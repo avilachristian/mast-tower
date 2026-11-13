@@ -2,12 +2,12 @@ import { create } from 'zustand';
 import { recalculateDailyLogCarryOver } from '@/entities/project/calculations';
 import {
   BAGS_PER_CUBIC_METER,
-  FOUNDATION_SPECS,
   checklistFromStatus,
   createCleanBaselineProject,
   createSampleMast2Project,
   deriveStatusFromChecklist,
   emptyChecklist,
+  resolveFoundationSpec,
 } from '@/entities/project/mast2Baseline';
 import {
   createCleanVerticalMastProject,
@@ -19,6 +19,17 @@ import {
   normalizeVerticalMastState,
   sectionChecklistFromStatus,
 } from '@/entities/project/verticalMastBaseline';
+import {
+  validateFoundationChecklistToggle,
+  type FoundationChecklistViolation,
+} from '@/entities/project/foundationValidation';
+import {
+  validateGuyLayerUpdate,
+  validateTowerSectionRangeUpdate,
+  validateTowerSectionUpdate,
+  type VerticalMastOrderViolation,
+} from '@/entities/project/verticalMastValidation';
+import { useUiStore } from '@/shared/state/uiStore';
 import type {
   CustomFoundationInspectionItem,
   DailyActivityLogEntry,
@@ -356,7 +367,7 @@ interface ProjectStore {
   toggleFoundationChecklistItem: (
     id: string,
     key: keyof FoundationStageChecklist
-  ) => void;
+  ) => FoundationChecklistViolation | null;
   updateFoundationDetails: (
     id: string,
     patch: Partial<
@@ -434,11 +445,14 @@ interface ProjectStore {
   exportProjectJson: () => string;
 
   // Vertical Mast Tower phase actions
-  updateTowerSectionStatus: (id: string, status: TowerSectionStatus) => void;
+  updateTowerSectionStatus: (
+    id: string,
+    status: TowerSectionStatus
+  ) => VerticalMastOrderViolation | null;
   toggleTowerSectionChecklistItem: (
     id: string,
     key: keyof TowerSectionChecklist
-  ) => void;
+  ) => VerticalMastOrderViolation | null;
   updateTowerSectionDetails: (
     id: string,
     patch: Partial<
@@ -452,18 +466,21 @@ interface ProjectStore {
     fromSectionNo: number,
     toSectionNo: number,
     status: TowerSectionStatus
-  ) => void;
-  updateGuyLayerStatus: (id: string, status: GuyLayerStatus) => void;
+  ) => VerticalMastOrderViolation | null;
+  updateGuyLayerStatus: (
+    id: string,
+    status: GuyLayerStatus
+  ) => VerticalMastOrderViolation | null;
   updateGuyLayerSector: (
     id: string,
     sector: Exclude<SectorId, 'CENTER'>,
     patch: Partial<GuySectorProgress>
-  ) => void;
+  ) => VerticalMastOrderViolation | null;
   toggleGuyLayerSectorInstalled: (
     id: string,
     sector: Exclude<SectorId, 'CENTER'>
-  ) => void;
-  toggleGuyLayerAllTensioned: (id: string) => void;
+  ) => VerticalMastOrderViolation | null;
+  toggleGuyLayerAllTensioned: (id: string) => VerticalMastOrderViolation | null;
   updateGuyLayerDetails: (
     id: string,
     patch: Partial<
@@ -682,7 +699,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const today = new Date().toISOString().slice(0, 10);
       const foundations = s.project.foundations.map((f) => {
         if (f.id !== id) return f;
-        const spec = FOUNDATION_SPECS[f.type];
+        const spec = resolveFoundationSpec(f.type, f.customSpecs);
         const checklist = checklistFromStatus(status);
         const isPoured = status === 'concreted' || status === 'curing' || status === 'completed';
         return {
@@ -703,9 +720,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return commitActiveProject(s, next);
     }),
 
-  toggleFoundationChecklistItem: (id, key) =>
+  toggleFoundationChecklistItem: (id, key) => {
+    const curr = get();
+    const targetFoundation = curr.project.foundations.find((f) => f.id === id);
+    if (!targetFoundation) return null;
+
+    const violation = validateFoundationChecklistToggle(targetFoundation, key);
+    if (violation) {
+      useUiStore.getState().setFoundationOrderViolation(violation);
+      return violation;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
     set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
       const foundations = s.project.foundations.map((f) => {
         if (f.id !== id) return f;
         const nextVal = !Boolean(f.checklist[key]);
@@ -715,7 +742,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           ...(key === 'formworkBraced' ? { anchorHardwareAligned: nextVal } : {}),
         };
         const status = deriveStatusFromChecklist(checklist);
-        const spec = FOUNDATION_SPECS[f.type];
+        const spec = resolveFoundationSpec(f.type, f.customSpecs);
         const isPoured = checklist.concretePoured;
         return {
           ...f,
@@ -733,7 +760,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       });
       const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
       return commitActiveProject(s, next);
-    }),
+    });
+    return null;
+  },
 
   updateFoundationDetails: (id, patch) =>
     set((s) => {
@@ -918,17 +947,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
   updateFoundationCustomSpecs: (id, patch) =>
     set((s) => {
       const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) =>
-        f.id === id
-          ? {
-              ...f,
-              customSpecs: {
-                ...(f.customSpecs ?? {}),
-                ...patch,
-              },
-            }
-          : f
-      );
+      const foundations = s.project.foundations.map((f) => {
+        if (f.id !== id) return f;
+        const merged: FoundationCustomSpecs = {
+          ...(f.customSpecs ?? {}),
+          ...patch,
+        };
+        const cleaned = Object.fromEntries(
+          Object.entries(merged).filter(([, value]) => value !== undefined)
+        ) as FoundationCustomSpecs;
+        return {
+          ...f,
+          customSpecs: Object.keys(cleaned).length > 0 ? cleaned : undefined,
+        };
+      });
       const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
       return commitActiveProject(s, next);
     }),
@@ -1181,13 +1213,21 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
   exportProjectJson: () => JSON.stringify(get().project, null, 2),
 
-  updateTowerSectionStatus: (id, status) =>
+  updateTowerSectionStatus: (id, status) => {
+    const curr = get();
+    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+    const violation = validateTowerSectionUpdate(vm, id, status);
+    if (violation) {
+      useUiStore.getState().setMastOrderViolation(violation);
+      return violation;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const isInstalled =
+      status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
     set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const isInstalled =
-        status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
-      const sections = vm.sections.map((sec) =>
+      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const sections = activeVm.sections.map((sec) =>
         sec.id === id
           ? {
               ...sec,
@@ -1202,45 +1242,60 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const next: MastProjectState = {
         ...s.project,
         lastUpdated: today,
-        verticalMast: syncVerticalMastFlags({ ...vm, sections }),
+        verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
       };
       return commitActiveProject(s, next);
-    }),
+    });
+    return null;
+  },
 
-  toggleTowerSectionChecklistItem: (id, key) =>
+  toggleTowerSectionChecklistItem: (id, key) => {
+    const curr = get();
+    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+    const targetSec = vm.sections.find((sec) => sec.id === id);
+    if (!targetSec) return null;
+
+    const nextVal = !targetSec.checklist[key];
+    const nextChecklist =
+      key === 'plumbedAndInspected'
+        ? sectionChecklistFromStatus(nextVal ? 'plumbed_verified' : 'not_started')
+        : {
+            ...targetSec.checklist,
+            [key]: nextVal,
+          };
+    const nextStatus = deriveSectionStatusFromChecklist(nextChecklist);
+    const violation = validateTowerSectionUpdate(vm, id, nextStatus);
+    if (violation) {
+      useUiStore.getState().setMastOrderViolation(violation);
+      return violation;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
     set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const sections = vm.sections.map((sec) => {
+      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const sections = activeVm.sections.map((sec) => {
         if (sec.id !== id) return sec;
-        const nextVal = !sec.checklist[key];
-        const checklist =
-          key === 'plumbedAndInspected'
-            ? sectionChecklistFromStatus(nextVal ? 'plumbed_verified' : 'not_started')
-            : {
-                ...sec.checklist,
-                [key]: nextVal,
-              };
-        const status = deriveSectionStatusFromChecklist(checklist);
         return {
           ...sec,
-          checklist,
-          status,
+          checklist: nextChecklist,
+          status: nextStatus,
           installedDate:
-            checklist.hoistedInPosition || checklist.plumbedAndInspected
+            nextChecklist.hoistedInPosition || nextChecklist.plumbedAndInspected
               ? sec.installedDate || today
               : undefined,
           verifiedDate:
-            status === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
+            nextStatus === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
         };
       });
       const next: MastProjectState = {
         ...s.project,
         lastUpdated: today,
-        verticalMast: syncVerticalMastFlags({ ...vm, sections }),
+        verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
       };
       return commitActiveProject(s, next);
-    }),
+    });
+    return null;
+  },
 
   updateTowerSectionDetails: (id, patch) =>
     set((s) => {
@@ -1257,15 +1312,28 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return commitActiveProject(s, next);
     }),
 
-  batchUpdateTowerSectionRange: (fromSectionNo, toSectionNo, status) =>
+  batchUpdateTowerSectionRange: (fromSectionNo, toSectionNo, status) => {
+    const curr = get();
+    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+    const violation = validateTowerSectionRangeUpdate(
+      vm,
+      fromSectionNo,
+      toSectionNo,
+      status
+    );
+    if (violation) {
+      useUiStore.getState().setMastOrderViolation(violation);
+      return violation;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const lo = Math.min(fromSectionNo, toSectionNo);
+    const hi = Math.max(fromSectionNo, toSectionNo);
+    const isInstalled =
+      status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
     set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const lo = Math.min(fromSectionNo, toSectionNo);
-      const hi = Math.max(fromSectionNo, toSectionNo);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const isInstalled =
-        status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
-      const sections = vm.sections.map((sec) =>
+      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const sections = activeVm.sections.map((sec) =>
         sec.sectionNo >= lo && sec.sectionNo <= hi
           ? {
               ...sec,
@@ -1280,17 +1348,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const next: MastProjectState = {
         ...s.project,
         lastUpdated: today,
-        verticalMast: syncVerticalMastFlags({ ...vm, sections }),
+        verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
       };
       return commitActiveProject(s, next);
-    }),
+    });
+    return null;
+  },
 
-  updateGuyLayerStatus: (id, status) =>
+  updateGuyLayerStatus: (id, status) => {
+    const curr = get();
+    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+    const violation = validateGuyLayerUpdate(vm, id, status);
+    if (violation) {
+      useUiStore.getState().setMastOrderViolation(violation);
+      return violation;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const template = guySectorsFromStatus(status);
     set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const template = guySectorsFromStatus(status);
-      const guyLayers = vm.guyLayers.map((g) =>
+      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const guyLayers = activeVm.guyLayers.map((g) =>
         g.id === id
           ? {
               ...g,
@@ -1309,115 +1387,162 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const next: MastProjectState = {
         ...s.project,
         lastUpdated: today,
-        verticalMast: { ...vm, guyLayers },
+        verticalMast: { ...activeVm, guyLayers },
       };
       return commitActiveProject(s, next);
-    }),
+    });
+    return null;
+  },
 
-  updateGuyLayerSector: (id, sector, patch) =>
+  updateGuyLayerSector: (id, sector, patch) => {
+    const curr = get();
+    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+    const targetGuy = vm.guyLayers.find((g) => g.id === id);
+    if (!targetGuy) return null;
+
+    const prevSector = targetGuy.sectors[sector];
+    const nextSector: GuySectorProgress = {
+      ...prevSector,
+      ...patch,
+    };
+    if (patch.tensioned) {
+      nextSector.pulled = true;
+      nextSector.terminated = true;
+    } else if (patch.terminated) {
+      nextSector.pulled = true;
+    }
+    const nextSectors = {
+      ...targetGuy.sectors,
+      [sector]: nextSector,
+    };
+    const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
+    const violation = validateGuyLayerUpdate(vm, id, nextStatus);
+    if (violation) {
+      useUiStore.getState().setMastOrderViolation(violation);
+      return violation;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
     set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const guyLayers = vm.guyLayers.map((g) => {
-        if (g.id !== id) return g;
-        const prevSector = g.sectors[sector];
-        const nextSector: GuySectorProgress = {
-          ...prevSector,
-          ...patch,
-        };
-        if (patch.tensioned) {
-          nextSector.pulled = true;
-          nextSector.terminated = true;
-        } else if (patch.terminated) {
-          nextSector.pulled = true;
-        }
-        const sectors = {
-          ...g.sectors,
-          [sector]: nextSector,
-        };
-        const status = deriveGuyLayerStatusFromSectors(sectors);
-        return {
-          ...g,
-          sectors,
-          status,
-          installedDate: status !== 'not_started' ? g.installedDate || today : undefined,
-          verifiedDate:
-            status === 'tensioned_verified' ? g.verifiedDate || today : undefined,
-        };
-      });
+      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const guyLayers = activeVm.guyLayers.map((g) =>
+        g.id === id
+          ? {
+              ...g,
+              sectors: nextSectors,
+              status: nextStatus,
+              installedDate:
+                nextStatus !== 'not_started' ? g.installedDate || today : undefined,
+              verifiedDate:
+                nextStatus === 'tensioned_verified' ? g.verifiedDate || today : undefined,
+            }
+          : g
+      );
       const next: MastProjectState = {
         ...s.project,
         lastUpdated: today,
-        verticalMast: { ...vm, guyLayers },
+        verticalMast: { ...activeVm, guyLayers },
       };
       return commitActiveProject(s, next);
-    }),
+    });
+    return null;
+  },
 
-  toggleGuyLayerSectorInstalled: (id, sector) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const guyLayers = vm.guyLayers.map((g) => {
-        if (g.id !== id) return g;
-        const prev = g.sectors[sector];
-        const currentlyInstalled = Boolean(prev.terminated || prev.tensioned);
-        const nextSector: GuySectorProgress = currentlyInstalled
-          ? { ...prev, pulled: false, terminated: false, tensioned: false }
-          : { ...prev, pulled: true, terminated: true };
-        const sectors = { ...g.sectors, [sector]: nextSector };
-        const status = deriveGuyLayerStatusFromSectors(sectors);
-        return {
-          ...g,
-          sectors,
-          status,
-          installedDate: status !== 'not_started' ? g.installedDate || today : undefined,
-          verifiedDate:
-            status === 'tensioned_verified' ? g.verifiedDate || today : undefined,
-        };
-      });
-      return commitActiveProject(s, {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: { ...vm, guyLayers },
-      });
-    }),
+  toggleGuyLayerSectorInstalled: (id, sector) => {
+    const curr = get();
+    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+    const targetGuy = vm.guyLayers.find((g) => g.id === id);
+    if (!targetGuy) return null;
 
-  toggleGuyLayerAllTensioned: (id) =>
+    const prev = targetGuy.sectors[sector];
+    const currentlyInstalled = Boolean(prev.terminated || prev.tensioned);
+    const nextSector: GuySectorProgress = currentlyInstalled
+      ? { ...prev, pulled: false, terminated: false, tensioned: false }
+      : { ...prev, pulled: true, terminated: true };
+    const nextSectors = { ...targetGuy.sectors, [sector]: nextSector };
+    const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
+    const violation = validateGuyLayerUpdate(vm, id, nextStatus);
+    if (violation) {
+      useUiStore.getState().setMastOrderViolation(violation);
+      return violation;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
     set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const guyLayers = vm.guyLayers.map((g) => {
-        if (g.id !== id) return g;
-        const allTensioned = (['I', 'II', 'III'] as const).every(
-          (k) => g.sectors[k].tensioned
-        );
-        const sectors = allTensioned
+      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const guyLayers = activeVm.guyLayers.map((g) =>
+        g.id === id
           ? {
-              I: { ...g.sectors.I, pulled: true, terminated: true, tensioned: false },
-              II: { ...g.sectors.II, pulled: true, terminated: true, tensioned: false },
-              III: { ...g.sectors.III, pulled: true, terminated: true, tensioned: false },
+              ...g,
+              sectors: nextSectors,
+              status: nextStatus,
+              installedDate:
+                nextStatus !== 'not_started' ? g.installedDate || today : undefined,
+              verifiedDate:
+                nextStatus === 'tensioned_verified' ? g.verifiedDate || today : undefined,
             }
-          : {
-              I: { ...g.sectors.I, pulled: true, terminated: true, tensioned: true },
-              II: { ...g.sectors.II, pulled: true, terminated: true, tensioned: true },
-              III: { ...g.sectors.III, pulled: true, terminated: true, tensioned: true },
-            };
-        const status = deriveGuyLayerStatusFromSectors(sectors);
-        return {
-          ...g,
-          sectors,
-          status,
-          installedDate: status !== 'not_started' ? g.installedDate || today : undefined,
-          verifiedDate:
-            status === 'tensioned_verified' ? g.verifiedDate || today : undefined,
-        };
-      });
+          : g
+      );
       return commitActiveProject(s, {
         ...s.project,
         lastUpdated: today,
-        verticalMast: { ...vm, guyLayers },
+        verticalMast: { ...activeVm, guyLayers },
       });
-    }),
+    });
+    return null;
+  },
+
+  toggleGuyLayerAllTensioned: (id) => {
+    const curr = get();
+    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+    const targetGuy = vm.guyLayers.find((g) => g.id === id);
+    if (!targetGuy) return null;
+
+    const allTensioned = (['I', 'II', 'III'] as const).every(
+      (k) => targetGuy.sectors[k].tensioned
+    );
+    const nextSectors = allTensioned
+      ? {
+          I: { ...targetGuy.sectors.I, pulled: true, terminated: true, tensioned: false },
+          II: { ...targetGuy.sectors.II, pulled: true, terminated: true, tensioned: false },
+          III: { ...targetGuy.sectors.III, pulled: true, terminated: true, tensioned: false },
+        }
+      : {
+          I: { ...targetGuy.sectors.I, pulled: true, terminated: true, tensioned: true },
+          II: { ...targetGuy.sectors.II, pulled: true, terminated: true, tensioned: true },
+          III: { ...targetGuy.sectors.III, pulled: true, terminated: true, tensioned: true },
+        };
+    const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
+    const violation = validateGuyLayerUpdate(vm, id, nextStatus);
+    if (violation) {
+      useUiStore.getState().setMastOrderViolation(violation);
+      return violation;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    set((s) => {
+      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const guyLayers = activeVm.guyLayers.map((g) =>
+        g.id === id
+          ? {
+              ...g,
+              sectors: nextSectors,
+              status: nextStatus,
+              installedDate:
+                nextStatus !== 'not_started' ? g.installedDate || today : undefined,
+              verifiedDate:
+                nextStatus === 'tensioned_verified' ? g.verifiedDate || today : undefined,
+            }
+          : g
+      );
+      return commitActiveProject(s, {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: { ...activeVm, guyLayers },
+      });
+    });
+    return null;
+  },
 
   updateGuyLayerDetails: (id, patch) =>
     set((s) => {

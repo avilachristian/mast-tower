@@ -14,6 +14,7 @@ import {
   Edit3,
   ImagePlus,
   Package,
+  Pencil,
   Plus,
   Printer,
   RotateCcw,
@@ -59,6 +60,10 @@ import type {
 import { readAndResizeImageFile } from '@/shared/lib/imageUpload';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
+import {
+  DailyLogRowEditorModal,
+  type DailyLogModalTarget,
+} from './DailyLogRowEditorModal';
 
 const ROLES: WorkerRole[] = [
   'Site Engineer',
@@ -573,6 +578,200 @@ export function DailyLogsView({
     }
   };
 
+  const [modalTarget, setModalTarget] = useState<DailyLogModalTarget | null>(null);
+
+  const openAddModal = (kind: DailyLogModalTarget['kind']) => {
+    switch (kind) {
+      case 'worker':
+        setModalTarget({
+          kind: 'worker',
+          index: null,
+          item: {
+            role: isVerticalMast ? 'Skilled' : 'Carpenter',
+            count: 1,
+            names: '',
+            hours: 0,
+          },
+        });
+        break;
+      case 'material':
+        setModalTarget({
+          kind: 'material',
+          index: null,
+          item: {
+            id: `mat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            name: '',
+            unit: 'pcs',
+            onSiteQty: 0,
+            deliveredQty: 0,
+            usedTodayQty: 0,
+            remainingQty: 0,
+            remarks: '',
+          },
+        });
+        break;
+      case 'activity':
+        setModalTarget({
+          kind: 'activity',
+          index: null,
+          item: createEmptyActivity(selectedFoundations[0] ?? ''),
+        });
+        break;
+      case 'equipment':
+        setModalTarget({
+          kind: 'equipment',
+          index: null,
+          item: createEmptyEquipment(),
+        });
+        break;
+      case 'delay':
+        setModalTarget({
+          kind: 'delay',
+          index: null,
+          item: createEmptyDelay(),
+        });
+        break;
+      case 'visitor':
+        setModalTarget({
+          kind: 'visitor',
+          index: null,
+          item: createEmptyVisitor(),
+        });
+        break;
+      case 'safety':
+        setModalTarget({
+          kind: 'safety',
+          index: null,
+          item: createEmptySafetyLog(),
+        });
+        break;
+      case 'documentation':
+        setModalTarget({
+          kind: 'documentation',
+          index: null,
+          item: createEmptyDocumentation(),
+        });
+        break;
+    }
+  };
+
+  const handleSaveModalTarget = (saved: DailyLogModalTarget) => {
+    switch (saved.kind) {
+      case 'worker':
+        setWorkersTouched(true);
+        if (saved.index === null) {
+          setWorkers((prev) => [...prev, saved.item]);
+        } else {
+          setWorkers((prev) =>
+            prev.map((w, i) => (i === saved.index ? saved.item : w))
+          );
+        }
+        break;
+      case 'material': {
+        setMaterialsTouched(true);
+        const nextItem = {
+          ...saved.item,
+          remainingQty: computeDailyLogMaterialRemaining(saved.item),
+        };
+        if (saved.index === null) {
+          setMaterialsOnSite((prev) => [...prev, nextItem]);
+        } else {
+          setMaterialsOnSite((prev) =>
+            prev.map((m, i) => (i === saved.index ? nextItem : m))
+          );
+        }
+        break;
+      }
+      case 'activity':
+        if (saved.index === null) {
+          setActivities((prev) => [...prev, saved.item]);
+        } else {
+          setActivities((prev) =>
+            prev.map((a, i) => (i === saved.index ? saved.item : a))
+          );
+        }
+        break;
+      case 'equipment':
+        if (saved.index === null) {
+          setEquipmentItems((prev) => [...prev, saved.item]);
+        } else {
+          setEquipmentItems((prev) =>
+            prev.map((eq, i) => (i === saved.index ? saved.item : eq))
+          );
+        }
+        break;
+      case 'delay':
+        if (saved.index === null) {
+          setDelayItems((prev) => [...prev, saved.item]);
+        } else {
+          setDelayItems((prev) =>
+            prev.map((d, i) => (i === saved.index ? saved.item : d))
+          );
+        }
+        break;
+      case 'visitor':
+        if (saved.index === null) {
+          setVisitorItems((prev) => [...prev, saved.item]);
+        } else {
+          setVisitorItems((prev) =>
+            prev.map((v, i) => (i === saved.index ? saved.item : v))
+          );
+        }
+        break;
+      case 'safety':
+        if (saved.index === null) {
+          setSafetyLogs((prev) => [...prev, saved.item]);
+        } else {
+          setSafetyLogs((prev) =>
+            prev.map((s, i) => (i === saved.index ? saved.item : s))
+          );
+        }
+        break;
+      case 'documentation':
+        if (saved.index === null) {
+          setDocumentationItems((prev) => [...prev, saved.item]);
+        } else {
+          setDocumentationItems((prev) =>
+            prev.map((doc, i) => (i === saved.index ? saved.item : doc))
+          );
+        }
+        break;
+    }
+    setModalTarget(null);
+  };
+
+  const handleDeleteModalTarget = (target: DailyLogModalTarget) => {
+    if (target.index === null) return;
+    const idx = target.index;
+    switch (target.kind) {
+      case 'worker':
+        removeWorkerRow(idx);
+        break;
+      case 'material':
+        removeMaterialRow(idx);
+        break;
+      case 'activity':
+        removeActivityRow(idx);
+        break;
+      case 'equipment':
+        removeEquipmentRow(idx);
+        break;
+      case 'delay':
+        removeDelayRow(idx);
+        break;
+      case 'visitor':
+        removeVisitorRow(idx);
+        break;
+      case 'safety':
+        removeSafetyRow(idx);
+        break;
+      case 'documentation':
+        removeDocumentationRow(idx);
+        break;
+    }
+    setModalTarget(null);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -760,7 +959,7 @@ export function DailyLogsView({
         <button
           type="button"
           onClick={() => setMobilePane('form')}
-          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition cursor-pointer ${
+          className={`flex-1 min-h-11 py-2.5 px-3 rounded-lg text-xs font-bold transition cursor-pointer ${
             mobilePane === 'form'
               ? 'bg-sky-600 text-white shadow-xs'
               : 'text-slate-600 hover:bg-slate-50'
@@ -771,7 +970,7 @@ export function DailyLogsView({
         <button
           type="button"
           onClick={() => setMobilePane('history')}
-          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition cursor-pointer ${
+          className={`flex-1 min-h-11 py-2.5 px-3 rounded-lg text-xs font-bold transition cursor-pointer ${
             mobilePane === 'history'
               ? 'bg-sky-600 text-white shadow-xs'
               : 'text-slate-600 hover:bg-slate-50'
@@ -803,19 +1002,21 @@ export function DailyLogsView({
                 <button
                   type="button"
                   onClick={handleCopyPreviousCrewAndMaterials}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                  title="Copy Last Crew & Materials"
+                  className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-2.5 sm:px-2 py-2 sm:py-1 rounded-lg sm:rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-xs sm:text-[11px] font-semibold text-slate-700 cursor-pointer"
                 >
-                  <Copy className="w-3 h-3 text-sky-600" />
-                  Copy Last Crew/Materials
+                  <Copy className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-sky-600" />
+                  <span className="sm:hidden">Copy Previous</span>
+                  <span className="hidden sm:inline">Copy Last Crew/Materials</span>
                 </button>
               )}
               {editingLogId && (
                 <button
                   type="button"
                   onClick={() => resetFormForNewEntry()}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-600 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-2.5 sm:px-2 py-2 sm:py-1 rounded-lg sm:rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-xs sm:text-[11px] font-semibold text-slate-600 cursor-pointer"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
                   Cancel Edit
                 </button>
               )}
@@ -837,7 +1038,7 @@ export function DailyLogsView({
                     value={projectName}
                     onChange={(e) => setProjectName(e.target.value)}
                     placeholder="e.g. Guyed Mast Tower – Mast 2"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 font-medium text-slate-900 focus:border-sky-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 font-medium text-slate-900 focus:border-sky-500 focus:outline-none"
                   />
                 </label>
                 <label className="sm:col-span-3 block">
@@ -854,7 +1055,7 @@ export function DailyLogsView({
                     required
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-slate-900 focus:border-sky-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 sm:py-1.5 text-slate-900 focus:border-sky-500 focus:outline-none"
                   />
                 </label>
                 <label className="sm:col-span-2 block">
@@ -867,7 +1068,7 @@ export function DailyLogsView({
                       setDayNumberTouched(true);
                       setDayNumber(Math.max(1, Number(e.target.value) || 1));
                     }}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-center font-semibold text-slate-900 focus:border-sky-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 sm:py-1.5 text-center font-semibold text-slate-900 focus:border-sky-500 focus:outline-none"
                   />
                 </label>
               </div>
@@ -880,7 +1081,7 @@ export function DailyLogsView({
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
                     placeholder="e.g. Mt. Labo, Camarines Norte"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-slate-800 focus:border-sky-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 text-slate-800 focus:border-sky-500 focus:outline-none"
                   />
                 </label>
                 <label className="block">
@@ -890,7 +1091,7 @@ export function DailyLogsView({
                     value={preparedBy}
                     onChange={(e) => setPreparedBy(e.target.value)}
                     placeholder="Site Engineer / Foreman"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-slate-800 focus:border-sky-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 text-slate-800 focus:border-sky-500 focus:outline-none"
                   />
                 </label>
               </div>
@@ -909,13 +1110,13 @@ export function DailyLogsView({
                       key={value}
                       type="button"
                       onClick={() => setWeather(value)}
-                      className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-[11px] font-semibold transition cursor-pointer ${
+                      className={`flex items-center justify-center gap-1.5 min-h-10 sm:min-h-0 px-2 py-2 rounded-lg border text-xs sm:text-[11px] font-semibold transition cursor-pointer ${
                         active
                           ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
                           : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
+                      <Icon className="w-4 h-4 sm:w-3.5 sm:h-3.5 shrink-0" />
                       <span className="truncate">{label}</span>
                     </button>
                   );
@@ -926,7 +1127,7 @@ export function DailyLogsView({
                 value={weatherNotes}
                 onChange={(e) => setWeatherNotes(e.target.value)}
                 placeholder="Optional weather notes (e.g. Clear AM, dense fog/drizzle afternoon)"
-                className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800 focus:border-sky-500 focus:outline-none"
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 text-xs text-slate-800 focus:border-sky-500 focus:outline-none"
               />
             </section>
 
@@ -944,14 +1145,75 @@ export function DailyLogsView({
                   <button
                     type="button"
                     onClick={addWorkerRow}
-                    className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
+                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
                   >
                     + Add Role
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('worker')}
+                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Role
                   </button>
                 </div>
               </div>
 
-              <div className="space-y-2">
+              {/* Mobile Compact Cards + Modal Trigger */}
+              <div className="md:hidden space-y-2">
+                {workers.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">
+                    No manpower roles added yet. Tap Add Role above.
+                  </div>
+                ) : (
+                  workers.map((w, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-center justify-between gap-2.5"
+                    >
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-900 truncate">
+                            {w.role}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold">
+                            {w.count} pax
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {w.names.trim() || 'No worker names recorded'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setModalTarget({ kind: 'worker', index: idx, item: { ...w } })
+                          }
+                          aria-label={`Edit ${w.role}`}
+                          title="Edit Role"
+                          className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeWorkerRow(idx)}
+                          aria-label={`Remove ${w.role}`}
+                          title="Remove Role"
+                          className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Desktop Inline Editor */}
+              <div className="hidden md:block space-y-2">
                 {workers.map((w, idx) => (
                   <div
                     key={idx}
@@ -1033,7 +1295,7 @@ export function DailyLogsView({
                   <Package className="w-3.5 h-3.5 text-sky-600" />
                   {isVerticalMast ? '4. Tower Parts on Site' : '4. Materials on Site'}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {prevLogForDraft && !editingLogId && (
                     <button
                       type="button"
@@ -1047,22 +1309,103 @@ export function DailyLogsView({
                         );
                       }}
                       title="Fill On Site from previous day's Remaining quantities"
-                      className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 text-[10px] font-semibold cursor-pointer"
+                      className="min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-1 sm:py-0.5 rounded-lg sm:rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 text-[11px] sm:text-[10px] font-semibold cursor-pointer"
                     >
-                      Auto-fill from Day {prevLogForDraft.dayNumber} Remaining
+                      Auto-fill from Day {prevLogForDraft.dayNumber}
                     </button>
                   )}
                   <button
                     type="button"
                     onClick={addMaterialRow}
-                    className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
+                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
                   >
                     + {isVerticalMast ? 'Add Tower Part' : 'Add Material'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('material')}
+                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {isVerticalMast ? 'Add Part' : 'Add Material'}
                   </button>
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Cards + Modal Trigger */}
+              <div className="md:hidden space-y-2">
+                {materialsOnSite.map((m, idx) => {
+                  const remaining = computeDailyLogMaterialRemaining(m);
+                  return (
+                    <div
+                      key={m.id}
+                      className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-slate-900 truncate">
+                              {m.name.trim() || (isVerticalMast ? 'Unnamed Part' : 'Unnamed Material')}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-700 text-[10px] font-semibold shrink-0">
+                              {m.unit || 'pcs'}
+                            </span>
+                          </div>
+                          {m.remarks && (
+                            <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+                              {m.remarks}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setModalTarget({ kind: 'material', index: idx, item: { ...m } })
+                            }
+                            aria-label={`Edit ${m.name || 'material'}`}
+                            title="Edit Item"
+                            className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeMaterialRow(idx)}
+                            aria-label={`Remove ${m.name || 'material'}`}
+                            title="Remove Item"
+                            className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-1.5 text-center text-[11px]">
+                        <div className="rounded-md bg-white border border-slate-200 py-1 px-1">
+                          <div className="text-[9px] text-slate-400 uppercase font-bold">On Site</div>
+                          <div className="font-bold text-slate-900">{m.onSiteQty}</div>
+                        </div>
+                        <div className="rounded-md bg-emerald-50/70 border border-emerald-200 py-1 px-1">
+                          <div className="text-[9px] text-emerald-700 uppercase font-bold">Deliv.</div>
+                          <div className="font-bold text-emerald-900">{m.deliveredQty ?? 0}</div>
+                        </div>
+                        <div className="rounded-md bg-white border border-slate-200 py-1 px-1">
+                          <div className="text-[9px] text-slate-400 uppercase font-bold">Used</div>
+                          <div className="font-bold text-slate-800">{m.usedTodayQty}</div>
+                        </div>
+                        <div className="rounded-md bg-sky-50 border border-sky-200 py-1 px-1">
+                          <div className="text-[9px] text-sky-700 uppercase font-bold">Rem.</div>
+                          <div className="font-bold text-sky-800">{remaining}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Inline Table */}
+              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
                     <tr>
@@ -1189,13 +1532,23 @@ export function DailyLogsView({
                 <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   5. Activities &amp; Status
                 </div>
-                <button
-                  type="button"
-                  onClick={addActivityRow}
-                  className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                >
-                  + Add Activity
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={addActivityRow}
+                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
+                  >
+                    + Add Activity
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('activity')}
+                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Activity
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -1217,7 +1570,7 @@ export function DailyLogsView({
                             key={g.id}
                             type="button"
                             onClick={() => toggleFoundation(g.id)}
-                            className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold transition cursor-pointer ${
+                            className={`px-2 py-1 sm:px-1.5 sm:py-0.5 rounded border text-xs sm:text-[10px] font-semibold transition cursor-pointer ${
                               active
                                 ? 'bg-teal-600 text-white border-teal-600'
                                 : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -1228,7 +1581,7 @@ export function DailyLogsView({
                         );
                       })}
                     </div>
-                    <div className="flex flex-wrap items-center gap-1 max-h-20 overflow-y-auto p-1 rounded border border-slate-200 bg-slate-50/50">
+                    <div className="flex flex-wrap items-center gap-1 max-h-24 overflow-y-auto p-1.5 rounded border border-slate-200 bg-slate-50/50">
                       <span className="text-[10px] font-bold text-slate-500 uppercase mr-1">
                         Sections:
                       </span>
@@ -1239,7 +1592,7 @@ export function DailyLogsView({
                             key={s.id}
                             type="button"
                             onClick={() => toggleFoundation(s.id)}
-                            className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold transition cursor-pointer ${
+                            className={`px-2 py-1 sm:px-1.5 sm:py-0.5 rounded border text-xs sm:text-[10px] font-semibold transition cursor-pointer ${
                               active
                                 ? 'bg-sky-600 text-white border-sky-600'
                                 : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -1252,7 +1605,7 @@ export function DailyLogsView({
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex flex-wrap gap-1.5 sm:gap-1">
                     {foundations.map((f) => {
                       const active = selectedFoundations.includes(f.id);
                       return (
@@ -1260,7 +1613,7 @@ export function DailyLogsView({
                           key={f.id}
                           type="button"
                           onClick={() => toggleFoundation(f.id)}
-                          className={`px-2 py-1 rounded border text-[11px] font-semibold transition cursor-pointer ${
+                          className={`px-2.5 py-1.5 sm:px-2 sm:py-1 rounded border text-xs sm:text-[11px] font-semibold transition cursor-pointer ${
                             active
                               ? 'bg-sky-600 text-white border-sky-600'
                               : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -1274,7 +1627,66 @@ export function DailyLogsView({
                 )}
               </div>
 
-              <div className="rounded-lg border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Cards + Modal Trigger */}
+              <div className="md:hidden space-y-2">
+                {activities.map((act, idx) => (
+                  <div
+                    key={act.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-start justify-between gap-2.5"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px] font-bold text-slate-800">
+                          {act.foundationId || 'Site'}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${
+                            ACTIVITY_STATUS_BADGE[act.status]
+                          }`}
+                        >
+                          {act.status}
+                        </span>
+                      </div>
+                      <div className="text-xs font-medium text-slate-900">
+                        {act.description.trim() || (
+                          <span className="text-slate-400 italic">
+                            Tap Edit to describe activity...
+                          </span>
+                        )}
+                      </div>
+                      {act.remarks && (
+                        <div className="text-[11px] text-slate-500">
+                          Remarks: {act.remarks}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalTarget({ kind: 'activity', index: idx, item: { ...act } })
+                        }
+                        aria-label="Edit activity"
+                        title="Edit Activity"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeActivityRow(idx)}
+                        aria-label="Remove activity"
+                        title="Remove Activity"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
                     <tr>
@@ -1408,16 +1820,81 @@ export function DailyLogsView({
                   <Wrench className="w-3.5 h-3.5 text-sky-600" />
                   6. Equipments
                 </div>
-                <button
-                  type="button"
-                  onClick={addEquipmentRow}
-                  className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                >
-                  + Add Equipment
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={addEquipmentRow}
+                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
+                  >
+                    + Add Equipment
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('equipment')}
+                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Equipment
+                  </button>
+                </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Cards */}
+              <div className="md:hidden space-y-2">
+                {equipmentItems.map((eq, idx) => (
+                  <div
+                    key={eq.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-center justify-between gap-2.5"
+                  >
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900 truncate">
+                          {eq.name.trim() || (
+                            <span className="text-slate-400 italic font-normal">
+                              Unnamed equipment
+                            </span>
+                          )}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px] font-bold text-slate-700">
+                          {eq.qty}x
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-slate-200/70 text-[10px] font-semibold text-slate-700">
+                          {eq.status || 'Operational'}
+                        </span>
+                      </div>
+                      {eq.remarks && (
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {eq.remarks}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalTarget({ kind: 'equipment', index: idx, item: { ...eq } })
+                        }
+                        aria-label="Edit equipment"
+                        title="Edit Equipment"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeEquipmentRow(idx)}
+                        aria-label="Remove equipment"
+                        title="Remove Equipment"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
                     <tr>
@@ -1501,16 +1978,79 @@ export function DailyLogsView({
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
                   7. Delays / Issues
                 </div>
-                <button
-                  type="button"
-                  onClick={addDelayRow}
-                  className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                >
-                  + Add Delay
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={addDelayRow}
+                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
+                  >
+                    + Add Delay
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('delay')}
+                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Delay
+                  </button>
+                </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Cards */}
+              <div className="md:hidden space-y-2">
+                {delayItems.map((d, idx) => (
+                  <div
+                    key={d.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-start justify-between gap-2.5"
+                  >
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="text-xs font-semibold text-slate-900">
+                        {d.description.trim() || (
+                          <span className="text-slate-400 italic font-normal">
+                            No delay recorded (tap Edit to enter)
+                          </span>
+                        )}
+                      </div>
+                      {(d.impact || d.remarks) && (
+                        <div className="text-[11px] text-slate-600">
+                          {d.impact && (
+                            <span className="font-medium text-amber-800">
+                              Impact: {d.impact}
+                            </span>
+                          )}
+                          {d.impact && d.remarks && ' · '}
+                          {d.remarks && <span>{d.remarks}</span>}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalTarget({ kind: 'delay', index: idx, item: { ...d } })
+                        }
+                        aria-label="Edit delay"
+                        title="Edit Delay"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeDelayRow(idx)}
+                        aria-label="Remove delay"
+                        title="Remove Delay"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
                     <tr>
@@ -1580,16 +2120,76 @@ export function DailyLogsView({
                   <UserCheck className="w-3.5 h-3.5 text-sky-600" />
                   8. Visitors
                 </div>
-                <button
-                  type="button"
-                  onClick={addVisitorRow}
-                  className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                >
-                  + Add Visitor
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={addVisitorRow}
+                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
+                  >
+                    + Add Visitor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('visitor')}
+                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Visitor
+                  </button>
+                </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Cards */}
+              <div className="md:hidden space-y-2">
+                {visitorItems.map((v, idx) => (
+                  <div
+                    key={v.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-start justify-between gap-2.5"
+                  >
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="text-xs font-bold text-slate-900">
+                        {v.name.trim() || (
+                          <span className="text-slate-400 italic font-normal">
+                            No visitor entered (tap Edit)
+                          </span>
+                        )}
+                      </div>
+                      {(v.roleOrCompany || v.purpose) && (
+                        <div className="text-[11px] text-slate-600">
+                          {[v.roleOrCompany, v.purpose].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
+                      {v.remarks && (
+                        <div className="text-[11px] text-slate-500">{v.remarks}</div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalTarget({ kind: 'visitor', index: idx, item: { ...v } })
+                        }
+                        aria-label="Edit visitor"
+                        title="Edit Visitor"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeVisitorRow(idx)}
+                        aria-label="Remove visitor"
+                        title="Remove Visitor"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
                     <tr>
@@ -1671,13 +2271,23 @@ export function DailyLogsView({
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   9. Safety Logs (Safety Officer)
                 </div>
-                <button
-                  type="button"
-                  onClick={addSafetyRow}
-                  className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                >
-                  + Add Safety Log
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={addSafetyRow}
+                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
+                  >
+                    + Add Safety Log
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('safety')}
+                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Safety
+                  </button>
+                </div>
               </div>
 
               <label className="block">
@@ -1689,11 +2299,68 @@ export function DailyLogsView({
                   value={safetyOfficer}
                   onChange={(e) => setSafetyOfficer(e.target.value)}
                   placeholder="Name of Safety Officer"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
                 />
               </label>
 
-              <div className="rounded-lg border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Cards */}
+              <div className="md:hidden space-y-2">
+                {safetyLogs.map((s, idx) => (
+                  <div
+                    key={s.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-start justify-between gap-2.5"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs font-bold text-slate-900">
+                          {s.timeOrActivity.trim() || (
+                            <span className="text-slate-400 italic font-normal">
+                              Safety entry (tap Edit)
+                            </span>
+                          )}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] font-bold text-emerald-700">
+                          {s.status}
+                        </span>
+                      </div>
+                      {s.hazardOrFinding && (
+                        <div className="text-[11px] text-slate-700">
+                          Obs: {s.hazardOrFinding}
+                        </div>
+                      )}
+                      {s.actionTaken && (
+                        <div className="text-[11px] text-slate-500">
+                          Action: {s.actionTaken}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalTarget({ kind: 'safety', index: idx, item: { ...s } })
+                        }
+                        aria-label="Edit safety log"
+                        title="Edit Safety Log"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeSafetyRow(idx)}
+                        aria-label="Remove safety log"
+                        title="Remove Safety Log"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
                     <tr>
@@ -1778,16 +2445,90 @@ export function DailyLogsView({
                   <Camera className="w-3.5 h-3.5 text-sky-600" />
                   10. Documentation
                 </div>
-                <button
-                  type="button"
-                  onClick={addDocumentationRow}
-                  className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                >
-                  + Add Documentation
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={addDocumentationRow}
+                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
+                  >
+                    + Add Documentation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openAddModal('documentation')}
+                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Photo
+                  </button>
+                </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 overflow-x-auto">
+              {/* Mobile Compact Cards */}
+              <div className="md:hidden space-y-2">
+                {documentationItems.map((doc, idx) => (
+                  <div
+                    key={doc.id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-center justify-between gap-2.5"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {doc.photoDataUrl ? (
+                        <img
+                          src={doc.photoDataUrl}
+                          alt={doc.description || doc.photoName || 'Documentation'}
+                          className="w-14 h-14 object-cover rounded-lg border border-slate-200 bg-white shrink-0"
+                        />
+                      ) : (
+                        <div className="w-14 h-14 rounded-lg border border-dashed border-slate-300 bg-white flex items-center justify-center text-slate-400 shrink-0">
+                          <Camera className="w-5 h-5" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="text-xs font-bold text-slate-900 truncate">
+                          {doc.description.trim() || (
+                            <span className="text-slate-400 italic font-normal">
+                              Tap Edit to add photo/caption
+                            </span>
+                          )}
+                        </div>
+                        {doc.remarks && (
+                          <div className="text-[11px] text-slate-500 truncate">
+                            {doc.remarks}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalTarget({
+                            kind: 'documentation',
+                            index: idx,
+                            item: { ...doc },
+                          })
+                        }
+                        aria-label="Edit documentation"
+                        title="Edit Documentation"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeDocumentationRow(idx)}
+                        aria-label="Remove documentation row"
+                        title="Remove Documentation"
+                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
                     <tr>
@@ -1895,7 +2636,7 @@ export function DailyLogsView({
 
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs sm:text-sm font-bold py-2.5 px-4 transition cursor-pointer shadow-xs"
+              className="w-full min-h-12 md:min-h-0 inline-flex items-center justify-center gap-1.5 rounded-xl md:rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm md:text-xs font-bold py-3 md:py-2.5 px-4 transition cursor-pointer shadow-xs"
             >
               <Plus className="w-4 h-4" />
               {editingLogId ? 'Update Daily Log' : 'Save Daily Log'}
@@ -2052,12 +2793,13 @@ export function DailyLogsView({
                         type="button"
                         onClick={() => handleCopyText(log)}
                         title="Copy plain text summary"
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                        aria-label="Copy plain text summary"
+                        className="inline-flex items-center justify-center gap-1 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-2.5 sm:px-2 py-2 sm:py-1 rounded-lg sm:rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
                       >
                         {copiedLogId === log.id ? (
-                          <Check className="w-3 h-3 text-emerald-600" />
+                          <Check className="w-4 h-4 sm:w-3 sm:h-3 text-emerald-600" />
                         ) : (
-                          <Copy className="w-3 h-3" />
+                          <Copy className="w-4 h-4 sm:w-3 sm:h-3" />
                         )}
                         <span className="hidden sm:inline">
                           {copiedLogId === log.id ? 'Copied' : 'Copy'}
@@ -2067,18 +2809,20 @@ export function DailyLogsView({
                         type="button"
                         onClick={() => setDailyLogPrintId(log.id)}
                         title="Print / Save PDF"
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-slate-50 hover:bg-sky-50 hover:border-sky-200 text-[11px] font-semibold text-slate-700 hover:text-sky-700 cursor-pointer"
+                        aria-label="Print / Save PDF"
+                        className="inline-flex items-center justify-center gap-1 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-2.5 sm:px-2 py-2 sm:py-1 rounded-lg sm:rounded border border-slate-200 bg-slate-50 hover:bg-sky-50 hover:border-sky-200 text-[11px] font-semibold text-slate-700 hover:text-sky-700 cursor-pointer"
                       >
-                        <Printer className="w-3 h-3" />
+                        <Printer className="w-4 h-4 sm:w-3 sm:h-3" />
                         <span className="hidden sm:inline">Print</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => handleLoadLogForEdit(log)}
                         title="Edit daily log"
-                        className="p-1.5 rounded border border-slate-200 text-slate-500 hover:text-sky-700 hover:bg-sky-50 cursor-pointer"
+                        aria-label="Edit daily log"
+                        className="min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center p-2 sm:p-1.5 rounded-lg sm:rounded border border-slate-200 text-slate-500 hover:text-sky-700 hover:bg-sky-50 cursor-pointer"
                       >
-                        <Edit3 className="w-3.5 h-3.5" />
+                        <Edit3 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                       </button>
                       <button
                         type="button"
@@ -2088,9 +2832,10 @@ export function DailyLogsView({
                           }
                         }}
                         title="Delete daily log"
-                        className="p-1.5 rounded border border-slate-200 text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                        aria-label="Delete daily log"
+                        className="min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center p-2 sm:p-1.5 rounded-lg sm:rounded border border-slate-200 text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -2460,6 +3205,19 @@ export function DailyLogsView({
           )}
         </div>
       </div>
+
+      <DailyLogRowEditorModal
+        target={modalTarget}
+        isVerticalMast={isVerticalMast}
+        roles={ROLES}
+        activityStatuses={ACTIVITY_STATUS_OPTIONS}
+        foundations={foundations}
+        verticalMastSections={verticalMastSections}
+        verticalMastGuyLayers={verticalMastGuyLayers}
+        onClose={() => setModalTarget(null)}
+        onSave={handleSaveModalTarget}
+        onDelete={handleDeleteModalTarget}
+      />
     </div>
   );
 }

@@ -105,6 +105,18 @@ export interface FoundationManualMaterialEntry {
 }
 
 export interface FoundationCustomSpecs {
+  lengthM?: number;
+  widthM?: number;
+  thicknessM?: number;
+  overburdenDepthM?: number;
+  leanThicknessM?: number;
+  concreteCoverMm?: number;
+  rebarM02Count?: number;
+  rebarM26Count?: number;
+  cementBags?: number;
+  sandBags?: number;
+  gravelBags?: number;
+  phenolicBoards?: number;
   size?: string;
   foundationVolume?: string;
   leanConcreteVolume?: string;

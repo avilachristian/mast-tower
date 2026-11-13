@@ -150,7 +150,7 @@ export function FoundationInspectionView({
             <button
               type="button"
               onClick={() => setViewMode('workspace')}
-              className={`px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
+              className={`min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
                 viewMode === 'workspace'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -161,7 +161,7 @@ export function FoundationInspectionView({
             <button
               type="button"
               onClick={() => setViewMode('report')}
-              className={`px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
+              className={`min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
                 viewMode === 'report'
                   ? 'bg-white text-sky-700 shadow-xs font-semibold'
                   : 'text-slate-600 hover:text-slate-900'
@@ -174,10 +174,12 @@ export function FoundationInspectionView({
           <button
             type="button"
             onClick={() => setInspectionReportOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
+            title="Print / Save PDF"
+            aria-label="Print / Save PDF"
+            className="inline-flex items-center justify-center gap-1.5 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
           >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print / PDF</span>
+            <Printer className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+            <span className="hidden sm:inline">Print / PDF</span>
           </button>
         </div>
       </div>
@@ -351,9 +353,9 @@ export function FoundationInspectionView({
                     <button
                       type="button"
                       onClick={() => setAddingItem((v) => !v)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-sky-50 hover:bg-sky-100 border border-sky-200 text-[11px] font-semibold text-sky-700 cursor-pointer"
+                      className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-2 sm:py-1 rounded-lg sm:rounded-md bg-sky-50 hover:bg-sky-100 border border-sky-200 text-xs sm:text-[11px] font-semibold text-sky-700 cursor-pointer"
                     >
-                      <Plus className="w-3.5 h-3.5" />
+                      <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                       Add Item
                     </button>
                     <button
@@ -361,19 +363,21 @@ export function FoundationInspectionView({
                       onClick={() => resetFoundationInspectionChecklist(selectedFoundation.id)}
                       disabled={!hasChecklistChanges}
                       title="Restore default checklist items and clear recorded entries for this foundation"
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-45 disabled:cursor-not-allowed text-[11px] font-semibold text-slate-700 cursor-pointer"
+                      className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-2 sm:py-1 rounded-lg sm:rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-45 disabled:cursor-not-allowed text-xs sm:text-[11px] font-semibold text-slate-700 cursor-pointer"
                     >
-                      <RotateCcw className="w-3 h-3" />
-                      Reset Checklist
+                      <RotateCcw className="w-4 h-4 sm:w-3 sm:h-3" />
+                      <span className="sm:hidden">Reset</span>
+                      <span className="hidden sm:inline">Reset Checklist</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleMarkAllPassed}
                       disabled={reportableInspections.length === 0}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 disabled:opacity-45 disabled:cursor-not-allowed border border-emerald-200 text-[11px] font-semibold text-emerald-700 cursor-pointer"
+                      className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-2 sm:py-1 rounded-lg sm:rounded-md bg-emerald-50 hover:bg-emerald-100 disabled:opacity-45 disabled:cursor-not-allowed border border-emerald-200 text-xs sm:text-[11px] font-semibold text-emerald-700 cursor-pointer"
                     >
-                      <CheckCheck className="w-3.5 h-3.5" />
-                      Mark All Passed
+                      <CheckCheck className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                      <span className="sm:hidden">All Passed</span>
+                      <span className="hidden sm:inline">Mark All Passed</span>
                     </button>
                   </div>
                 </div>

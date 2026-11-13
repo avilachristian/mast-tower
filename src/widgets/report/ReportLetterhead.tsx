@@ -1,43 +1,26 @@
 import { formatDateWithWeekday } from '@/entities/project/calculations';
 import type { MastProjectState, ReportDetailsSpec } from '@/entities/project/types';
-import type { PrintOrientation, PrintPaperSize } from '@/shared/state/uiStore';
+import { resolveReportLogos } from '@/shared/assets/defaultLogos';
 
 const PRINT_PAGE_STYLE_ID = 'mast-dynamic-print-page-style';
 
 /**
- * Injects or updates the dynamic `@page { size: ... }` rule so the browser print
- * dialog defaults cleanly to the chosen paper size and orientation.
+ * Removes any legacy dynamic `@page { size: ... }` override so the browser's
+ * native Print / Save as PDF dialog controls paper size and Portrait / Landscape
+ * orientation directly without CSS conflicts.
  */
-export function applyPrintPageStyle(
-  paperSize: PrintPaperSize = 'A4',
-  orientation: PrintOrientation = 'portrait'
-): void {
+export function applyPrintPageStyle(): void {
   if (typeof document === 'undefined') return;
-  let styleEl = document.getElementById(PRINT_PAGE_STYLE_ID) as HTMLStyleElement | null;
-  if (!styleEl) {
-    styleEl = document.createElement('style');
-    styleEl.id = PRINT_PAGE_STYLE_ID;
-    document.head.appendChild(styleEl);
-  }
-  const margin = paperSize === 'A3' ? '12mm' : '10mm';
-  styleEl.textContent = `@media print { @page { size: ${paperSize} ${orientation}; margin: ${margin}; } }`;
+  document.getElementById(PRINT_PAGE_STYLE_ID)?.remove();
 }
 
 /**
- * Temporarily sets `document.title` and ensures `@page` size/orientation rules
- * are applied before invoking browser Print / Save as PDF.
+ * Temporarily sets `document.title` and opens the browser's native Print /
+ * Save as PDF dialog without forcing a `@page` orientation override.
  */
-export function triggerReportPrint(
-  documentTitle?: string,
-  pageOptions?: { paperSize?: PrintPaperSize; orientation?: PrintOrientation }
-): void {
+export function triggerReportPrint(documentTitle?: string): void {
   if (typeof window === 'undefined') return;
-  if (pageOptions?.paperSize || pageOptions?.orientation) {
-    applyPrintPageStyle(
-      pageOptions.paperSize ?? 'A4',
-      pageOptions.orientation ?? 'portrait'
-    );
-  }
+  applyPrintPageStyle();
   const previousTitle = document.title;
   const sanitized = (documentTitle ?? '').replace(/[\\/:*?"<>|]+/g, '-').trim();
   if (sanitized) {
@@ -67,6 +50,7 @@ export function resolveReportDetails(
       overrides?.preparedBy?.trim() || base.preparedBy?.trim() || project.preparedBy,
     reportDate:
       overrides?.reportDate?.trim() || base.reportDate?.trim() || project.lastUpdated,
+    logos: resolveReportLogos(base.logos),
   };
 }
 
@@ -89,7 +73,7 @@ export function ReportLetterhead({
   fallbackContractor?: string;
   fallbackDate?: string;
 }) {
-  const logos = details?.logos;
+  const logos = resolveReportLogos(details?.logos);
   const hasAnyLogo = Boolean(
     logos?.left?.dataUrl || logos?.center?.dataUrl || logos?.right?.dataUrl
   );

@@ -108,46 +108,38 @@ export function OverallVerticalMastStatusSheet({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 flex-1 text-xs">
-              <div className="p-2.5 border-r border-b border-slate-900">
+            <div className="grid grid-cols-3 divide-x divide-slate-900 flex-1 text-xs">
+              <div className="p-2.5">
                 <div className="text-[10px] font-bold uppercase text-slate-500">
                   Tower Legs Installed
                 </div>
                 <div className="font-bold text-slate-900 tabular-nums mt-0.5 text-sm">
                   {metrics.verifiedSections} / {metrics.totalSections}
-                  <span className="text-xs font-semibold text-slate-600 ml-1">
+                  <span className="block text-[11px] font-semibold text-slate-600">
                     ({metrics.verifiedHeightM} m)
-                  </span>
-                </div>
-              </div>
-              <div className="p-2.5 border-b border-slate-900">
-                <div className="text-[10px] font-bold uppercase text-slate-500">
-                  Guy Layers Tensioned
-                </div>
-                <div className="font-bold text-slate-900 tabular-nums mt-0.5 text-sm">
-                  {metrics.tensionedGuyLayers} / {metrics.totalGuyLayers}
-                  <span className="text-xs font-semibold text-slate-600 ml-1">
-                    Layers
-                  </span>
-                </div>
-              </div>
-              <div className="p-2.5 border-r border-slate-900">
-                <div className="text-[10px] font-bold uppercase text-slate-500">
-                  Guy Strands Tensioned
-                </div>
-                <div className="font-bold text-slate-900 tabular-nums mt-0.5 text-sm">
-                  {metrics.tensionedStrands} / {metrics.totalStrands}
-                  <span className="text-xs font-semibold text-slate-600 ml-1">
-                    Cables
                   </span>
                 </div>
               </div>
               <div className="p-2.5">
                 <div className="text-[10px] font-bold uppercase text-slate-500">
-                  Daily Logs / Man-Days
+                  Guy Layers Tensioned
                 </div>
                 <div className="font-bold text-slate-900 tabular-nums mt-0.5 text-sm">
-                  {project.dailyLogs.length} logs · {metrics.totalManDays} md
+                  {metrics.tensionedGuyLayers} / {metrics.totalGuyLayers}
+                  <span className="block text-[11px] font-semibold text-slate-600">
+                    Layers
+                  </span>
+                </div>
+              </div>
+              <div className="p-2.5">
+                <div className="text-[10px] font-bold uppercase text-slate-500">
+                  Guy Strands Tensioned
+                </div>
+                <div className="font-bold text-slate-900 tabular-nums mt-0.5 text-sm">
+                  {metrics.tensionedStrands} / {metrics.totalStrands}
+                  <span className="block text-[11px] font-semibold text-slate-600">
+                    Cables
+                  </span>
                 </div>
               </div>
             </div>

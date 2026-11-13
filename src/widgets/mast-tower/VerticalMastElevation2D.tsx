@@ -12,9 +12,67 @@ import {
   SIMPLIFIED_TOWER_SECTION_STATUSES,
   TOWER_SECTION_STATUS_META,
 } from '@/entities/project/verticalMastBaseline';
-import type { MastSelectionTarget } from '@/shared/state/uiStore';
+import {
+  useUiStore,
+  type MastSelectionTarget,
+  type MastVerticalScale,
+} from '@/shared/state/uiStore';
 
 type ElevationFocus = 'all' | 'lower' | 'upper';
+
+export const MAST_VERTICAL_SCALE_OPTIONS: { value: MastVerticalScale; label: string }[] = [
+  { value: 1, label: '1×' },
+  { value: 1.5, label: '1.5×' },
+  { value: 2, label: '2×' },
+  { value: 3, label: '3×' },
+];
+
+export function getMastElevationGeometry(
+  focus: ElevationFocus,
+  verticalScale: MastVerticalScale = 1
+): {
+  yScale: number;
+  yGround: number;
+  viewBox: string;
+} {
+  if (verticalScale === 1) {
+    const viewBoxByFocus: Record<ElevationFocus, string> = {
+      all: '0 0 760 595',
+      lower: '0 270 760 325',
+      upper: '0 0 760 335',
+    };
+    return {
+      yScale: 3.6,
+      yGround: 528,
+      viewBox: viewBoxByFocus[focus],
+    };
+  }
+
+  const yScale = 3.6 * verticalScale;
+  const yGround = Math.round(63.6 + 129 * yScale);
+  const totalHeight = yGround + 67;
+  if (focus === 'lower') {
+    const yStart = Math.max(0, Math.round(yGround - 71.5 * yScale));
+    return {
+      yScale,
+      yGround,
+      viewBox: `0 ${yStart} 760 ${totalHeight - yStart}`,
+    };
+  }
+  if (focus === 'upper') {
+    const upperEnd = Math.min(totalHeight, Math.round(63.6 + 75.4 * yScale));
+    return {
+      yScale,
+      yGround,
+      viewBox: `0 0 760 ${upperEnd}`,
+    };
+  }
+  return {
+    yScale,
+    yGround,
+    viewBox: `0 0 760 ${totalHeight}`,
+  };
+}
 
 export function VerticalMastElevation2D({
   verticalMast,
@@ -25,6 +83,7 @@ export function VerticalMastElevation2D({
   compact = false,
   fillParent = false,
   hideHeader = false,
+  enableVerticalScale,
 }: {
   verticalMast: VerticalMastState;
   selectedTarget?: MastSelectionTarget | null;
@@ -34,23 +93,22 @@ export function VerticalMastElevation2D({
   compact?: boolean;
   fillParent?: boolean;
   hideHeader?: boolean;
+  enableVerticalScale?: boolean;
 }) {
   const [focus, setFocus] = useState<ElevationFocus>('all');
+  const mastVerticalScale = useUiStore((s) => s.mastVerticalScale);
+  const setMastVerticalScale = useUiStore((s) => s.setMastVerticalScale);
+
+  const canScale = enableVerticalScale ?? (Boolean(onSelectTarget) && !hideHeader);
+  const activeVScale: MastVerticalScale = canScale ? mastVerticalScale : 1;
 
   const cx = 360;
-  const yGround = 528;
   const xScale = 3.6; // ±72m -> ±259.2px (x = 100.8 .. 619.2)
-  const yScale = 3.6; // 129m (41x3m + 6m rod) -> 464.4px (peak y = 63.6)
-  const towerHalfW = 12;
+  const { yScale, yGround, viewBox } = getMastElevationGeometry(focus, activeVScale);
+  const towerHalfW = 13.5;
 
   const yAtElev = (elevM: number) => yGround - elevM * yScale;
   const xAtOffset = (offsetM: number) => cx + offsetM * xScale;
-
-  const viewBoxByFocus: Record<ElevationFocus, string> = {
-    all: '0 0 760 595',
-    lower: '0 270 760 325',
-    upper: '0 0 760 335',
-  };
 
   const sectionCounts = verticalMast.sections.reduce<Record<TowerSectionStatus, number>>(
     (acc, sec) => {
@@ -170,6 +228,33 @@ export function VerticalMastElevation2D({
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5">
+            {canScale && (
+              <div
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
+                role="group"
+                aria-label="Vertical diagram scale"
+                title="Stretch diagram vertically to make tower sections easier to tap or click"
+              >
+                <span className="px-1.5 text-[10px] font-semibold text-slate-500 select-none">
+                  V-Scale
+                </span>
+                {MAST_VERTICAL_SCALE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setMastVerticalScale(opt.value)}
+                    className={`px-2 py-0.5 rounded-md font-semibold transition cursor-pointer ${
+                      activeVScale === opt.value
+                        ? 'bg-white text-teal-700 shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]">
               {(
                 [
@@ -225,19 +310,27 @@ export function VerticalMastElevation2D({
       {/* Interactive SVG Elevation */}
       <div
         className={
-          fillParent
-            ? 'p-1 flex-1 min-h-0 flex items-center justify-center bg-slate-50/40'
-            : 'p-2 sm:p-3 bg-slate-50/40'
+          activeVScale > 1
+            ? fillParent
+              ? 'p-2 flex-1 min-h-0 overflow-y-auto max-h-[560px] sm:max-h-[640px] bg-slate-50/40'
+              : compact
+                ? 'p-2 sm:p-3 overflow-y-auto max-h-[540px] bg-slate-50/40'
+                : 'p-2 sm:p-3 overflow-y-auto max-h-[640px] bg-slate-50/40'
+            : fillParent
+              ? 'p-1 flex-1 min-h-0 flex items-center justify-center bg-slate-50/40'
+              : 'p-2 sm:p-3 bg-slate-50/40'
         }
       >
         <svg
-          viewBox={viewBoxByFocus[focus]}
+          viewBox={viewBox}
           className={
-            fillParent
-              ? 'w-full h-full max-w-full max-h-full select-none'
-              : compact
-                ? 'w-full max-h-[540px] mx-auto select-none'
-                : 'w-full max-h-[640px] mx-auto select-none'
+            activeVScale > 1
+              ? 'w-full h-auto block mx-auto select-none'
+              : fillParent
+                ? 'w-full h-full max-w-full max-h-full select-none'
+                : compact
+                  ? 'w-full max-h-[540px] mx-auto select-none'
+                  : 'w-full max-h-[640px] mx-auto select-none'
           }
           role="img"
           aria-label="Vertical 120m Mast Tower and 16-Layer Guying Elevation Diagram"
@@ -250,17 +343,17 @@ export function VerticalMastElevation2D({
                 <line
                   x1={52}
                   y1={y}
-                  x2={644}
+                  x2={638}
                   y2={y}
                   stroke={elev === 0 ? '#334155' : '#e2e8f0'}
                   strokeWidth={elev === 0 ? 2 : 1}
                   strokeDasharray={elev === 0 ? undefined : '3 4'}
                 />
                 <text
-                  x={46}
-                  y={y + 3.5}
+                  x={48}
+                  y={y + 4}
                   textAnchor="end"
-                  fontSize={9.5}
+                  fontSize={11}
                   fontWeight={elev === 0 || elev === 120 ? 700 : 500}
                   fill="#475569"
                 >
@@ -290,10 +383,10 @@ export function VerticalMastElevation2D({
             strokeDasharray="2 3"
           />
           <text
-            x={46}
-            y={yAtElev(129) + 3}
+            x={48}
+            y={yAtElev(129) + 3.5}
             textAnchor="end"
-            fontSize={9}
+            fontSize={10.5}
             fontWeight={600}
             fill="#64748b"
           >
@@ -310,7 +403,7 @@ export function VerticalMastElevation2D({
             x={10}
             y={(yAtElev(129) + yGround) / 2}
             textAnchor="middle"
-            fontSize={8.5}
+            fontSize={9.5}
             fontWeight={700}
             fill="#64748b"
             transform={`rotate(-90 10 ${(yAtElev(129) + yGround) / 2})`}
@@ -495,7 +588,7 @@ export function VerticalMastElevation2D({
                 <line
                   x1={cx + towerHalfW + 2}
                   y1={yAttach}
-                  x2={650}
+                  x2={641}
                   y2={yAttach}
                   stroke={isSelected ? '#0284c7' : '#cbd5e1'}
                   strokeWidth={isSelected ? 1.2 : 0.7}
@@ -503,19 +596,19 @@ export function VerticalMastElevation2D({
                 />
                 <g>
                   <rect
-                    x={651}
-                    y={yAttach - 7.5}
-                    width={103}
-                    height={15}
-                    rx={3}
+                    x={642}
+                    y={yAttach - 8.5}
+                    width={113}
+                    height={17}
+                    rx={3.5}
                     fill={isSelected ? '#0284c7' : '#ffffff'}
                     stroke={isSelected ? '#0369a1' : badgeColor}
-                    strokeWidth={isSelected ? 1.4 : 1}
+                    strokeWidth={isSelected ? 1.5 : 1.05}
                   />
                   <text
-                    x={656}
-                    y={yAttach + 3}
-                    fontSize={8.5}
+                    x={647}
+                    y={yAttach + 3.5}
+                    fontSize={9.5}
                     fontWeight={700}
                     fill={isSelected ? '#ffffff' : '#0f172a'}
                   >
@@ -542,7 +635,7 @@ export function VerticalMastElevation2D({
                         key={secKey}
                         cx={733 + idx * 7}
                         cy={yAttach}
-                        r={2.4}
+                        r={2.5}
                         fill={dotColor}
                       />
                     );
@@ -560,7 +653,15 @@ export function VerticalMastElevation2D({
             const meta = TOWER_SECTION_STATUS_META[sec.status];
             const isSelected = selectedSection?.id === sec.id;
             const isDone = sec.status !== 'not_started';
-            const strokeColor = isSelected ? '#0284c7' : isDone ? meta.color : '#94a3b8';
+            const strokeColor = isSelected ? '#0284c7' : isDone ? meta.color : '#64748b';
+            const xL = cx - towerHalfW;
+            const xR = cx + towerHalfW;
+            const bayCount = activeVScale >= 1.5 ? 6 : 4;
+            const zigzagPoints = Array.from({ length: bayCount + 1 }, (_, idx) => {
+              const py = yBot - (idx / bayCount) * h;
+              const px = idx % 2 === 0 ? xL + 1.5 : xR - 1.5;
+              return `${px.toFixed(1)},${py.toFixed(1)}`;
+            }).join(' ');
 
             return (
               <g
@@ -589,46 +690,82 @@ export function VerticalMastElevation2D({
                   />
                 )}
 
-                {/* Section body fill */}
+                {/* Soft Section Status Backdrop */}
                 <rect
-                  x={cx - towerHalfW}
+                  x={xL}
                   y={yTop}
                   width={towerHalfW * 2}
                   height={h}
                   fill={isDone ? meta.color : '#f8fafc'}
-                  fillOpacity={isSelected ? 0.35 : isDone ? 0.22 : 0.8}
-                  stroke={strokeColor}
-                  strokeWidth={isSelected ? 1.8 : 1.1}
-                  strokeDasharray={isDone ? undefined : '2.5 2'}
+                  fillOpacity={isSelected ? 0.34 : isDone ? 0.2 : 0.72}
+                  stroke="none"
                 />
 
-                {/* Center mast spine + diagonal truss graphic inside module */}
+                {/* Top & Bottom Splice Flange Collars (flange ears matching modular CAD detail) */}
                 <line
-                  x1={cx}
+                  x1={xL - 2}
                   y1={yTop}
-                  x2={cx}
-                  y2={yBot}
-                  stroke={strokeColor}
-                  strokeWidth={0.9}
-                  strokeOpacity={isDone ? 0.85 : 0.4}
-                />
-                <line
-                  x1={cx - towerHalfW}
-                  y1={yBot}
-                  x2={cx + towerHalfW}
+                  x2={xR + 2}
                   y2={yTop}
                   stroke={strokeColor}
-                  strokeWidth={0.75}
-                  strokeOpacity={isDone ? 0.75 : 0.35}
+                  strokeWidth={isSelected ? 1.5 : 1.05}
+                  strokeOpacity={isDone || isSelected ? 0.95 : 0.65}
                 />
                 <line
-                  x1={cx - towerHalfW}
-                  y1={yTop}
-                  x2={cx + towerHalfW}
+                  x1={xL - 2}
+                  y1={yBot}
+                  x2={xR + 2}
                   y2={yBot}
                   stroke={strokeColor}
-                  strokeWidth={0.75}
-                  strokeOpacity={isDone ? 0.75 : 0.35}
+                  strokeWidth={isSelected ? 1.5 : 1.05}
+                  strokeOpacity={isDone || isSelected ? 0.95 : 0.65}
+                />
+
+                {/* Principal Material (Left & Right Vertical Leg Chords) */}
+                <line
+                  x1={xL}
+                  y1={yTop}
+                  x2={xL}
+                  y2={yBot}
+                  stroke={strokeColor}
+                  strokeWidth={isSelected ? 2 : 1.45}
+                  strokeDasharray={isDone ? undefined : '3 1.5'}
+                />
+                <line
+                  x1={xR}
+                  y1={yTop}
+                  x2={xR}
+                  y2={yBot}
+                  stroke={strokeColor}
+                  strokeWidth={isSelected ? 2 : 1.45}
+                  strokeDasharray={isDone ? undefined : '3 1.5'}
+                />
+
+                {/* Horizontal Crosspieces (dividing 3.0m section into equal truss bays) */}
+                {Array.from({ length: bayCount - 1 }, (_, idx) => {
+                  const yCross = yBot - ((idx + 1) / bayCount) * h;
+                  return (
+                    <line
+                      key={idx}
+                      x1={xL + 1}
+                      y1={yCross}
+                      x2={xR - 1}
+                      y2={yCross}
+                      stroke={strokeColor}
+                      strokeWidth={activeVScale >= 1.5 ? 0.8 : 0.55}
+                      strokeOpacity={isDone || isSelected ? 0.85 : 0.45}
+                    />
+                  );
+                })}
+
+                {/* Continuous Alternating Inclined Bracing Members (Warren Zigzag) */}
+                <polyline
+                  points={zigzagPoints}
+                  fill="none"
+                  stroke={strokeColor}
+                  strokeWidth={activeVScale >= 1.5 ? 0.85 : 0.6}
+                  strokeLinejoin="round"
+                  strokeOpacity={isDone || isSelected ? 0.9 : 0.5}
                 />
 
                 {/* Wider invisible hit rect for easy clicking */}
@@ -640,17 +777,19 @@ export function VerticalMastElevation2D({
                   fill="transparent"
                 />
 
-                {/* Every 5th section index label & top S41 on left of mast */}
-                {(sec.sectionNo === 1 ||
+                {/* Section index labels (expand visibility cleanly when vertically scaled) */}
+                {(activeVScale >= 2 ||
+                  (activeVScale >= 1.5 && sec.sectionNo % 2 === 1) ||
+                  sec.sectionNo === 1 ||
                   sec.sectionNo === 41 ||
                   (sec.sectionNo % 5 === 0 && sec.sectionNo <= 35) ||
                   isSelected) && (
                   <g>
                     <text
-                      x={cx - towerHalfW - 6}
-                      y={(yTop + yBot) / 2 + 3}
+                      x={cx - towerHalfW - 7}
+                      y={(yTop + yBot) / 2 + 3.5}
                       textAnchor="end"
-                      fontSize={isSelected ? 9.5 : 8}
+                      fontSize={isSelected ? 11 : 9.5}
                       fontWeight={isSelected ? 800 : 600}
                       fill={isSelected ? '#0369a1' : '#475569'}
                     >
@@ -681,22 +820,22 @@ export function VerticalMastElevation2D({
               strokeWidth={0.8}
             />
             <text
-              x={cx - towerHalfW - 36}
-              y={yAtElev(7.0) + 3}
+              x={cx - towerHalfW - 38}
+              y={yAtElev(7.0) + 3.5}
               textAnchor="end"
-              fontSize={8.5}
+              fontSize={10}
               fontWeight={700}
               fill="#0f172a"
             >
               7.0m Platform
             </text>
             <line
-              x1={cx - towerHalfW - 34}
+              x1={cx - towerHalfW - 35}
               y1={yAtElev(7.0)}
               x2={cx - towerHalfW - 6}
               y2={yAtElev(7.0)}
               stroke="#475569"
-              strokeWidth={0.8}
+              strokeWidth={0.9}
             />
           </g>
 
@@ -718,9 +857,9 @@ export function VerticalMastElevation2D({
               fill={rodMeta.color}
             />
             <text
-              x={cx + 8}
-              y={yAtElev(126) + 2}
-              fontSize={8.5}
+              x={cx + 9}
+              y={yAtElev(126) + 3}
+              fontSize={10}
               fontWeight={700}
               fill="#334155"
             >
@@ -779,9 +918,9 @@ export function VerticalMastElevation2D({
                 />
                 <text
                   x={ax}
-                  y={yGround + 24}
+                  y={yGround + 25}
                   textAnchor="middle"
-                  fontSize={9}
+                  fontSize={10.5}
                   fontWeight={ringMatches || isCenter ? 800 : 600}
                   fill={ringMatches ? '#0369a1' : '#334155'}
                 >
@@ -789,9 +928,9 @@ export function VerticalMastElevation2D({
                 </text>
                 <text
                   x={ax}
-                  y={yGround + 35}
+                  y={yGround + 37}
                   textAnchor="middle"
-                  fontSize={8}
+                  fontSize={9}
                   fill="#64748b"
                 >
                   {isCenter
@@ -806,17 +945,17 @@ export function VerticalMastElevation2D({
           <g stroke="#94a3b8" strokeWidth={0.9}>
             <line
               x1={xAtOffset(-72)}
-              y1={yGround + 47}
+              y1={yGround + 48}
               x2={xAtOffset(72)}
-              y2={yGround + 47}
+              y2={yGround + 48}
             />
             {[-72, -54, -36, -18, 0, 18, 36, 54, 72].map((m) => (
               <line
                 key={m}
                 x1={xAtOffset(m)}
-                y1={yGround + 43}
+                y1={yGround + 44}
                 x2={xAtOffset(m)}
-                y2={yGround + 51}
+                y2={yGround + 52}
               />
             ))}
           </g>
@@ -824,9 +963,9 @@ export function VerticalMastElevation2D({
             <text
               key={mid}
               x={xAtOffset(mid)}
-              y={yGround + 59}
+              y={yGround + 62}
               textAnchor="middle"
-              fontSize={8}
+              fontSize={9.5}
               fill="#64748b"
             >
               18m
@@ -835,63 +974,63 @@ export function VerticalMastElevation2D({
 
           {/* Dedicated Vertical Elevation Legend Matched to Guy Wire & Anchor Pad Colors */}
           {focus !== 'lower' && (
-            <g transform="translate(56, 14)">
+            <g transform="translate(56, 12)">
               <rect
                 x={0}
                 y={0}
-                width={196}
-                height={162}
-                rx={6}
+                width={224}
+                height={188}
+                rx={7}
                 fill="#ffffff"
                 fillOpacity={0.96}
                 stroke="#cbd5e1"
-                strokeWidth={1}
+                strokeWidth={1.1}
               />
-              <text x={10} y={14} fontSize={8.5} fontWeight={700} fill="#0f172a">
+              <text x={12} y={16} fontSize={10} fontWeight={700} fill="#0f172a">
                 ELEVATION LEGEND (ZT-120-01)
               </text>
-              <line x1={10} y1={19} x2={186} y2={19} stroke="#e2e8f0" strokeWidth={0.8} />
+              <line x1={12} y1={22} x2={212} y2={22} stroke="#e2e8f0" strokeWidth={0.9} />
 
               {/* Simplified Tower Leg Status */}
-              <text x={10} y={29} fontSize={7.5} fontWeight={700} fill="#475569">
+              <text x={12} y={34} fontSize={8.5} fontWeight={700} fill="#475569">
                 TOWER LEGS (S01–S41) &amp; PF-0 BASE
               </text>
-              <g fontSize={8} fill="#334155">
-                <rect x={10} y={33} width={11} height={8} rx={1.5} fill="#10b981" fillOpacity={0.28} stroke="#10b981" strokeWidth={1.1} />
-                <text x={25} y={40}>Tower Leg Installed</text>
+              <g fontSize={9.5} fill="#334155">
+                <rect x={12} y={39} width={13} height={9} rx={1.5} fill="#10b981" fillOpacity={0.28} stroke="#10b981" strokeWidth={1.2} />
+                <text x={30} y={46.5}>Tower Leg Installed</text>
 
-                <rect x={10} y={46} width={11} height={8} rx={1.5} fill="#94a3b8" fillOpacity={0.14} stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 1" />
-                <text x={25} y={53}>Pending Installation</text>
+                <rect x={12} y={54} width={13} height={9} rx={1.5} fill="#94a3b8" fillOpacity={0.14} stroke="#94a3b8" strokeWidth={1} strokeDasharray="2 1" />
+                <text x={30} y={61.5}>Pending Installation</text>
               </g>
 
-              <line x1={10} y1={59} x2={186} y2={59} stroke="#e2e8f0" strokeWidth={0.8} />
+              <line x1={12} y1={69} x2={212} y2={69} stroke="#e2e8f0" strokeWidth={0.9} />
 
               {/* Guy Cable Wires & Ground Anchor Pads (exact match to 2D Plan) */}
-              <text x={10} y={69} fontSize={7.5} fontWeight={700} fill="#475569">
+              <text x={12} y={80} fontSize={8.5} fontWeight={700} fill="#475569">
                 GUY WIRES &amp; ANCHOR PADS (L01–L16)
               </text>
-              <g fontSize={8} fill="#334155">
-                <line x1={10} y1={77} x2={24} y2={77} stroke={ANCHOR_GUY_STAGE_META.pending.color} strokeWidth={1.4} strokeDasharray="3 2" />
-                <text x={28} y={80}>{ANCHOR_GUY_STAGE_META.pending.legendLabel}</text>
+              <g fontSize={9.5} fill="#334155">
+                <line x1={12} y1={89} x2={28} y2={89} stroke={ANCHOR_GUY_STAGE_META.pending.color} strokeWidth={1.6} strokeDasharray="3 2" />
+                <text x={33} y={92.5}>{ANCHOR_GUY_STAGE_META.pending.legendLabel}</text>
 
-                <line x1={10} y1={90} x2={24} y2={90} stroke={ANCHOR_GUY_STAGE_META.guy_1.color} strokeWidth={2.2} />
-                <text x={28} y={93}>{ANCHOR_GUY_STAGE_META.guy_1.legendLabel}</text>
+                <line x1={12} y1={103} x2={28} y2={103} stroke={ANCHOR_GUY_STAGE_META.guy_1.color} strokeWidth={2.4} />
+                <text x={33} y={106.5}>{ANCHOR_GUY_STAGE_META.guy_1.legendLabel}</text>
 
-                <line x1={10} y1={103} x2={24} y2={103} stroke={ANCHOR_GUY_STAGE_META.guy_2.color} strokeWidth={2.2} />
-                <text x={28} y={106}>{ANCHOR_GUY_STAGE_META.guy_2.legendLabel}</text>
+                <line x1={12} y1={117} x2={28} y2={117} stroke={ANCHOR_GUY_STAGE_META.guy_2.color} strokeWidth={2.4} />
+                <text x={33} y={120.5}>{ANCHOR_GUY_STAGE_META.guy_2.legendLabel}</text>
 
-                <line x1={10} y1={116} x2={24} y2={116} stroke={ANCHOR_GUY_STAGE_META.guy_3.color} strokeWidth={2.2} />
-                <text x={28} y={119}>{ANCHOR_GUY_STAGE_META.guy_3.legendLabel}</text>
+                <line x1={12} y1={131} x2={28} y2={131} stroke={ANCHOR_GUY_STAGE_META.guy_3.color} strokeWidth={2.4} />
+                <text x={33} y={134.5}>{ANCHOR_GUY_STAGE_META.guy_3.legendLabel}</text>
 
-                <line x1={10} y1={129} x2={24} y2={129} stroke={ANCHOR_GUY_STAGE_META.guy_4.color} strokeWidth={2.2} />
-                <text x={28} y={132}>{ANCHOR_GUY_STAGE_META.guy_4.legendLabel}</text>
+                <line x1={12} y1={145} x2={28} y2={145} stroke={ANCHOR_GUY_STAGE_META.guy_4.color} strokeWidth={2.4} />
+                <text x={33} y={148.5}>{ANCHOR_GUY_STAGE_META.guy_4.legendLabel}</text>
 
-                <line x1={10} y1={142} x2={24} y2={142} stroke={ANCHOR_GUY_STAGE_META.all_tensioned.color} strokeWidth={2.4} />
-                <text x={28} y={145}>5. All Cables Tensioned (Verified)</text>
+                <line x1={12} y1={159} x2={28} y2={159} stroke={ANCHOR_GUY_STAGE_META.all_tensioned.color} strokeWidth={2.6} />
+                <text x={33} y={162.5}>5. All Cables Tensioned (Verified)</text>
               </g>
 
-              <line x1={10} y1={151} x2={186} y2={151} stroke="#e2e8f0" strokeWidth={0.8} />
-              <text x={10} y={158.5} fontSize={7} fill="#64748b">
+              <line x1={12} y1={170} x2={212} y2={170} stroke="#e2e8f0" strokeWidth={0.9} />
+              <text x={12} y={180.5} fontSize={8} fill="#64748b">
                 Wire &amp; C1–B2 pad colors match Anchor Plan
               </text>
             </g>

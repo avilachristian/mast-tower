@@ -1,4 +1,6 @@
+import { createDefaultReportLogos } from '@/shared/assets/defaultLogos';
 import type {
+  FoundationCustomSpecs,
   FoundationInspectionItemKey,
   FoundationRecord,
   FoundationSpec,
@@ -130,56 +132,56 @@ export const STATUS_META: Record<
     pct: 0,
   },
   excavated: {
-    label: '1–2. Excavation & Retrofit',
-    shortLabel: 'Excavation & Retrofit',
+    label: '1–2. Excavated & Retrofitted',
+    shortLabel: 'Excavated & Retrofitted',
     color: '#b97a57',
     bgClass: 'bg-stone-100 border-stone-400',
     textClass: 'text-stone-800',
     pct: 15,
   },
   lean_concrete: {
-    label: '3. Lean Concrete Pour',
-    shortLabel: 'Lean Concrete Pour',
+    label: '3. Lean Concrete Poured',
+    shortLabel: 'Lean Concrete Poured',
     color: '#facc15',
     bgClass: 'bg-yellow-50 border-yellow-400',
     textClass: 'text-yellow-800',
     pct: 30,
   },
   rebar_and_anchor: {
-    label: '4. Rebar, Anchor/Bolt & Forms Install',
-    shortLabel: 'Rebar & Forms Install',
+    label: '4. Rebar, Anchor/Bolt & Forms Installed',
+    shortLabel: 'Rebar & Forms Installed',
     color: '#06b6d4',
     bgClass: 'bg-cyan-50 border-cyan-400',
     textClass: 'text-cyan-800',
     pct: 50,
   },
   formwork: {
-    label: '5. Rebar, Anchor/Bolt & Forms Inspect',
-    shortLabel: 'Rebar & Forms Inspect',
+    label: '5. Rebar, Anchor/Bolt & Forms Inspected',
+    shortLabel: 'Rebar & Forms Inspected',
     color: '#f97316',
     bgClass: 'bg-orange-50 border-orange-400',
     textClass: 'text-orange-800',
     pct: 65,
   },
   concreted: {
-    label: '6. Concrete Pouring',
-    shortLabel: 'Concrete Pouring',
+    label: '6. Concrete Poured',
+    shortLabel: 'Concrete Poured',
     color: '#ec4899',
     bgClass: 'bg-pink-50 border-pink-400',
     textClass: 'text-pink-800',
     pct: 80,
   },
   curing: {
-    label: '7. Curing',
-    shortLabel: 'Curing',
+    label: '7. Cured',
+    shortLabel: 'Cured',
     color: '#8b5cf6',
     bgClass: 'bg-violet-50 border-violet-400',
     textClass: 'text-violet-800',
     pct: 90,
   },
   completed: {
-    label: '8. Backfill (Completed)',
-    shortLabel: 'Backfill (Done)',
+    label: '8. Backfilled',
+    shortLabel: 'Backfilled',
     color: '#10b981',
     bgClass: 'bg-emerald-50 border-emerald-400',
     textClass: 'text-emerald-800',
@@ -205,43 +207,43 @@ export function getFoundationChecklistSteps(
   return [
     {
       key: 'excavationVerified',
-      label: '1. Excavation',
-      shortLabel: 'Excavation',
+      label: '1. Excavated',
+      shortLabel: 'Excavated',
     },
     {
       key: 'excavationInspectionDone',
-      label: '2. Excavation Inspection and Retrofit',
-      shortLabel: 'Excavation Inspection and Retrofit',
+      label: '2. Excavation Inspected & Retrofitted',
+      shortLabel: 'Excavation Inspected & Retrofitted',
     },
     {
       key: 'leanConcretePoured',
-      label: '3. Lean Concrete Pour',
-      shortLabel: 'Lean Concrete Pour',
+      label: '3. Lean Concrete Poured',
+      shortLabel: 'Lean Concrete Poured',
     },
     {
       key: 'rebarCageInstalled',
-      label: `4. Rebar, ${hardwareLabel}, and Formworks Installation`,
-      shortLabel: `Rebar, ${hardwareLabel}, and Formworks Installation`,
+      label: `4. Rebar, ${hardwareLabel}, and Formworks Installed`,
+      shortLabel: `Rebar, ${hardwareLabel}, and Formworks Installed`,
     },
     {
       key: 'formworkBraced',
-      label: `5. Rebar, ${hardwareLabel}, and Formworks Inspection`,
-      shortLabel: `Rebar, ${hardwareLabel}, and Formworks Inspection`,
+      label: `5. Rebar, ${hardwareLabel}, and Formworks Inspected`,
+      shortLabel: `Rebar, ${hardwareLabel}, and Formworks Inspected`,
     },
     {
       key: 'concretePoured',
-      label: '6. Concrete Pouring',
-      shortLabel: 'Concrete Pouring',
+      label: '6. Concrete Poured',
+      shortLabel: 'Concrete Poured',
     },
     {
       key: 'curingStarted',
-      label: '7. Curing',
-      shortLabel: 'Curing',
+      label: '7. Cured',
+      shortLabel: 'Cured',
     },
     {
       key: 'curingAndBackfillDone',
-      label: '8. Backfill',
-      shortLabel: 'Backfill',
+      label: '8. Backfilled',
+      shortLabel: 'Backfilled',
     },
   ];
 }
@@ -306,41 +308,87 @@ const INSPECTION_PLAN_BY_TYPE: Record<
   },
 };
 
-/** Returns civil-works QA/QC inspection items with PDF plan measurements for a foundation type. */
+/** 4ft × 8ft (1.22m × 2.44m) phenolic boards required to shutter all 4 sides of a single pad. */
+export const FOUNDATION_PHENOLIC_BOARDS: Record<FoundationType, number> = {
+  principal: 4,
+  anchor_a: 5,
+  anchor_b: 4,
+  anchor_c: 2,
+};
+
+/** Returns civil-works QA/QC inspection items with PDF plan measurements for a foundation type and optional custom dimensions. */
 export function getFoundationInspectionChecklistItems(
-  foundationType: FoundationType
+  foundationType: FoundationType,
+  customSpecs?: FoundationCustomSpecs
 ): FoundationInspectionItemDef[] {
-  const plan = INSPECTION_PLAN_BY_TYPE[foundationType];
+  const basePlan = INSPECTION_PLAN_BY_TYPE[foundationType];
+  const resolved = resolveFoundationSpec(foundationType, customSpecs);
+
+  let excavation = basePlan.excavation;
+  let leanConcrete = basePlan.leanConcrete;
+  let coversAndCage = basePlan.coversAndCage;
+  let rebarCutAndSpacing = basePlan.rebarCutAndSpacing;
+
+  if (resolved.hasCustomDimensions) {
+    const lenMm = Math.round(resolved.lengthM * 1000);
+    const widMm = Math.round(resolved.widthM * 1000);
+    const padMm = Math.round(resolved.thicknessM * 1000);
+    const overMm = Math.round(resolved.overburdenDepthM * 1000);
+    const leanMm = Math.round(resolved.leanThicknessM * 1000);
+    const totalDepthMm = Math.round(resolved.totalExcavationDepthM * 1000);
+    excavation =
+      overMm === 0
+        ? `${lenMm} × ${widMm} mm pad; ${totalDepthMm} mm depth from N.G.L. (${padMm} mm pad + ${leanMm} mm lean, flush top)`
+        : `${lenMm} × ${widMm} mm pad; ${totalDepthMm} mm total depth (${overMm} mm overburden + ${padMm} mm pad + ${leanMm} mm lean)`;
+    leanConcrete = `${leanMm} mm thickness (Class A, ${resolved.leanConcreteCuM.toFixed(2)} m³)`;
+  }
+
+  if (resolved.hasCustomDimensions || customSpecs?.concreteCoverMm !== undefined) {
+    const padMm = Math.round(resolved.thicknessM * 1000);
+    const coverMm = Math.round(resolved.concreteCoverMm);
+    const cageHeightMm = Math.max(0, padMm - coverMm * 2);
+    coversAndCage = `${coverMm} mm top & bottom cover; ${cageHeightMm} mm inner rebar cage height`;
+  }
+
+  if (
+    customSpecs?.rebarM02Count !== undefined ||
+    customSpecs?.rebarM26Count !== undefined
+  ) {
+    const baseSpec = FOUNDATION_SPECS[foundationType];
+    rebarCutAndSpacing = `Ø20 mm @ 200 mm O.C. both ways · Main: ${resolved.rebarM02Count} pcs @ ${baseSpec.rebarM02CutM.toFixed(2)} m · Chair: ${resolved.rebarM26Count} pcs @ ${baseSpec.rebarM26CutM.toFixed(2)} m`;
+  }
+
   return [
     {
       key: 'excavation_size_depth',
       description: 'Excavation Size & Depth (vs N.G.L.)',
-      planMeasurement: plan.excavation,
+      planMeasurement: excavation,
     },
     {
       key: 'lean_concrete_50mm',
       description: 'Lean Concrete Bedding (Class A)',
-      planMeasurement: plan.leanConcrete,
+      planMeasurement: leanConcrete,
     },
     {
       key: 'concrete_covers_50mm',
       description: 'Concrete Covers & Rebar Cage Height',
-      planMeasurement: plan.coversAndCage,
+      planMeasurement: coversAndCage,
     },
     {
       key: 'bars_spacing_200mm',
       description: 'Main & Chair Rebar Size, Count, Cut & Spacing',
-      planMeasurement: plan.rebarCutAndSpacing,
+      planMeasurement: rebarCutAndSpacing,
     },
     {
       key: 'rebar_lap_length',
       description: 'Rebar Lap Lengths (Outer / Inner)',
-      planMeasurement: plan.rebarLapLength,
+      planMeasurement: basePlan.rebarLapLength,
     },
     {
       key: 'anchor_rod_alignment',
-      description: plan.anchorHardwareDesc,
-      planMeasurement: plan.anchorHardwarePlan,
+      description: basePlan.anchorHardwareDesc,
+      planMeasurement:
+        customSpecs?.towerAccessories?.trim() || basePlan.anchorHardwarePlan,
     },
   ];
 }
@@ -349,13 +397,160 @@ export function getFoundationInspectionChecklistItems(
 export const FOUNDATION_INSPECTION_ITEMS: FoundationInspectionItemDef[] =
   getFoundationInspectionChecklistItems('anchor_a');
 
-/** 4ft × 8ft (1.22m × 2.44m) phenolic boards required to shutter all 4 sides of a single pad. */
-export const FOUNDATION_PHENOLIC_BOARDS: Record<FoundationType, number> = {
-  principal: 4,
-  anchor_a: 5,
-  anchor_b: 4,
-  anchor_c: 2,
-};
+export interface ResolvedFoundationSpec {
+  type: FoundationType;
+  label: string;
+  lengthM: number;
+  widthM: number;
+  thicknessM: number;
+  overburdenDepthM: number;
+  leanThicknessM: number;
+  concreteCoverMm: number;
+  totalExcavationDepthM: number;
+  structuralConcreteCuM: number;
+  leanConcreteCuM: number;
+  totalConcreteCuM: number;
+  cementBags: number;
+  sandBags: number;
+  gravelBags: number;
+  rebarM02Count: number;
+  rebarM26Count: number;
+  phenolicBoards: number;
+  anchorSummary: string;
+  hasCustomDimensions: boolean;
+}
+
+function finitePositive(val: unknown, fallback: number): number {
+  return typeof val === 'number' && Number.isFinite(val) && val > 0 ? val : fallback;
+}
+
+function finiteNonNegative(val: unknown, fallback: number): number {
+  return typeof val === 'number' && Number.isFinite(val) && val >= 0 ? val : fallback;
+}
+
+/** Formats dimension in meters using 1 decimal when clean (e.g. 2.0), 2 decimals otherwise (e.g. 2.25). */
+export function formatDimensionM(val: number): string {
+  return Math.abs(val * 10 - Math.round(val * 10)) < 1e-6
+    ? val.toFixed(1)
+    : val.toFixed(2);
+}
+
+/** Formats volume in m³ using 1 decimal when clean (e.g. 4.0), 2 decimals otherwise (e.g. 6.75). */
+export function formatConcreteCuM(val: number): string {
+  return Math.abs(val * 10 - Math.round(val * 10)) < 1e-6
+    ? val.toFixed(1)
+    : val.toFixed(2);
+}
+
+/**
+ * Resolves a foundation's effective dimensions, excavation depth, dynamic concrete
+ * pour volumes (L × W × Depth), and scaled concrete material estimates from either
+ * per-foundation overrides or baseline engineering defaults.
+ */
+export function resolveFoundationSpec(
+  foundationType: FoundationType,
+  custom?: FoundationCustomSpecs
+): ResolvedFoundationSpec {
+  const defaults = FOUNDATION_SPECS[foundationType];
+  const lengthM = finitePositive(custom?.lengthM, defaults.lengthM);
+  const widthM = finitePositive(custom?.widthM, defaults.widthM);
+  const thicknessM = finitePositive(custom?.thicknessM, defaults.thicknessM);
+  const overburdenDepthM = finiteNonNegative(
+    custom?.overburdenDepthM,
+    defaults.overburdenDepthM
+  );
+  const leanThicknessM = finiteNonNegative(
+    custom?.leanThicknessM,
+    defaults.leanThicknessM
+  );
+  const concreteCoverMm = finiteNonNegative(custom?.concreteCoverMm, 50);
+
+  const structuralDimsChanged =
+    Math.abs(lengthM - defaults.lengthM) > 1e-6 ||
+    Math.abs(widthM - defaults.widthM) > 1e-6 ||
+    Math.abs(thicknessM - defaults.thicknessM) > 1e-6;
+  const leanDimsChanged =
+    Math.abs(lengthM - defaults.lengthM) > 1e-6 ||
+    Math.abs(widthM - defaults.widthM) > 1e-6 ||
+    Math.abs(leanThicknessM - defaults.leanThicknessM) > 1e-6;
+  const hasCustomDimensions =
+    structuralDimsChanged ||
+    leanDimsChanged ||
+    Math.abs(overburdenDepthM - defaults.overburdenDepthM) > 1e-6;
+
+  const structuralConcreteCuM = structuralDimsChanged
+    ? Number((lengthM * widthM * thicknessM).toFixed(2))
+    : defaults.structuralConcreteCuM;
+  const leanConcreteCuM = leanDimsChanged
+    ? Number((lengthM * widthM * leanThicknessM).toFixed(2))
+    : defaults.leanConcreteCuM;
+  const totalConcreteCuM = Number(
+    (structuralConcreteCuM + leanConcreteCuM).toFixed(2)
+  );
+  const totalExcavationDepthM = Number(
+    (overburdenDepthM + thicknessM + leanThicknessM).toFixed(3)
+  );
+
+  const volRatio =
+    defaults.structuralConcreteCuM > 0
+      ? structuralConcreteCuM / defaults.structuralConcreteCuM
+      : 1;
+
+  const cementBags =
+    custom?.cementBags !== undefined
+      ? Math.round(finiteNonNegative(custom.cementBags, defaults.cementBags))
+      : structuralDimsChanged
+        ? Math.round(defaults.cementBags * volRatio)
+        : defaults.cementBags;
+  const sandBags =
+    custom?.sandBags !== undefined
+      ? Math.round(finiteNonNegative(custom.sandBags, defaults.sandBags))
+      : structuralDimsChanged
+        ? Math.round(defaults.sandBags * volRatio)
+        : defaults.sandBags;
+  const gravelBags =
+    custom?.gravelBags !== undefined
+      ? Math.round(finiteNonNegative(custom.gravelBags, defaults.gravelBags))
+      : structuralDimsChanged
+        ? Math.round(defaults.gravelBags * volRatio)
+        : defaults.gravelBags;
+
+  const rebarM02Count = Math.round(
+    finiteNonNegative(custom?.rebarM02Count, defaults.rebarM02Count)
+  );
+  const rebarM26Count = Math.round(
+    finiteNonNegative(custom?.rebarM26Count, defaults.rebarM26Count)
+  );
+  const phenolicBoards = Math.round(
+    finiteNonNegative(
+      custom?.phenolicBoards,
+      FOUNDATION_PHENOLIC_BOARDS[foundationType]
+    )
+  );
+
+  return {
+    type: foundationType,
+    label: defaults.label,
+    lengthM,
+    widthM,
+    thicknessM,
+    overburdenDepthM,
+    leanThicknessM,
+    concreteCoverMm,
+    totalExcavationDepthM,
+    structuralConcreteCuM,
+    leanConcreteCuM,
+    totalConcreteCuM,
+    cementBags,
+    sandBags,
+    gravelBags,
+    rebarM02Count,
+    rebarM26Count,
+    phenolicBoards,
+    anchorSummary: custom?.towerAccessories?.trim() || defaults.anchorSummary,
+    hasCustomDimensions,
+  };
+}
 
 export function emptyChecklist(): FoundationStageChecklist {
   return {
@@ -670,6 +865,9 @@ export function createSampleMast2Project(): MastProjectState {
     contractor: 'GSL Utility Builders',
     towerHeightM: 120,
     lastUpdated: '2026-11-13',
+    reportDetails: {
+      logos: createDefaultReportLogos(),
+    },
     foundations,
     schedule,
     inventory: createInitialInventory(),
@@ -890,6 +1088,9 @@ export function createCleanBaselineProject(): MastProjectState {
     contractor: 'GSL Utility Builders',
     towerHeightM: 120,
     lastUpdated: new Date().toISOString().slice(0, 10),
+    reportDetails: {
+      logos: createDefaultReportLogos(),
+    },
     foundations: createInitialFoundations(),
     schedule: createInitialSchedule(),
     inventory: createInitialInventory(),

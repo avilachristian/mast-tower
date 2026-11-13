@@ -1,9 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
 import type { MastProjectState } from '@/entities/project/types';
 import type { MastSelectionTarget } from '@/shared/state/uiStore';
-import { ReportToolbarActions, usePrintPageSetup } from '@/widgets/report/PrintPageControls';
+import { PrintModalHeader, usePrintPageSetup } from '@/widgets/report/PrintPageControls';
 import { VerticalMastInspectionSheet } from './VerticalMastInspectionSheet';
 
 export function VerticalMastInspectionPrintModal({
@@ -48,27 +47,13 @@ export function VerticalMastInspectionPrintModal({
         className={`report-modal-dialog ${dialogMaxWidthClass} mx-auto bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden print:max-w-none print:rounded-none print:shadow-none print:border-none`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="no-print print:hidden sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200 text-slate-900">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">
-              Tower &amp; Guying QA/QC Inspection Report — {target.id}
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              {project.reportDetails?.projectName?.trim() || project.projectName} · Print or Save as PDF
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ReportToolbarActions targetRef={sheetRef} documentTitle={docTitle} />
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close report"
-              className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+        <PrintModalHeader
+          title={`Tower & Guying QA/QC Inspection Report — ${target.id}`}
+          subtitle={`${project.reportDetails?.projectName?.trim() || project.projectName} · Print or Save as PDF`}
+          targetRef={sheetRef}
+          documentTitle={docTitle}
+          onClose={onClose}
+        />
 
         <div className="report-modal-preview-frame overflow-x-auto bg-slate-100/75 p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">
           <div

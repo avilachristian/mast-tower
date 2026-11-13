@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Copy, X } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import {
   computeDailyLogMaterialRemaining,
   formatDailyLogPlainText,
@@ -17,7 +17,7 @@ import { buildVerticalMastOverviewData } from '@/entities/project/verticalMastCa
 import type { MastSelectionTarget } from '@/shared/state/uiStore';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
 import { VerticalMastElevation2D } from '@/widgets/mast-tower/VerticalMastElevation2D';
-import { ReportToolbarActions, usePrintPageSetup } from '@/widgets/report/PrintPageControls';
+import { PrintModalHeader, usePrintPageSetup } from '@/widgets/report/PrintPageControls';
 import {
   ReportLetterhead,
   ReportSignoffFooter,
@@ -105,14 +105,14 @@ export function DailyLogPrintModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar (hidden when printing) */}
-        <div className="no-print print:hidden flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200 text-slate-900">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold text-slate-800">Daily Construction Log</span>
-            {project.dailyLogs.length > 0 && (
+        <PrintModalHeader
+          title="Daily Construction Log"
+          titleExtra={
+            project.dailyLogs.length > 0 ? (
               <select
                 value={log.id}
                 onChange={(e) => onSelectLog(e.target.value)}
-                className="w-full sm:w-auto max-w-full min-w-0 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
+                className="w-full sm:w-auto max-w-full min-w-0 min-h-10 sm:min-h-8 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
               >
                 {project.dailyLogs.map((entry) => (
                   <option key={entry.id} value={entry.id}>
@@ -120,29 +120,22 @@ export function DailyLogPrintModal({
                   </option>
                 ))}
               </select>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
+            ) : undefined
+          }
+          extraActions={
             <button
               type="button"
               onClick={handleCopyText}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold cursor-pointer"
+              className="inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-8 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-200/70 border border-slate-300 text-slate-700 text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
             >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-              {copied ? 'Copied' : 'Copy Text'}
+              {copied ? <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <Copy className="w-3.5 h-3.5 shrink-0" />}
+              <span>{copied ? 'Copied' : 'Copy Text'}</span>
             </button>
-            <ReportToolbarActions targetRef={sheetRef} documentTitle={reportDocTitle} />
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close daily log print preview"
-              className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+          }
+          targetRef={sheetRef}
+          documentTitle={reportDocTitle}
+          onClose={onClose}
+        />
 
         {/* Printable Sheet */}
         <div className="report-modal-preview-frame overflow-x-auto bg-slate-100/75 p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">

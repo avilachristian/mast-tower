@@ -3,6 +3,7 @@ import {
   computeSmartPdfPageBreaks,
   getPdfCaptureWidthPx,
   getPdfPageDimensionsMm,
+  normalizePdfText,
   sanitizePdfFilename,
 } from '@/shared/print/pdfGenerator';
 import { resolveReportDetails } from '@/widgets/report/ReportLetterhead';
@@ -37,6 +38,7 @@ import {
   createSampleMast2Project,
   deriveStatusFromChecklist,
   emptyChecklist,
+  resolveFoundationSpec,
 } from '@/entities/project/mast2Baseline';
 import {
   buildSectionActivityReportData,
@@ -51,11 +53,10 @@ import {
   createSampleVerticalMastProject,
   getSectionGuyChecklistItems,
 } from '@/entities/project/verticalMastBaseline';
-import { useUiStore } from '@/shared/state/uiStore';
-import {
-  PRINT_PAPER_OPTIONS,
-  getPrintDialogMaxWidthClass,
-} from '@/widgets/report/PrintPageControls';
+import { shouldOpenLauncherOnStartup, useUiStore } from '@/shared/state/uiStore';
+import { DEFAULT_REPORT_LOGOS, resolveReportLogos } from '@/shared/assets/defaultLogos';
+import { getMastElevationGeometry } from '@/widgets/mast-tower/VerticalMastElevation2D';
+import { applyPrintPageStyle } from '@/widgets/report/ReportLetterhead';
 import { useProjectStore } from '@/shared/state/projectStore';
 import {
   computeCalloutBoxWidth,
@@ -208,14 +209,14 @@ describe('Workspace UI & Foundation Activity Report', () => {
     expect(report.tasks).toHaveLength(8);
     expect(report.tasks[0].done).toBe(false); // Starts clean without pre-filled excavation default
     expect(report.tasks.map((t) => t.description)).toEqual([
-      'Excavation',
-      'Excavation Inspection and Retrofit',
-      'Lean Concrete Pour',
-      'Rebar, Ground Anchor Rod, and Formworks Installation',
-      'Rebar, Ground Anchor Rod, and Formworks Inspection',
-      'Concrete Pouring',
-      'Curing',
-      'Backfill',
+      'Excavated',
+      'Excavation Inspected & Retrofitted',
+      'Lean Concrete Poured',
+      'Rebar, Ground Anchor Rod, and Formworks Installed',
+      'Rebar, Ground Anchor Rod, and Formworks Inspected',
+      'Concrete Poured',
+      'Cured',
+      'Backfilled',
     ]);
     const pf0Report = buildFoundationActivityReportData(
       project,
@@ -223,10 +224,10 @@ describe('Workspace UI & Foundation Activity Report', () => {
       project.foundations.find((f) => f.id === 'PF-0')!
     );
     expect(pf0Report.tasks[3].description).toBe(
-      'Rebar, Bolt Frame, and Formworks Installation'
+      'Rebar, Bolt Frame, and Formworks Installed'
     );
     expect(pf0Report.tasks[4].description).toBe(
-      'Rebar, Bolt Frame, and Formworks Inspection'
+      'Rebar, Bolt Frame, and Formworks Inspected'
     );
     expect(pf0Report.rebarDetails[0]).toBe('Main Rebar (M_02): 40 pcs');
     expect(pf0Report.rebarDetails[1]).toBe('Chair Bar (M_26): 9 pcs');
@@ -943,31 +944,17 @@ describe('Workspace UI & Foundation Activity Report', () => {
     useProjectStore.getState().deleteProject(mastId);
   });
 
-  it('supports selectable paper sizes and page orientations in print preferences', () => {
-    expect(PRINT_PAPER_OPTIONS.map((o) => o.id)).toEqual(['A4', 'A3', 'letter', 'legal']);
-
+  it('preserves browser-controlled print orientation without injecting @page locks', () => {
     const store = useUiStore.getState();
     expect(store.printPaperSize).toBe('A4');
     expect(store.printOrientation).toBe('portrait');
-    expect(getPrintDialogMaxWidthClass('A4', 'portrait')).toBe('max-w-5xl');
 
-    store.setPrintPaperSize('A3');
-    store.setPrintOrientation('landscape');
-    expect(useUiStore.getState().printPaperSize).toBe('A3');
-    expect(useUiStore.getState().printOrientation).toBe('landscape');
-    expect(getPrintDialogMaxWidthClass('A3', 'landscape')).toBe('max-w-[1360px]');
-    expect(getPrintDialogMaxWidthClass('letter', 'landscape')).toBe('max-w-[1200px]');
-    expect(getPrintDialogMaxWidthClass('legal', 'landscape')).toBe('max-w-[1360px]');
-    expect(getPrintDialogMaxWidthClass('A3', 'portrait')).toBe('max-w-[1140px]');
+    expect(() => applyPrintPageStyle()).not.toThrow();
 
     expect(getPdfCaptureWidthPx('A4', 'portrait')).toBe(900);
     expect(getPdfCaptureWidthPx('A3', 'portrait')).toBe(1060);
     expect(getPdfCaptureWidthPx('letter', 'landscape')).toBe(1120);
     expect(getPdfCaptureWidthPx('A3', 'landscape')).toBe(1280);
-
-    // Restore defaults
-    store.setPrintPaperSize('A4');
-    store.setPrintOrientation('portrait');
   });
 
   it('integrates attached guy cable checklist steps into tower sections', () => {
@@ -999,7 +986,8 @@ describe('Workspace UI & Foundation Activity Report', () => {
     expect(s03ReportBefore.tasks).toHaveLength(5);
     expect(s03ReportBefore.tasks.every((t) => !t.done)).toBe(true);
 
-    // Toggle Sector I & II installed
+    // Erect S01-S03 bottom-up before installing L01 (attached to S03), then toggle Sector I & II installed
+    useProjectStore.getState().batchUpdateTowerSectionRange(1, 3, 'plumbed_verified');
     useProjectStore.getState().toggleGuyLayerSectorInstalled('L01', 'I');
     useProjectStore.getState().toggleGuyLayerSectorInstalled('L01', 'II');
     let updatedL01 = useProjectStore
@@ -1072,7 +1060,7 @@ describe('Workspace UI & Foundation Activity Report', () => {
     expect(state.projectType).toBe('vertical_mast');
     expect(state.foundations.find((f) => f.id === 'PF-0')?.status).toBe('completed');
 
-    useProjectStore.getState().updateTowerSectionStatus('S01', 'plumbed_verified');
+    useProjectStore.getState().batchUpdateTowerSectionRange(1, 3, 'plumbed_verified');
     useProjectStore.getState().toggleGuyLayerSectorInstalled('L01', 'I');
 
     // Toggle back to Foundation Phase and confirm both foundation and vertical mast progress remain intact
@@ -1115,6 +1103,11 @@ describe('Workspace UI & Foundation Activity Report', () => {
       { startPx: 0, endPx: 960 },
       { startPx: 960, endPx: 1800 },
     ]);
+
+    // Vector PDF text normalization maps unsupported engineering/UI symbols cleanly
+    expect(normalizePdfText('Tension ≥ 45 kN & ≤ 55 kN ✓ · 20 × 20 m — Ø11.4mm')).toBe(
+      'Tension >= 45 kN & <= 55 kN [OK] · 20 × 20 m — Ø11.4mm'
+    );
   });
 
   it('starts clean projects without contractor boilerplate notes and defaults vertical mast daily logs to tower parts', () => {
@@ -1186,6 +1179,330 @@ describe('Workspace UI & Foundation Activity Report', () => {
     expect(nextMastMaterials.some((m) => m.name === 'Cement')).toBe(false);
     expect(nextMastMaterials.some((m) => m.name === 'Modular Tower Section (3.0m)')).toBe(true);
     expect(nextMastMaterials.find((m) => m.name === 'Sand')?.onSiteQty).toBe(3);
+  });
+
+  it('shows project launcher only on very first launch before any workspace entry', () => {
+    const emptyStorage = { getItem: () => null };
+    const visitedStorage = {
+      getItem: (k: string) => (k === 'mast2-launcher-completed-v1' ? '1' : null),
+    };
+    const savedWorkspaceStorage = {
+      getItem: (k: string) =>
+        k === 'mast2-tower-projects-workspace-v1' ? '{"activeProjectId":"p1","projects":[]}' : null,
+    };
+    const legacyStorage = {
+      getItem: (k: string) => (k === 'mast2-tower-report-generator-v1' ? '{}' : null),
+    };
+
+    expect(shouldOpenLauncherOnStartup(null)).toBe(false);
+    expect(shouldOpenLauncherOnStartup(emptyStorage)).toBe(true);
+    expect(shouldOpenLauncherOnStartup(visitedStorage)).toBe(false);
+    expect(shouldOpenLauncherOnStartup(savedWorkspaceStorage)).toBe(false);
+    expect(shouldOpenLauncherOnStartup(legacyStorage)).toBe(false);
+  });
+
+  it('scales vertical mast elevation viewBox cleanly for interactive selection', () => {
+    expect(getMastElevationGeometry('all', 1)).toEqual({
+      yScale: 3.6,
+      yGround: 528,
+      viewBox: '0 0 760 595',
+    });
+    expect(getMastElevationGeometry('upper', 1).viewBox).toBe('0 0 760 335');
+    expect(getMastElevationGeometry('lower', 1).viewBox).toBe('0 270 760 325');
+
+    const scaled2x = getMastElevationGeometry('all', 2);
+    expect(scaled2x.yScale).toBe(7.2);
+    expect(scaled2x.yGround).toBe(992);
+    expect(scaled2x.viewBox).toBe('0 0 760 1059');
+
+    const store = useUiStore.getState();
+    expect(store.mastVerticalScale).toBe(1);
+    store.setMastVerticalScale(2);
+    expect(useUiStore.getState().mastVerticalScale).toBe(2);
+    store.setMastVerticalScale(1);
+  });
+
+  it('provides GSL (left), PGPC (center), and GEDI (right) as default report letterhead logos', () => {
+    expect(DEFAULT_REPORT_LOGOS.left.dataUrl).toBeTruthy();
+    expect(DEFAULT_REPORT_LOGOS.center.dataUrl).toBeTruthy();
+    expect(DEFAULT_REPORT_LOGOS.right.dataUrl).toBeTruthy();
+
+    for (const factory of [
+      createSampleMast2Project,
+      createCleanBaselineProject,
+      createCleanVerticalMastProject,
+      createSampleVerticalMastProject,
+    ]) {
+      const project = factory();
+      expect(project.reportDetails?.logos?.left?.dataUrl).toBe(DEFAULT_REPORT_LOGOS.left.dataUrl);
+      expect(project.reportDetails?.logos?.center?.dataUrl).toBe(
+        DEFAULT_REPORT_LOGOS.center.dataUrl
+      );
+      expect(project.reportDetails?.logos?.right?.dataUrl).toBe(
+        DEFAULT_REPORT_LOGOS.right.dataUrl
+      );
+    }
+
+    // Legacy / uninitialized projects resolve to default logos too
+    const legacyResolved = resolveReportDetails({
+      projectName: 'Legacy Project',
+      location: 'Site',
+      preparedBy: 'Engr.',
+      contractor: 'Contractor',
+      lastUpdated: '2026-11-13',
+    });
+    expect(legacyResolved.logos).toEqual({
+      left: DEFAULT_REPORT_LOGOS.left,
+      center: DEFAULT_REPORT_LOGOS.center,
+      right: DEFAULT_REPORT_LOGOS.right,
+    });
+
+    // Explicitly cleared slots stay cleared while remaining slots keep defaults/overrides
+    const partialCleared = resolveReportLogos({
+      left: { dataUrl: '', caption: '' },
+      right: { dataUrl: 'data:image/png;base64,CUSTOM', caption: 'Custom' },
+    });
+    expect(partialCleared.left?.dataUrl).toBe('');
+    expect(partialCleared.center?.dataUrl).toBe(DEFAULT_REPORT_LOGOS.center.dataUrl);
+    expect(partialCleared.right?.dataUrl).toBe('data:image/png;base64,CUSTOM');
+  });
+
+  it('enforces bottom-up tower section erection order and populates message modal state on violation', () => {
+    const testId = useProjectStore.getState().createProject({
+      projectType: 'vertical_mast',
+      projectName: 'Bottom-Up Order Test',
+      location: 'Mt. Labo',
+      contractor: 'GSL',
+      preparedBy: 'Engr.',
+      template: 'clean',
+    });
+
+    useUiStore.getState().setMastOrderViolation(null);
+
+    // 1. Trying to mark S40 completed when S01..S39 are pending is blocked
+    const s40Violation = useProjectStore
+      .getState()
+      .updateTowerSectionStatus('S40', 'plumbed_verified');
+    expect(s40Violation).not.toBeNull();
+    expect(s40Violation?.kind).toBe('section_bottom_up');
+    expect(s40Violation?.blockingSectionId).toBe('S01');
+    expect(useUiStore.getState().mastOrderViolation?.blockingSectionId).toBe('S01');
+    expect(
+      useProjectStore
+        .getState()
+        .project.verticalMast?.sections.find((s) => s.id === 'S40')?.status
+    ).toBe('not_started');
+
+    // 2. Trying to toggle S02 checklist item before S01 is completed is blocked
+    const s02ChecklistViolation = useProjectStore
+      .getState()
+      .toggleTowerSectionChecklistItem('S02', 'plumbedAndInspected');
+    expect(s02ChecklistViolation?.kind).toBe('section_bottom_up');
+    expect(s02ChecklistViolation?.blockingSectionId).toBe('S01');
+
+    // 3. Batch range S10..S20 fails when S01..S09 are pending
+    const rangeViolation = useProjectStore
+      .getState()
+      .batchUpdateTowerSectionRange(10, 20, 'plumbed_verified');
+    expect(rangeViolation?.kind).toBe('section_bottom_up');
+    expect(rangeViolation?.blockingSectionId).toBe('S01');
+
+    // 4. Cannot install/tension guy layer L01 (on S03) before S01..S03 are completed
+    const guyViolation = useProjectStore
+      .getState()
+      .toggleGuyLayerSectorInstalled('L01', 'I');
+    expect(guyViolation?.kind).toBe('guy_requires_section');
+    expect(guyViolation?.blockingSectionId).toBe('S01');
+
+    // 5. Erecting S01, then S02, then S03 bottom-up succeeds cleanly
+    useUiStore.getState().setMastOrderViolation(null);
+    expect(
+      useProjectStore.getState().updateTowerSectionStatus('S01', 'plumbed_verified')
+    ).toBeNull();
+    expect(
+      useProjectStore.getState().updateTowerSectionStatus('S02', 'plumbed_verified')
+    ).toBeNull();
+    expect(
+      useProjectStore.getState().updateTowerSectionStatus('S03', 'plumbed_verified')
+    ).toBeNull();
+    expect(useUiStore.getState().mastOrderViolation).toBeNull();
+
+    // 6. Now L01 (on S03) can be installed cleanly
+    expect(
+      useProjectStore.getState().toggleGuyLayerSectorInstalled('L01', 'I')
+    ).toBeNull();
+
+    // 7. Cannot revert S01 while S02–S03 above it are still installed
+    const revertS01Violation = useProjectStore
+      .getState()
+      .updateTowerSectionStatus('S01', 'not_started');
+    expect(revertS01Violation?.kind).toBe('section_top_down_revert');
+    expect(revertS01Violation?.blockingSectionId).toBe('S03');
+
+    // 8. Cannot revert S03 while attached L01 still has installed/tensioned guy cables
+    const revertS03WithGuyViolation = useProjectStore
+      .getState()
+      .updateTowerSectionStatus('S03', 'not_started');
+    expect(revertS03WithGuyViolation?.kind).toBe('section_has_active_guys');
+
+    // Clearing L01 allows top-down revert of S03 -> S02 -> S01
+    expect(
+      useProjectStore.getState().updateGuyLayerStatus('L01', 'not_started')
+    ).toBeNull();
+    expect(
+      useProjectStore.getState().batchUpdateTowerSectionRange(1, 3, 'not_started')
+    ).toBeNull();
+
+    useUiStore.getState().setMastOrderViolation(null);
+    useProjectStore.getState().deleteProject(testId);
+  });
+
+  it('enforces sequential 1->8 order on foundation activity checklist and populates message modal state on violation', () => {
+    const testId = useProjectStore.getState().createProject({
+      projectType: 'foundation',
+      projectName: 'Foundation Checklist Order Test',
+      location: 'Mt. Labo',
+      contractor: 'GSL',
+      preparedBy: 'Engr.',
+      template: 'clean',
+    });
+
+    useUiStore.getState().setFoundationOrderViolation(null);
+
+    // 1. Checking step 6 (Concrete Poured) or step 2 before step 1 is blocked
+    const skipToPourViolation = useProjectStore
+      .getState()
+      .toggleFoundationChecklistItem('I-A1', 'concretePoured');
+    expect(skipToPourViolation?.kind).toBe('checklist_order_forward');
+    expect(skipToPourViolation?.requiredStepKey).toBe('excavationVerified');
+    expect(useUiStore.getState().foundationOrderViolation?.foundationId).toBe('I-A1');
+    expect(
+      useProjectStore
+        .getState()
+        .project.foundations.find((f) => f.id === 'I-A1')?.checklist.concretePoured
+    ).toBe(false);
+
+    // 2. Checking steps 1..8 sequentially works cleanly
+    useUiStore.getState().setFoundationOrderViolation(null);
+    const orderedKeys = [
+      'excavationVerified',
+      'excavationInspectionDone',
+      'leanConcretePoured',
+      'rebarCageInstalled',
+      'formworkBraced',
+      'concretePoured',
+      'curingStarted',
+      'curingAndBackfillDone',
+    ] as const;
+
+    for (const key of orderedKeys) {
+      expect(
+        useProjectStore.getState().toggleFoundationChecklistItem('I-A1', key)
+      ).toBeNull();
+    }
+    expect(
+      useProjectStore
+        .getState()
+        .project.foundations.find((f) => f.id === 'I-A1')?.status
+    ).toBe('completed');
+    expect(useUiStore.getState().foundationOrderViolation).toBeNull();
+
+    // 3. Trying to uncheck an earlier step (e.g. step 3) while later steps remain checked is blocked
+    const reverseSkipViolation = useProjectStore
+      .getState()
+      .toggleFoundationChecklistItem('I-A1', 'leanConcretePoured');
+    expect(reverseSkipViolation?.kind).toBe('checklist_order_reverse');
+    expect(reverseSkipViolation?.requiredStepKey).toBe('curingAndBackfillDone');
+
+    // 4. Unchecking in reverse order (8 -> 7) works cleanly
+    expect(
+      useProjectStore
+        .getState()
+        .toggleFoundationChecklistItem('I-A1', 'curingAndBackfillDone')
+    ).toBeNull();
+    expect(
+      useProjectStore
+        .getState()
+        .project.foundations.find((f) => f.id === 'I-A1')?.status
+    ).toBe('curing');
+
+    useUiStore.getState().setFoundationOrderViolation(null);
+    useProjectStore.getState().deleteProject(testId);
+  });
+
+  it('recalculates foundation concrete pour volumes, metrics, and specs dynamically from custom dimensions', () => {
+    const testId = useProjectStore.getState().createProject({
+      projectType: 'foundation',
+      projectName: 'Dynamic Dimensions Test',
+      location: 'Site D',
+      contractor: 'GSL',
+      preparedBy: 'Engr.',
+      template: 'clean',
+    });
+
+    // Baseline defaults remain exact (4.20 for PF-0, 51.96 m³ total across 13 pads)
+    const baselineMetrics = computeProjectMetrics(useProjectStore.getState().project);
+    expect(baselineMetrics.totalConcreteCuM).toBe(51.96);
+
+    // Customize PF-0: 2.5m x 2.5m x 1.2m pad, 0.2m overburden, 0.05m lean bedding, 75mm cover, 48 main bars
+    // -> Structural = 2.5 * 2.5 * 1.2 = 7.50 m³, Lean = 2.5 * 2.5 * 0.05 = 0.31 m³, Total = 7.81 m³
+    // -> Total depth = 0.20 + 1.20 + 0.05 = 1.45 m
+    useProjectStore.getState().updateFoundationCustomSpecs('PF-0', {
+      lengthM: 2.5,
+      widthM: 2.5,
+      thicknessM: 1.2,
+      overburdenDepthM: 0.2,
+      leanThicknessM: 0.05,
+      concreteCoverMm: 75,
+      rebarM02Count: 48,
+    });
+
+    const updatedProject = useProjectStore.getState().project;
+    const updatedPf0 = updatedProject.foundations.find((f) => f.id === 'PF-0')!;
+    const resolvedPf0 = resolveFoundationSpec(updatedPf0.type, updatedPf0.customSpecs);
+    expect(resolvedPf0.structuralConcreteCuM).toBe(7.5);
+    expect(resolvedPf0.leanConcreteCuM).toBe(0.31);
+    expect(resolvedPf0.totalConcreteCuM).toBe(7.81);
+    expect(resolvedPf0.totalExcavationDepthM).toBe(1.45);
+    expect(resolvedPf0.cementBags).toBe(94); // 50 * (7.5 / 4.0) = 93.75 -> 94 bags
+
+    // Project total concrete increases by (7.81 - 4.20) = +3.61 => 55.57 m³
+    const dynamicMetrics = computeProjectMetrics(updatedProject);
+    expect(dynamicMetrics.totalConcreteCuM).toBe(55.57);
+
+    // Mark PF-0 as poured -> pouredConcreteCuM reflects dynamic 7.81 m³
+    useProjectStore.getState().updateFoundationStatus('PF-0', 'concreted');
+    const pouredProject = useProjectStore.getState().project;
+    const pouredMetrics = computeProjectMetrics(pouredProject);
+    expect(pouredMetrics.pouredConcreteCuM).toBe(7.81);
+
+    // Activity & Inspection & Overall Status reports all reflect dynamic specs & volumes
+    const pouredPf0 = pouredProject.foundations.find((f) => f.id === 'PF-0')!;
+    const activityReport = buildFoundationActivityReportData(
+      pouredProject,
+      pouredMetrics,
+      pouredPf0
+    );
+    expect(activityReport.specDetails.size).toBe('2.5 × 2.5 × 1.2 m');
+    expect(activityReport.specDetails.foundationVolume).toBe('7.5 m³ (Class AA)');
+    expect(activityReport.specDetails.leanConcreteVolume).toBe('0.31 m³ (50 mm)');
+    expect(activityReport.specDetails.excavationDepth).toBe(
+      '1.45 m (1,450 mm from N.G.L.)'
+    );
+    expect(activityReport.specDetails.cover).toBe('75 mm');
+    expect(activityReport.materials.find((m) => m.key === 'main_rebar')?.required).toBe(48);
+    expect(activityReport.inspections[0].planMeasurement).toContain('2500 × 2500 mm pad');
+
+    const overview = buildOverallProjectStatusReportData(pouredProject);
+    const pf0OverviewRow = overview.foundationRows.find((r) => r.id === 'PF-0')!;
+    expect(pf0OverviewRow.sizeLabel).toBe('2.5 × 2.5 × 1.2 m');
+    expect(pf0OverviewRow.totalVolumeCuM).toBe(7.81);
+
+    // Resetting restores baseline defaults cleanly
+    useProjectStore.getState().resetFoundationCustomSpecs('PF-0');
+    expect(computeProjectMetrics(useProjectStore.getState().project).totalConcreteCuM).toBe(51.96);
+
+    useProjectStore.getState().deleteProject(testId);
   });
 });
 

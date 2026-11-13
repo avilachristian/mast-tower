@@ -1,11 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
 import { FOUNDATION_SPECS } from '@/entities/project/mast2Baseline';
 import type { MastProjectState } from '@/entities/project/types';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { ActivityReportSheet } from './ActivityReportSheet';
-import { ReportToolbarActions, usePrintPageSetup } from './PrintPageControls';
+import { PrintModalHeader, usePrintPageSetup } from './PrintPageControls';
 
 export function PrintableReportModal({
   project,
@@ -47,16 +46,14 @@ export function PrintableReportModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar (hidden when printing) */}
-        <div className="no-print print:hidden flex flex-wrap items-center justify-between gap-2 px-4 py-3 bg-slate-50 border-b border-slate-200 text-slate-900">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold text-slate-800">
-              Current Foundation Activity Report
-            </span>
-            {selectedFoundation && (
+        <PrintModalHeader
+          title="Current Foundation Activity Report"
+          titleExtra={
+            selectedFoundation ? (
               <select
                 value={selectedFoundation.id}
                 onChange={(e) => selectFoundation(e.target.value)}
-                className="w-full sm:w-auto max-w-full min-w-0 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
+                className="w-full sm:w-auto max-w-full min-w-0 min-h-10 sm:min-h-8 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
               >
                 {project.foundations.map((f) => (
                   <option key={f.id} value={f.id}>
@@ -64,21 +61,12 @@ export function PrintableReportModal({
                   </option>
                 ))}
               </select>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <ReportToolbarActions targetRef={sheetRef} documentTitle={reportTitle} />
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close report"
-              className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+            ) : undefined
+          }
+          targetRef={sheetRef}
+          documentTitle={reportTitle}
+          onClose={onClose}
+        />
 
         <div className="report-modal-preview-frame overflow-x-auto bg-slate-100/75 p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">
           <div

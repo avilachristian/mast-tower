@@ -1,5 +1,6 @@
 import { ImagePlus, Printer, RotateCcw, Trash2 } from 'lucide-react';
 import type { MastProjectState, ReportDetailsSpec } from '@/entities/project/types';
+import { createDefaultReportLogos, resolveReportLogos } from '@/shared/assets/defaultLogos';
 import { ReportLetterhead } from '@/widgets/report/ReportLetterhead';
 
 type LogoPosition = 'left' | 'center' | 'right';
@@ -66,6 +67,7 @@ export function ProjectReportDetailsPanel({
   onOpenReport?: () => void;
 }) {
   const details: ReportDetailsSpec = project.reportDetails ?? {};
+  const resolvedLogos = resolveReportLogos(details.logos);
 
   const update = (patch: Partial<ReportDetailsSpec>) => {
     onChange(patch);
@@ -76,30 +78,39 @@ export function ProjectReportDetailsPanel({
     const dataUrl = await readAndOptimizeLogoFile(file);
     update({
       logos: {
-        ...details.logos,
+        ...resolvedLogos,
         [slot]: {
           dataUrl,
-          caption: details.logos?.[slot]?.caption ?? '',
+          caption: resolvedLogos[slot]?.caption ?? '',
         },
       },
     });
   };
 
   const handleUpdateLogoCaption = (slot: LogoPosition, caption: string) => {
-    const current = details.logos?.[slot];
-    if (!current) return;
+    const current = resolvedLogos[slot];
+    if (!current?.dataUrl) return;
     update({
       logos: {
-        ...details.logos,
+        ...resolvedLogos,
         [slot]: { ...current, caption },
       },
     });
   };
 
   const handleRemoveLogo = (slot: LogoPosition) => {
-    const nextLogos = { ...details.logos };
-    delete nextLogos[slot];
-    update({ logos: nextLogos });
+    update({
+      logos: {
+        ...resolvedLogos,
+        [slot]: { dataUrl: '', caption: '' },
+      },
+    });
+  };
+
+  const handleResetDefaultLogos = () => {
+    update({
+      logos: createDefaultReportLogos(),
+    });
   };
 
   return (
@@ -115,28 +126,30 @@ export function ProjectReportDetailsPanel({
               Configure header logos, project metadata, and engineering signatories included across Activity, Inspection, and Daily Log PDF reports.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => update({ reportDate: getTodayIsoDate() })}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 cursor-pointer"
+              className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-2 sm:py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 cursor-pointer"
             >
-              <RotateCcw className="w-3.5 h-3.5" /> Set Today&apos;s Date
+              <RotateCcw className="w-4 h-4 sm:w-3.5 sm:h-3.5" /> Set Today&apos;s Date
             </button>
             {onOpenReport && (
               <button
                 type="button"
                 onClick={onOpenReport}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold cursor-pointer shadow-xs"
+                title="Preview / Print Report"
+                className="inline-flex items-center justify-center gap-1.5 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-3 py-2 sm:py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold cursor-pointer shadow-xs"
               >
-                <Printer className="w-3.5 h-3.5" /> Preview / Print Report
+                <Printer className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden sm:inline">Preview / Print Report</span>
               </button>
             )}
           </div>
         </div>
 
         {/* Live Letterhead Preview */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
+        <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs overflow-x-auto">
           <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-3">
             Live Report Header Preview
           </div>
@@ -162,23 +175,33 @@ export function ProjectReportDetailsPanel({
                 Upload company, client, consultant, or project stamps (PNG, JPG, WebP, SVG).
               </p>
             </div>
-            <label className="inline-flex items-center gap-2 text-xs text-slate-600">
-              <span className="font-medium">Logo Height:</span>
-              <input
-                type="range"
-                min={32}
-                max={96}
-                step={4}
-                value={details.logoHeightPx ?? 52}
-                onChange={(e) =>
-                  update({ logoHeightPx: parseInt(e.target.value, 10) || 52 })
-                }
-                className="w-24 accent-sky-600"
-              />
-              <span className="w-10 text-right font-mono text-[11px] font-semibold">
-                {details.logoHeightPx ?? 52}px
-              </span>
-            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleResetDefaultLogos}
+                className="inline-flex items-center gap-1.5 min-h-9 sm:min-h-0 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                title="Restore default GSL (Left), PGPC (Center), and GEDI (Right) logos"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Restore Default Logos
+              </button>
+              <label className="inline-flex items-center gap-2 text-xs text-slate-600">
+                <span className="font-medium">Logo Height:</span>
+                <input
+                  type="range"
+                  min={32}
+                  max={96}
+                  step={4}
+                  value={details.logoHeightPx ?? 52}
+                  onChange={(e) =>
+                    update({ logoHeightPx: parseInt(e.target.value, 10) || 52 })
+                  }
+                  className="w-24 accent-sky-600"
+                />
+                <span className="w-10 text-right font-mono text-[11px] font-semibold">
+                  {details.logoHeightPx ?? 52}px
+                </span>
+              </label>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -187,21 +210,21 @@ export function ProjectReportDetailsPanel({
                 {
                   slot: 'left',
                   title: 'Left Logo',
-                  hint: 'e.g. Engineering / Firm Logo',
+                  hint: 'Default: GSL Logo',
                 },
                 {
                   slot: 'center',
                   title: 'Center Logo',
-                  hint: 'e.g. Project Seal / Main Header',
+                  hint: 'Default: PGPC Logo',
                 },
                 {
                   slot: 'right',
                   title: 'Right Logo',
-                  hint: 'e.g. Client / Contractor Logo',
+                  hint: 'Default: GEDI Logo',
                 },
               ] as const
             ).map(({ slot, title, hint }) => {
-              const logo = details.logos?.[slot];
+              const logo = resolvedLogos[slot];
               return (
                 <div
                   key={slot}
@@ -217,9 +240,10 @@ export function ProjectReportDetailsPanel({
                         type="button"
                         onClick={() => handleRemoveLogo(slot)}
                         title={`Remove ${title}`}
-                        className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                        aria-label={`Remove ${title}`}
+                        className="h-9 w-9 sm:h-auto sm:w-auto inline-flex items-center justify-center p-1.5 sm:p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                       </button>
                     )}
                   </div>
@@ -233,9 +257,9 @@ export function ProjectReportDetailsPanel({
                       />
                     </div>
                   ) : (
-                    <label className="h-20 border-2 border-dashed border-slate-300 hover:border-sky-400 rounded bg-white flex flex-col items-center justify-center gap-1 cursor-pointer text-slate-500 hover:text-sky-600 transition-colors">
-                      <ImagePlus className="w-4 h-4" />
-                      <span className="text-[11px] font-medium">Upload {title}</span>
+                    <label className="h-24 sm:h-20 border-2 border-dashed border-slate-300 hover:border-sky-400 rounded bg-white flex flex-col items-center justify-center gap-1 cursor-pointer text-slate-500 hover:text-sky-600 transition-colors">
+                      <ImagePlus className="w-5 h-5 sm:w-4 sm:h-4" />
+                      <span className="text-xs sm:text-[11px] font-medium">Upload {title}</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -255,10 +279,10 @@ export function ProjectReportDetailsPanel({
                       value={logo?.caption ?? ''}
                       disabled={!logo?.dataUrl}
                       onChange={(e) => handleUpdateLogoCaption(slot, e.target.value)}
-                      className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                      className="flex-1 h-9 sm:h-7 px-2 text-xs sm:text-[11px] border border-slate-200 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
                     />
                     {logo?.dataUrl && (
-                      <label className="h-7 px-2 rounded border border-slate-300 bg-white hover:bg-slate-100 text-[10px] font-semibold text-slate-700 inline-flex items-center cursor-pointer">
+                      <label className="h-9 sm:h-7 px-3 sm:px-2 rounded border border-slate-300 bg-white hover:bg-slate-100 text-xs sm:text-[10px] font-semibold text-slate-700 inline-flex items-center cursor-pointer">
                         Replace
                         <input
                           type="file"

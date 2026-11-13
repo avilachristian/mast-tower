@@ -149,25 +149,25 @@ export function VerticalMastActivityView() {
             <button
               type="button"
               onClick={() => setViewMode('edit')}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-1.5 rounded-md cursor-pointer ${
                 viewMode === 'edit'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <ClipboardEdit className="w-3.5 h-3.5" />
+              <ClipboardEdit className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
               Edit Erection
             </button>
             <button
               type="button"
               onClick={() => setViewMode('preview')}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-1.5 rounded-md cursor-pointer ${
                 viewMode === 'preview'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Eye className="w-3.5 h-3.5" />
+              <Eye className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
               Report Preview
             </button>
           </div>
@@ -175,10 +175,12 @@ export function VerticalMastActivityView() {
           <button
             type="button"
             onClick={() => setReportOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+            title="Print / Save PDF"
+            aria-label="Print / Save PDF"
+            className="inline-flex items-center justify-center gap-1.5 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
           >
-            <Printer className="w-3.5 h-3.5" />
-            Print / PDF
+            <Printer className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+            <span className="hidden sm:inline">Print / PDF</span>
           </button>
         </div>
       </div>

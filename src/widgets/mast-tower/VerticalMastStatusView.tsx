@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  ArrowUpRight,
   CheckCircle2,
   ClipboardEdit,
   Eye,
@@ -185,36 +186,39 @@ export function VerticalMastStatusView() {
             <button
               type="button"
               onClick={() => setViewMode('dashboard')}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-1.5 rounded-md transition cursor-pointer ${
                 viewMode === 'dashboard'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <ClipboardEdit className="w-3.5 h-3.5" />
-              Status Dashboard
+              <ClipboardEdit className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+              <span className="sm:hidden">Dashboard</span>
+              <span className="hidden sm:inline">Status Dashboard</span>
             </button>
             <button
               type="button"
               onClick={() => setViewMode('preview')}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md transition cursor-pointer ${
+              className={`inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-1.5 rounded-md transition cursor-pointer ${
                 viewMode === 'preview'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Eye className="w-3.5 h-3.5" />
-              Report Preview
+              <Eye className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+              <span>Report Preview</span>
             </button>
           </div>
 
           <button
             type="button"
             onClick={() => setOverallReportOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+            title="Print / Save PDF"
+            aria-label="Print / Save PDF"
+            className="inline-flex items-center justify-center gap-1.5 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
           >
-            <Printer className="w-3.5 h-3.5" />
-            Print / PDF
+            <Printer className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+            <span className="hidden sm:inline">Print / PDF</span>
           </button>
         </div>
       </div>
@@ -548,7 +552,140 @@ export function VerticalMastStatusView() {
             </div>
 
             {tableTab === 'guy_layers' ? (
-              <div className="overflow-x-auto">
+              <>
+              {/* Mobile Guy Layer Cards */}
+              <div className="md:hidden divide-y divide-slate-200">
+                {vm.guyLayers.map((layer) => {
+                  const meta = GUY_LAYER_STATUS_META[layer.status];
+                  const isSelected =
+                    selectedMastTarget.kind === 'guy_layer' &&
+                    selectedMastTarget.id === layer.id;
+                  return (
+                    <div
+                      key={layer.id}
+                      className={`p-3.5 space-y-2.5 ${
+                        isSelected ? 'bg-sky-50/50' : ''
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-sm font-bold text-slate-900">
+                              {layer.id}
+                            </span>
+                            <span className="text-xs font-semibold text-sky-700">
+                              +{layer.elevationM.toFixed(1)} m
+                            </span>
+                            <span className="text-[11px] font-medium text-slate-500">
+                              · {layer.sectionId}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-600">
+                            {layer.anchorRingLabel} · {layer.cableSpec}
+                          </div>
+                        </div>
+
+                        <select
+                          aria-label={`Status for ${layer.id}`}
+                          value={layer.status}
+                          onChange={(e) =>
+                            updateGuyLayerStatus(
+                              layer.id,
+                              e.target.value as GuyLayerStatus
+                            )
+                          }
+                          className="h-9 px-2 rounded-lg border border-slate-200 bg-white text-[11px] font-semibold text-slate-800 shrink-0"
+                          style={{
+                            borderLeftWidth: 3,
+                            borderLeftColor: meta.color,
+                          }}
+                        >
+                          {(Object.keys(GUY_LAYER_STATUS_META) as GuyLayerStatus[]).map(
+                            (st) => (
+                              <option key={st} value={st}>
+                                {GUY_LAYER_STATUS_META[st].label}
+                              </option>
+                            )
+                          )}
+                        </select>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {(['I', 'II', 'III'] as const).map((secKey) => {
+                          const sec = layer.sectors[secKey];
+                          const badgeCls = sec.tensioned
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : sec.terminated
+                              ? 'bg-sky-100 text-sky-800 border-sky-300'
+                              : sec.pulled
+                                ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                : 'bg-slate-100 text-slate-500 border-slate-200';
+                          return (
+                            <span
+                              key={secKey}
+                              className={`px-2 py-0.5 rounded border text-[10px] font-bold ${badgeCls}`}
+                            >
+                              Sector {secKey}:{' '}
+                              {sec.tensioned
+                                ? `Tensioned${sec.tensionKn ? ` (${sec.tensionKn} kN)` : ''}`
+                                : sec.terminated
+                                  ? 'Terminated'
+                                  : sec.pulled
+                                    ? 'Pulled'
+                                    : 'Pending'}
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      {(layer.installedDate || layer.verifiedDate || layer.notes) && (
+                        <div className="rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-2 text-[11px] text-slate-600 space-y-0.5">
+                          {layer.installedDate && (
+                            <div className="font-medium text-slate-700">
+                              Installed: {formatDateWithWeekday(layer.installedDate)}
+                            </div>
+                          )}
+                          {layer.verifiedDate && (
+                            <div className="font-medium text-emerald-700">
+                              Verified: {formatDateWithWeekday(layer.verifiedDate)}
+                            </div>
+                          )}
+                          {layer.notes && (
+                            <div className="text-slate-500 line-clamp-2">{layer.notes}</div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenLayerEdit(layer)}
+                          className="flex-1 min-h-10 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                        >
+                          <Pencil className="w-4 h-4" />
+                          Edit Dates &amp; Notes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleJumpToActivity({
+                              kind: 'section',
+                              id: layer.sectionId,
+                            })
+                          }
+                          title={`Open ${layer.sectionId} details`}
+                          aria-label={`Open ${layer.sectionId} details`}
+                          className="h-10 w-10 inline-flex items-center justify-center rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 cursor-pointer shrink-0"
+                        >
+                          <ArrowUpRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                     <tr>
@@ -707,8 +844,132 @@ export function VerticalMastStatusView() {
                   </tbody>
                 </table>
               </div>
+              </>
             ) : (
-              <div className="overflow-x-auto max-h-[540px] overflow-y-auto">
+              <>
+              {/* Mobile Tower Section Cards */}
+              <div className="md:hidden divide-y divide-slate-200">
+                {vm.sections.map((sec) => {
+                  const meta = TOWER_SECTION_STATUS_META[sec.status];
+                  const isSelected =
+                    selectedMastTarget.kind === 'section' &&
+                    selectedMastTarget.id === sec.id;
+                  return (
+                    <div
+                      key={sec.id}
+                      className={`p-3.5 space-y-2.5 ${
+                        isSelected ? 'bg-sky-50/50' : ''
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-slate-900">
+                              {sec.id}
+                            </span>
+                            <span className="text-xs font-semibold text-sky-700">
+                              {sec.elevationFromM.toFixed(1)}–{sec.elevationToM.toFixed(1)} m
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-700">
+                              ({meta.pct}%)
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-600">
+                            {sec.legSpec} · {sec.boltSpec}
+                          </div>
+                        </div>
+
+                        <select
+                          aria-label={`Status for ${sec.id}`}
+                          value={sec.status}
+                          onChange={(e) =>
+                            updateTowerSectionStatus(
+                              sec.id,
+                              e.target.value as TowerSectionStatus
+                            )
+                          }
+                          className="h-9 px-2 rounded-lg border border-slate-200 bg-white text-[11px] font-semibold text-slate-800 shrink-0"
+                          style={{
+                            borderLeftWidth: 3,
+                            borderLeftColor: meta.color,
+                          }}
+                        >
+                          {SIMPLIFIED_TOWER_SECTION_STATUSES.map((st) => (
+                            <option key={st} value={st}>
+                              {TOWER_SECTION_STATUS_META[st].label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {(sec.hasPlatform || sec.hasLightningRod || sec.guyLayerIds.length > 0) && (
+                        <div className="flex flex-wrap gap-1">
+                          {sec.hasPlatform && (
+                            <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-200 text-[10px] font-semibold">
+                              Platform +7m
+                            </span>
+                          )}
+                          {sec.hasLightningRod && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                              Lightning Rod 6m
+                            </span>
+                          )}
+                          {sec.guyLayerIds.map((gid) => (
+                            <span
+                              key={gid}
+                              className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 border border-sky-200 text-[10px] font-semibold"
+                            >
+                              {gid}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {(sec.installedDate || sec.verticalityMm || sec.notes) && (
+                        <div className="rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-2 text-[11px] text-slate-600 space-y-0.5">
+                          {sec.installedDate && (
+                            <div className="font-medium text-slate-700">
+                              Erected: {formatDateWithWeekday(sec.installedDate)}
+                            </div>
+                          )}
+                          {sec.verticalityMm && (
+                            <div className="text-sky-700 font-medium">
+                              Verticality: {sec.verticalityMm}
+                            </div>
+                          )}
+                          {sec.notes && (
+                            <div className="text-slate-500 line-clamp-2">{sec.notes}</div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSectionEdit(sec)}
+                          className="flex-1 min-h-10 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                        >
+                          <Pencil className="w-4 h-4" />
+                          Edit Dates &amp; Verticality
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleJumpToActivity({ kind: 'section', id: sec.id })
+                          }
+                          title={`Open ${sec.id} details`}
+                          aria-label={`Open ${sec.id} details`}
+                          className="h-10 w-10 inline-flex items-center justify-center rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 cursor-pointer shrink-0"
+                        >
+                          <ArrowUpRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto max-h-[540px] overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 sticky top-0 z-10">
                     <tr>
@@ -851,6 +1112,7 @@ export function VerticalMastStatusView() {
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </div>
         </>
@@ -871,13 +1133,14 @@ export function VerticalMastStatusView() {
               <button
                 type="button"
                 onClick={() => setEditingSectionId(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+                aria-label="Close edit section modal"
+                className="h-10 w-10 sm:h-8 sm:w-8 inline-flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-4 space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
                     Installed Date
@@ -888,7 +1151,7 @@ export function VerticalMastStatusView() {
                     onChange={(e) =>
                       setSecForm((p) => ({ ...p, installedDate: e.target.value }))
                     }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                    className="w-full h-11 sm:h-9 px-3 py-2 rounded-lg border border-slate-300"
                   />
                 </div>
                 <div>
@@ -901,7 +1164,7 @@ export function VerticalMastStatusView() {
                     onChange={(e) =>
                       setSecForm((p) => ({ ...p, verifiedDate: e.target.value }))
                     }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                    className="w-full h-11 sm:h-9 px-3 py-2 rounded-lg border border-slate-300"
                   />
                 </div>
               </div>
@@ -916,7 +1179,7 @@ export function VerticalMastStatusView() {
                     setSecForm((p) => ({ ...p, verticalityMm: e.target.value }))
                   }
                   placeholder="e.g. 0.4 mm/m (<=1/1000)"
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                  className="w-full h-11 sm:h-9 px-3 py-2 rounded-lg border border-slate-300"
                 />
               </div>
               <div>
@@ -936,14 +1199,14 @@ export function VerticalMastStatusView() {
               <button
                 type="button"
                 onClick={() => setEditingSectionId(null)}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-medium cursor-pointer"
+                className="min-h-11 sm:min-h-0 px-4 sm:px-3 py-2 sm:py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-medium cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveSectionEdit}
-                className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold cursor-pointer"
+                className="min-h-11 sm:min-h-0 px-5 sm:px-4 py-2 sm:py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold cursor-pointer"
               >
                 Save Changes
               </button>
@@ -969,13 +1232,14 @@ export function VerticalMastStatusView() {
               <button
                 type="button"
                 onClick={() => setEditingLayerId(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
+                aria-label="Close edit guy layer modal"
+                className="h-10 w-10 sm:h-8 sm:w-8 inline-flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="p-4 space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
                     Installed Date
@@ -986,7 +1250,7 @@ export function VerticalMastStatusView() {
                     onChange={(e) =>
                       setLayerForm((p) => ({ ...p, installedDate: e.target.value }))
                     }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                    className="w-full h-11 sm:h-9 px-3 py-2 rounded-lg border border-slate-300"
                   />
                 </div>
                 <div>
@@ -999,7 +1263,7 @@ export function VerticalMastStatusView() {
                     onChange={(e) =>
                       setLayerForm((p) => ({ ...p, verifiedDate: e.target.value }))
                     }
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300"
+                    className="w-full h-11 sm:h-9 px-3 py-2 rounded-lg border border-slate-300"
                   />
                 </div>
               </div>
@@ -1022,14 +1286,14 @@ export function VerticalMastStatusView() {
               <button
                 type="button"
                 onClick={() => setEditingLayerId(null)}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-medium cursor-pointer"
+                className="min-h-11 sm:min-h-0 px-4 sm:px-3 py-2 sm:py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-medium cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleSaveLayerEdit}
-                className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold cursor-pointer"
+                className="min-h-11 sm:min-h-0 px-5 sm:px-4 py-2 sm:py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold cursor-pointer"
               >
                 Save Changes
               </button>

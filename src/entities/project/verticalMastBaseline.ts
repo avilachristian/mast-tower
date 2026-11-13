@@ -1,3 +1,4 @@
+import { createDefaultReportLogos } from '@/shared/assets/defaultLogos';
 import {
   checklistFromStatus,
   createInitialFoundations,
@@ -639,6 +640,7 @@ export function createCleanVerticalMastProject(): MastProjectState {
       preparedBy: 'Engr. Christian C. Avila',
       documentTitle: 'VERTICAL MAST TOWER ERECTION STATUS REPORT',
       referenceNo: 'ZT-120-01',
+      logos: createDefaultReportLogos(),
     },
     foundations: createCompletedSiteFoundationsForTower(),
     verticalMast: createInitialVerticalMastState(),

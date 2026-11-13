@@ -1,12 +1,13 @@
 import {
   BAGS_PER_CUBIC_METER,
   DEFAULT_KG_PER_BAG,
-  FOUNDATION_PHENOLIC_BOARDS,
-  FOUNDATION_SPECS,
   PROJECT_MATERIAL_TARGETS,
   STATUS_META,
+  formatConcreteCuM,
+  formatDimensionM,
   getFoundationChecklistSteps,
   getFoundationInspectionChecklistItems,
+  resolveFoundationSpec,
 } from './mast2Baseline';
 import type {
   DailyActivityLogEntry,
@@ -16,6 +17,7 @@ import type {
   DailyLogMaterialItem,
   DailyLogSafetyItem,
   DailyLogVisitorItem,
+  FoundationCustomSpecs,
   FoundationInspectionItemKey,
   FoundationInspectionStatus,
   FoundationRecord,
@@ -161,8 +163,8 @@ export function computeProjectMetrics(state: MastProjectState): ProjectSummaryMe
   let gravelConsumedBags = 0;
 
   for (const f of state.foundations) {
-    const spec = FOUNDATION_SPECS[f.type];
-    const foundationTotalCuM = spec.structuralConcreteCuM + spec.leanConcreteCuM;
+    const spec = resolveFoundationSpec(f.type, f.customSpecs);
+    const foundationTotalCuM = spec.totalConcreteCuM;
     totalConcreteCuM += foundationTotalCuM;
     pctSum += STATUS_META[f.status].pct;
 
@@ -221,7 +223,7 @@ export function checkFoundationMaterialReadiness(
   foundation: FoundationRecord,
   metrics: ProjectSummaryMetrics
 ): { ready: boolean; missing: string[] } {
-  const spec = FOUNDATION_SPECS[foundation.type];
+  const spec = resolveFoundationSpec(foundation.type, foundation.customSpecs);
   const missing: string[] = [];
   if (metrics.cementOnSiteBags < spec.cementBags) {
     missing.push(`${spec.cementBags - Math.max(0, metrics.cementOnSiteBags)} bags cement`);
@@ -342,11 +344,11 @@ export function buildOverallProjectStatusReportData(
   });
 
   const foundationRows: OverallFoundationStatusRow[] = project.foundations.map((f) => {
-    const spec = FOUNDATION_SPECS[f.type];
+    const spec = resolveFoundationSpec(f.type, f.customSpecs);
     const meta = STATUS_META[f.status];
     const steps = getFoundationChecklistSteps(f.type);
     const completedSteps = steps.filter((s) => Boolean(f.checklist[s.key])).length;
-    const defaults = getDefaultFoundationSpecFields(f.type);
+    const defaults = getDefaultFoundationSpecFields(f.type, f.customSpecs);
     const sizeLabel = f.customSpecs?.size?.trim() || defaults.size;
     return {
       id: f.id,
@@ -357,7 +359,7 @@ export function buildOverallProjectStatusReportData(
       sectorLabel: f.sector === 'CENTER' ? 'Center (0m)' : `Sector ${f.sector} (${f.radiusM}m)`,
       radiusM: f.radiusM,
       sizeLabel,
-      totalVolumeCuM: Number((spec.structuralConcreteCuM + spec.leanConcreteCuM).toFixed(2)),
+      totalVolumeCuM: spec.totalConcreteCuM,
       status: f.status,
       statusLabel: meta.label,
       statusShortLabel: meta.shortLabel,
@@ -446,19 +448,21 @@ export interface FoundationActivityReportData {
   materials: FoundationActivityMaterialRow[];
 }
 
-/** Returns default organized foundation specification fields derived from engineering drawings. */
+/** Returns organized foundation specification fields derived from baseline or custom dimensions. */
 export function getDefaultFoundationSpecFields(
-  foundationType: FoundationType
+  foundationType: FoundationType,
+  customSpecs?: FoundationCustomSpecs
 ): FoundationSpecDetails {
-  const spec = FOUNDATION_SPECS[foundationType];
-  const totalDepthM = spec.overburdenDepthM + spec.thicknessM + spec.leanThicknessM;
+  const spec = resolveFoundationSpec(foundationType, customSpecs);
+  const totalDepthM = spec.totalExcavationDepthM;
   const totalDepthMm = Math.round(totalDepthM * 1000);
+  const leanMm = Math.round(spec.leanThicknessM * 1000);
   return {
-    size: `${spec.lengthM.toFixed(1)} × ${spec.widthM.toFixed(1)} × ${spec.thicknessM.toFixed(1)} m`,
-    foundationVolume: `${spec.structuralConcreteCuM.toFixed(1)} m³ (Class AA)`,
-    leanConcreteVolume: `${spec.leanConcreteCuM.toFixed(2)} m³ (50 mm)`,
+    size: `${formatDimensionM(spec.lengthM)} × ${formatDimensionM(spec.widthM)} × ${formatDimensionM(spec.thicknessM)} m`,
+    foundationVolume: `${formatConcreteCuM(spec.structuralConcreteCuM)} m³ (Class AA)`,
+    leanConcreteVolume: `${spec.leanConcreteCuM.toFixed(2)} m³ (${leanMm} mm)`,
     excavationDepth: `${totalDepthM.toFixed(2)} m (${totalDepthMm.toLocaleString('en-US')} mm from N.G.L.)`,
-    cover: '50 mm',
+    cover: `${Math.round(spec.concreteCoverMm)} mm`,
     mainRebar: `M_02: ${spec.rebarM02Count} pcs (Ø20 mm @ 200 mm O.C.)`,
     chairBar: `M_26: ${spec.rebarM26Count} pcs`,
     towerAccessoriesLabel:
@@ -484,13 +488,16 @@ export function buildFoundationActivityReportData(
   foundation: FoundationRecord,
   overrides: Partial<Record<FoundationActivityMaterialKey, FoundationActivityMaterialOverride>> = {}
 ): FoundationActivityReportData {
-  const spec = FOUNDATION_SPECS[foundation.type];
+  const spec = resolveFoundationSpec(foundation.type, foundation.customSpecs);
   const foundationTitle =
     foundation.sector === 'CENTER'
       ? `${foundation.id} — ${spec.label}`
       : `${foundation.id} — ${spec.label} (Sector ${foundation.sector} · ${foundation.radiusM}m)`;
 
-  const defaults = getDefaultFoundationSpecFields(foundation.type);
+  const defaults = getDefaultFoundationSpecFields(
+    foundation.type,
+    foundation.customSpecs
+  );
   const custom = foundation.customSpecs;
   const specDetails: FoundationSpecDetails = {
     size: custom?.size !== undefined ? custom.size : defaults.size,
@@ -516,9 +523,9 @@ export function buildFoundationActivityReportData(
         : defaults.towerAccessories,
   };
 
-  const totalVolumeCuM = spec.structuralConcreteCuM + spec.leanConcreteCuM;
+  const totalVolumeCuM = spec.totalConcreteCuM;
   const sizeLabel = specDetails.size || defaults.size;
-  const volumeLabel = `${totalVolumeCuM.toFixed(2)} m³ total (${spec.structuralConcreteCuM.toFixed(1)} m³ AA + ${spec.leanConcreteCuM.toFixed(2)} m³ lean)`;
+  const volumeLabel = `${totalVolumeCuM.toFixed(2)} m³ total (${formatConcreteCuM(spec.structuralConcreteCuM)} m³ AA + ${spec.leanConcreteCuM.toFixed(2)} m³ lean)`;
 
   const rebarDetails = [
     `Main Rebar (M_02): ${spec.rebarM02Count} pcs`,
@@ -584,7 +591,7 @@ export function buildFoundationActivityReportData(
       key: 'phenolic',
       description: 'Phenolic',
       unit: 'pcs',
-      required: FOUNDATION_PHENOLIC_BOARDS[foundation.type],
+      required: spec.phenolicBoards,
       defaultRemarks: '',
     },
   ];
@@ -607,7 +614,10 @@ export function buildFoundationActivityReportData(
   });
 
   const removedKeys = new Set(foundation.removedInspectionKeys ?? []);
-  const builtInItems = getFoundationInspectionChecklistItems(foundation.type)
+  const builtInItems = getFoundationInspectionChecklistItems(
+    foundation.type,
+    foundation.customSpecs
+  )
     .filter((item) => !removedKeys.has(item.key))
     .map((item) => ({ ...item, isCustom: false }));
   const customItems = (foundation.customInspectionItems ?? []).map((item) => ({

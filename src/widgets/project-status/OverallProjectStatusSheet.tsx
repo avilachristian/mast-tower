@@ -76,8 +76,8 @@ export function OverallProjectStatusSheet({
             </div>
 
             {/* Key KPI Grid */}
-            <div className="grid grid-cols-2 border-b border-slate-900 text-[11px]">
-              <div className="p-2 border-r border-b border-slate-900">
+            <div className="grid grid-cols-3 divide-x divide-slate-900 border-b border-slate-900 text-[11px]">
+              <div className="p-2">
                 <div className="text-[10px] font-bold uppercase text-slate-500">
                   Completed Pads
                 </div>
@@ -85,28 +85,20 @@ export function OverallProjectStatusSheet({
                   {metrics.completedCount} / {metrics.totalFoundations} Done
                 </div>
               </div>
-              <div className="p-2 border-b border-slate-900">
+              <div className="p-2">
                 <div className="text-[10px] font-bold uppercase text-slate-500">
-                  Concreted / Curing
+                  Concreted / Cured
                 </div>
                 <div className="font-bold text-slate-900 tabular-nums mt-0.5">
                   {metrics.pouredOrBeyondCount} / {metrics.totalFoundations} Poured
                 </div>
               </div>
-              <div className="p-2 border-r border-slate-900">
+              <div className="p-2">
                 <div className="text-[10px] font-bold uppercase text-slate-500">
                   Concrete Volume Poured
                 </div>
                 <div className="font-bold text-slate-900 tabular-nums mt-0.5">
                   {metrics.pouredConcreteCuM.toFixed(2)} / {metrics.totalConcreteCuM.toFixed(2)} m³
-                </div>
-              </div>
-              <div className="p-2">
-                <div className="text-[10px] font-bold uppercase text-slate-500">
-                  Daily Logs / Man-Days
-                </div>
-                <div className="font-bold text-slate-900 tabular-nums mt-0.5">
-                  {project.dailyLogs.length} logs · {metrics.totalManDays} md
                 </div>
               </div>
             </div>
@@ -116,13 +108,13 @@ export function OverallProjectStatusSheet({
               <div className="px-2.5 py-1 bg-slate-100 border-b border-slate-900 text-[11px] font-bold uppercase text-slate-800">
                 Foundations by Current Stage
               </div>
-              <div className="divide-y divide-slate-200 text-[10.5px]">
+              <div className="divide-y divide-slate-200 text-[10px] leading-tight">
                 {stageCounts.map((stage) => (
                   <div
                     key={stage.status}
-                    className="grid grid-cols-12 items-center px-2.5 py-1 gap-1"
+                    className="flex items-center justify-between px-2.5 py-1 gap-2"
                   >
-                    <div className="col-span-7 flex items-center gap-1.5 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <span
                         className="w-2.5 h-2.5 rounded-xs border border-slate-700 shrink-0"
                         style={{
@@ -130,17 +122,12 @@ export function OverallProjectStatusSheet({
                           opacity: stage.status === 'not_started' ? 0.3 : 0.9,
                         }}
                       />
-                      <span className="truncate font-medium text-slate-800">
+                      <span className="font-medium text-slate-800">
                         {stage.label}
                       </span>
                     </div>
-                    <div className="col-span-2 text-right font-bold text-slate-900 tabular-nums">
+                    <div className="text-right font-bold text-slate-900 tabular-nums shrink-0">
                       {stage.count}
-                    </div>
-                    <div className="col-span-3 text-right text-[9.5px] text-slate-500 truncate">
-                      {stage.foundationIds.length > 0
-                        ? stage.foundationIds.join(', ')
-                        : '—'}
                     </div>
                   </div>
                 ))}

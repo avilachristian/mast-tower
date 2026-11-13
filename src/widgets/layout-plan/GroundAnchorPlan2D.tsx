@@ -1,4 +1,9 @@
-import { FOUNDATION_SPECS, STATUS_META } from '@/entities/project/mast2Baseline';
+import {
+  FOUNDATION_SPECS,
+  STATUS_META,
+  formatDimensionM,
+  resolveFoundationSpec,
+} from '@/entities/project/mast2Baseline';
 import type {
   AnchorGuyNodeState,
   AnchorGuyStage,
@@ -400,7 +405,7 @@ export function GroundAnchorPlan2D({
           {/* Foundation Nodes */}
           {foundations.map((f) => {
             const [fx, fy] = toSvg(f.xM, f.zM);
-            const spec = FOUNDATION_SPECS[f.type];
+            const spec = resolveFoundationSpec(f.type, f.customSpecs);
             const meta = STATUS_META[f.status];
             const guyState = anchorGuyStates?.[f.id];
             const guyMeta = guyState ? ANCHOR_GUY_STAGE_META[guyState.stage] : null;
@@ -511,7 +516,7 @@ export function GroundAnchorPlan2D({
                 <title>
                   {guyState && guyMeta
                     ? `${f.name} (${spec.label})\nGuying: ${guyState.summaryLabel}\nStage: ${guyMeta.label}`
-                    : `${f.name} (${spec.lengthM}×${spec.widthM}×${spec.thicknessM}m)\nStatus: ${meta.label} (${meta.pct}%)\n${spec.anchorSummary}`}
+                    : `${f.name} (${formatDimensionM(spec.lengthM)}×${formatDimensionM(spec.widthM)}×${formatDimensionM(spec.thicknessM)}m · ${spec.totalConcreteCuM.toFixed(2)}m³)\nStatus: ${meta.label} (${meta.pct}%)\n${spec.anchorSummary}`}
                 </title>
               </g>
             );
@@ -629,18 +634,19 @@ export function GroundAnchorPlan2D({
               /* Activity Status Swatches matching the 8 civil construction stages */
               (
                 [
-                  { status: 'not_started' as FoundationStatus, label: 'Pending / Not Started' },
-                  { status: 'excavated' as FoundationStatus, label: '1–2. Excavation & Inspection / Retrofit' },
-                  { status: 'lean_concrete' as FoundationStatus, label: '3. Lean Concrete Pour' },
-                  { status: 'rebar_and_anchor' as FoundationStatus, label: '4. Rebar, Anchor / Bolt & Forms Install' },
-                  { status: 'formwork' as FoundationStatus, label: '5. Rebar, Anchor / Bolt & Forms Inspect' },
-                  { status: 'concreted' as FoundationStatus, label: '6. Concrete Pouring' },
-                  { status: 'curing' as FoundationStatus, label: '7. Curing' },
-                  { status: 'completed' as FoundationStatus, label: '8. Backfill (Completed)' },
-                ]
-              ).map(({ status, label }, idx) => {
+                  'not_started',
+                  'excavated',
+                  'lean_concrete',
+                  'rebar_and_anchor',
+                  'formwork',
+                  'concreted',
+                  'curing',
+                  'completed',
+                ] as FoundationStatus[]
+              ).map((status, idx) => {
                 const sy = 33 + idx * 17;
                 const stMeta = STATUS_META[status];
+                const label = stMeta.label;
                 return (
                   <g key={status} transform={`translate(12, ${sy})`}>
                     <rect

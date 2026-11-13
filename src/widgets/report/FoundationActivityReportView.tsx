@@ -9,8 +9,14 @@ import {
   buildFoundationActivityReportData,
   formatDateWithWeekday,
 } from '@/entities/project/calculations';
-import { FOUNDATION_SPECS, STATUS_META } from '@/entities/project/mast2Baseline';
+import {
+  FOUNDATION_SPECS,
+  STATUS_META,
+  formatConcreteCuM,
+  resolveFoundationSpec,
+} from '@/entities/project/mast2Baseline';
 import type {
+  FoundationCustomSpecs,
   FoundationRecord,
   FoundationStatus,
   MastProjectState,
@@ -44,7 +50,63 @@ export function FoundationActivityReportView({
   const setReportOpen = useUiStore((s) => s.setReportOpen);
 
   const report = buildFoundationActivityReportData(project, null, selectedFoundation);
-  const spec = FOUNDATION_SPECS[selectedFoundation.type];
+  const resolvedSpec = resolveFoundationSpec(
+    selectedFoundation.type,
+    selectedFoundation.customSpecs
+  );
+
+  const handleNumericDimensionChange = (
+    field:
+      | 'lengthM'
+      | 'widthM'
+      | 'thicknessM'
+      | 'overburdenDepthM'
+      | 'leanThicknessM'
+      | 'concreteCoverMm',
+    raw: string
+  ) => {
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) return;
+    const minVal =
+      field === 'lengthM' || field === 'widthM' || field === 'thicknessM'
+        ? 0.05
+        : 0;
+    const val = Math.max(minVal, parsed);
+    const patch: Partial<FoundationCustomSpecs> = {
+      [field]: val,
+      // Clear auto-derived label overrides so dynamic volumes/sizes reflect immediately
+      ...(field === 'concreteCoverMm'
+        ? { cover: undefined }
+        : {
+            size: undefined,
+            foundationVolume: undefined,
+            leanConcreteVolume: undefined,
+            excavationDepth: undefined,
+          }),
+    };
+    updateFoundationCustomSpecs(selectedFoundation.id, patch);
+  };
+
+  const handleCountOverrideChange = (
+    field:
+      | 'rebarM02Count'
+      | 'rebarM26Count'
+      | 'phenolicBoards'
+      | 'cementBags'
+      | 'sandBags'
+      | 'gravelBags',
+    raw: string
+  ) => {
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) return;
+    const val = Math.max(0, parsed);
+    const patch: Partial<FoundationCustomSpecs> = {
+      [field]: val,
+      ...(field === 'rebarM02Count' ? { mainRebar: undefined } : {}),
+      ...(field === 'rebarM26Count' ? { chairBar: undefined } : {}),
+    };
+    updateFoundationCustomSpecs(selectedFoundation.id, patch);
+  };
 
   return (
     <div className="flex flex-col bg-slate-50 min-h-full">
@@ -64,7 +126,8 @@ export function FoundationActivityReportView({
             ))}
           </select>
           <span className="text-[11px] text-slate-500 hidden sm:inline">
-            {report.sizeLabel} · {spec.structuralConcreteCuM.toFixed(1)} m³ AA
+            {report.sizeLabel} · {formatConcreteCuM(resolvedSpec.structuralConcreteCuM)} m³ AA (
+            {resolvedSpec.totalConcreteCuM.toFixed(2)} m³ total)
           </span>
         </div>
 
@@ -73,7 +136,7 @@ export function FoundationActivityReportView({
             <button
               type="button"
               onClick={() => setViewMode('workspace')}
-              className={`px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
+              className={`min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
                 viewMode === 'workspace'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -84,7 +147,7 @@ export function FoundationActivityReportView({
             <button
               type="button"
               onClick={() => setViewMode('report')}
-              className={`px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
+              className={`min-h-10 sm:min-h-0 px-3 sm:px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
                 viewMode === 'report'
                   ? 'bg-white text-sky-700 shadow-xs font-semibold'
                   : 'text-slate-600 hover:text-slate-900'
@@ -97,10 +160,12 @@ export function FoundationActivityReportView({
           <button
             type="button"
             onClick={() => setReportOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
+            title="Print / Save PDF"
+            aria-label="Print / Save PDF"
+            className="inline-flex items-center justify-center gap-1.5 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
           >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print / PDF</span>
+            <Printer className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+            <span className="hidden sm:inline">Print / PDF</span>
           </button>
         </div>
       </div>
@@ -142,7 +207,7 @@ export function FoundationActivityReportView({
                 <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-200 bg-slate-50/70">
                   <div>
                     <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                      Activities — {selectedFoundation.id} ({spec.label})
+                      Activities — {selectedFoundation.id} ({resolvedSpec.label})
                     </h2>
                     <p className="text-[11px] text-slate-500">
                       Tap tasks to update status for the report
@@ -248,67 +313,270 @@ export function FoundationActivityReportView({
                 </div>
 
                 <div className="p-3.5 space-y-3 text-xs">
-                  {/* Size */}
-                  <label className="block">
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
-                      Size
-                    </span>
-                    <input
-                      type="text"
-                      value={report.specDetails.size}
-                      onChange={(e) =>
-                        updateFoundationCustomSpecs(selectedFoundation.id, {
-                          size: e.target.value,
-                        })
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
-                    />
-                  </label>
-
-                  {/* Volume */}
-                  <div className="pt-2 border-t border-slate-200 space-y-2">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
-                      Volume
+                  {/* Dynamic Dimensions & Depths (drives Concrete Pour Volume) */}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-700">
+                        Pad Dimensions &amp; Depths (Dynamic Volume)
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-sky-50 border border-sky-200 text-[10.5px] font-semibold text-sky-800 tabular-nums">
+                        Pour: {formatConcreteCuM(resolvedSpec.structuralConcreteCuM)} m³ AA +{' '}
+                        {resolvedSpec.leanConcreteCuM.toFixed(2)} m³ Lean ={' '}
+                        {resolvedSpec.totalConcreteCuM.toFixed(2)} m³ Total
+                      </span>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                       <label className="block">
                         <span className="text-[11px] font-medium text-slate-600">
-                          Foundation
+                          Length (m)
                         </span>
                         <input
-                          type="text"
-                          value={report.specDetails.foundationVolume}
+                          type="number"
+                          step="0.05"
+                          min="0.1"
+                          value={resolvedSpec.lengthM}
                           onChange={(e) =>
-                            updateFoundationCustomSpecs(selectedFoundation.id, {
-                              foundationVolume: e.target.value,
-                            })
+                            handleNumericDimensionChange('lengthM', e.target.value)
                           }
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
                         />
                       </label>
                       <label className="block">
                         <span className="text-[11px] font-medium text-slate-600">
-                          Lean Concrete
+                          Width (m)
                         </span>
                         <input
-                          type="text"
-                          value={report.specDetails.leanConcreteVolume}
+                          type="number"
+                          step="0.05"
+                          min="0.1"
+                          value={resolvedSpec.widthM}
                           onChange={(e) =>
-                            updateFoundationCustomSpecs(selectedFoundation.id, {
-                              leanConcreteVolume: e.target.value,
-                            })
+                            handleNumericDimensionChange('widthM', e.target.value)
                           }
-                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Pad Depth (m)
+                        </span>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0.1"
+                          value={resolvedSpec.thicknessM}
+                          onChange={(e) =>
+                            handleNumericDimensionChange('thicknessM', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Overburden (m)
+                        </span>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0"
+                          value={resolvedSpec.overburdenDepthM}
+                          onChange={(e) =>
+                            handleNumericDimensionChange(
+                              'overburdenDepthM',
+                              e.target.value
+                            )
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Lean Concrete (m)
+                        </span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={resolvedSpec.leanThicknessM}
+                          onChange={(e) =>
+                            handleNumericDimensionChange('leanThicknessM', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Cover (mm)
+                        </span>
+                        <input
+                          type="number"
+                          step="5"
+                          min="0"
+                          value={resolvedSpec.concreteCoverMm}
+                          onChange={(e) =>
+                            handleNumericDimensionChange('concreteCoverMm', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
                         />
                       </label>
                     </div>
                   </div>
 
-                  {/* Excavation Depth & Cover */}
-                  <div className="pt-2 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Required Material & Rebar Counts (auto-scaled on volume change, editable) */}
+                  <div className="pt-2 border-t border-slate-200 space-y-2">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                      Design Material &amp; Rebar Quantities
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Cement (bags)
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={resolvedSpec.cementBags}
+                          onChange={(e) =>
+                            handleCountOverrideChange('cementBags', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Sand (bags)
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={resolvedSpec.sandBags}
+                          onChange={(e) =>
+                            handleCountOverrideChange('sandBags', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Gravel (bags)
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={resolvedSpec.gravelBags}
+                          onChange={(e) =>
+                            handleCountOverrideChange('gravelBags', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Main Rebar (pcs)
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={resolvedSpec.rebarM02Count}
+                          onChange={(e) =>
+                            handleCountOverrideChange('rebarM02Count', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Chair Bar (pcs)
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={resolvedSpec.rebarM26Count}
+                          onChange={(e) =>
+                            handleCountOverrideChange('rebarM26Count', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Phenolic (pcs)
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={resolvedSpec.phenolicBoards}
+                          onChange={(e) =>
+                            handleCountOverrideChange('phenolicBoards', e.target.value)
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 tabular-nums focus:border-sky-500 focus:outline-none"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Report Text Labels (auto-derived from dimensions above, or customize) */}
+                  <div className="pt-2 border-t border-slate-200 space-y-2">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                      Report Submittal Labels
+                    </div>
                     <label className="block">
-                      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
-                        Excavation Depth
+                      <span className="text-[11px] font-medium text-slate-600">
+                        Size Label
+                      </span>
+                      <input
+                        type="text"
+                        value={report.specDetails.size}
+                        onChange={(e) =>
+                          updateFoundationCustomSpecs(selectedFoundation.id, {
+                            size: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Volume */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <label className="block">
+                      <span className="text-[11px] font-medium text-slate-600">
+                        Foundation Volume Label
+                      </span>
+                      <input
+                        type="text"
+                        value={report.specDetails.foundationVolume}
+                        onChange={(e) =>
+                          updateFoundationCustomSpecs(selectedFoundation.id, {
+                            foundationVolume: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] font-medium text-slate-600">
+                        Lean Concrete Label
+                      </span>
+                      <input
+                        type="text"
+                        value={report.specDetails.leanConcreteVolume}
+                        onChange={(e) =>
+                          updateFoundationCustomSpecs(selectedFoundation.id, {
+                            leanConcreteVolume: e.target.value,
+                          })
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Excavation Depth & Cover Labels */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <label className="block">
+                      <span className="text-[11px] font-medium text-slate-600">
+                        Excavation Depth Label
                       </span>
                       <input
                         type="text"
@@ -322,8 +590,8 @@ export function FoundationActivityReportView({
                       />
                     </label>
                     <label className="block">
-                      <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
-                        Cover
+                      <span className="text-[11px] font-medium text-slate-600">
+                        Cover Label
                       </span>
                       <input
                         type="text"
