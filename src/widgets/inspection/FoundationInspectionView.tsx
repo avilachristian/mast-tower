@@ -124,12 +124,12 @@ export function FoundationInspectionView({
     <div className="flex flex-col bg-slate-50 min-h-full">
       {/* Top Foundation Inspection Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-white border-b border-slate-200 shadow-2xs">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto min-w-0">
           <select
             aria-label="Select Foundation to Inspect"
             value={selectedFoundation.id}
             onChange={(e) => selectFoundation(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:border-sky-500 focus:outline-none"
+            className="w-full sm:w-auto max-w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-900 focus:border-sky-500 focus:outline-none"
           >
             {project.foundations.map((f) => (
               <option key={f.id} value={f.id}>
@@ -185,7 +185,7 @@ export function FoundationInspectionView({
       {/* Main Content */}
       {viewMode === 'report' ? (
         <div className="p-2 sm:p-5">
-          <div className="max-w-5xl mx-auto bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="max-w-5xl mx-auto bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
             <InspectionReportSheet
               project={project}
               foundation={selectedFoundation}

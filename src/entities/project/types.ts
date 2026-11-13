@@ -1,3 +1,5 @@
+export type ProjectType = 'foundation' | 'vertical_mast';
+
 export type FoundationType = 'principal' | 'anchor_a' | 'anchor_b' | 'anchor_c';
 
 export type SectorId = 'CENTER' | 'I' | 'II' | 'III';
@@ -351,7 +353,119 @@ export interface ReportDetailsSpec {
   notes?: string;
 }
 
+export type TowerSectionKind =
+  | 'bottom'
+  | 'platform'
+  | 'guy_attach'
+  | 'standard'
+  | 'top';
+
+export type TowerSectionStatus =
+  | 'not_started'
+  | 'pre_assembled'
+  | 'hoisted'
+  | 'bolted_torqued'
+  | 'plumbed_verified';
+
+export interface TowerSectionChecklist {
+  stagedAndVerified: boolean;
+  hoistedInPosition: boolean;
+  flangeBolted: boolean;
+  guyPlatesOrFixturesReady: boolean;
+  plumbedAndInspected: boolean;
+}
+
+export interface TowerSectionRecord {
+  id: string; // 'S01' .. 'S41'
+  sectionNo: number; // 1 .. 41
+  label: string;
+  kind: TowerSectionKind;
+  elevationFromM: number;
+  elevationToM: number;
+  legSpec: string;
+  boltSpec: string;
+  guyLayerIds: string[];
+  guyElevationsM: number[];
+  hasPlatform?: boolean;
+  hasLightningRod?: boolean;
+  status: TowerSectionStatus;
+  checklist: TowerSectionChecklist;
+  installedDate?: string;
+  verifiedDate?: string;
+  verticalityMm?: string;
+  notes: string;
+  inspectionChecklist?: Partial<
+    Record<FoundationInspectionItemKey, FoundationInspectionEntry>
+  >;
+  customInspectionItems?: CustomFoundationInspectionItem[];
+  removedInspectionKeys?: string[];
+  inspectionMeta?: FoundationInspectionMeta;
+}
+
+export type GuyLayerStatus =
+  | 'not_started'
+  | 'strands_pulled'
+  | 'anchored'
+  | 'tensioned_verified';
+
+export interface GuySectorProgress {
+  pulled: boolean;
+  terminated: boolean;
+  tensioned: boolean;
+  tensionKn?: string;
+  remarks?: string;
+}
+
+export interface GuyLayerRecord {
+  id: string; // 'L01' .. 'L16'
+  layerNo: number; // 1 .. 16
+  elevationM: number;
+  sectionId: string; // 'S03' .. 'S39'
+  anchorRingType: Exclude<FoundationType, 'principal'>;
+  anchorRingLabel: string;
+  anchorRadiusM: number; // 18 | 36 | 54 | 72
+  anchorIds: Record<Exclude<SectorId, 'CENTER'>, string>;
+  cableSpec: string;
+  status: GuyLayerStatus;
+  sectors: Record<Exclude<SectorId, 'CENTER'>, GuySectorProgress>;
+  installedDate?: string;
+  verifiedDate?: string;
+  notes: string;
+  inspectionChecklist?: Partial<
+    Record<FoundationInspectionItemKey, FoundationInspectionEntry>
+  >;
+  customInspectionItems?: CustomFoundationInspectionItem[];
+  removedInspectionKeys?: string[];
+  inspectionMeta?: FoundationInspectionMeta;
+}
+
+export interface VerticalMastState {
+  sections: TowerSectionRecord[];
+  guyLayers: GuyLayerRecord[];
+  platformStatus: 'not_started' | 'installed' | 'verified';
+  lightningRodStatus: 'not_started' | 'installed' | 'verified';
+}
+
+export type AnchorGuyStage =
+  | 'pending'
+  | 'pulled'
+  | 'guy_1'
+  | 'guy_2'
+  | 'guy_3'
+  | 'guy_4'
+  | 'all_tensioned';
+
+export interface AnchorGuyNodeState {
+  stage: AnchorGuyStage;
+  pulledCount: number;
+  anchoredCount: number;
+  tensionedCount: number;
+  totalGuys: number;
+  summaryLabel: string;
+}
+
 export interface MastProjectState {
+  projectType?: ProjectType;
   projectName: string;
   location: string;
   preparedBy: string;
@@ -360,6 +474,7 @@ export interface MastProjectState {
   lastUpdated: string;
   reportDetails?: ReportDetailsSpec;
   foundations: FoundationRecord[];
+  verticalMast?: VerticalMastState;
   haulingLogs: HaulingLogEntry[];
   dailyLogs: DailyActivityLogEntry[];
   schedule: ScheduleActivityItem[];

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Copy, Printer, X } from 'lucide-react';
+import { Check, Copy, X } from 'lucide-react';
 import {
   computeDailyLogMaterialRemaining,
   formatDailyLogPlainText,
@@ -13,12 +13,15 @@ import {
   getDailyLogVisitorRows,
 } from '@/entities/project/calculations';
 import type { DailyActivityLogEntry, MastProjectState } from '@/entities/project/types';
+import { buildVerticalMastOverviewData } from '@/entities/project/verticalMastCalculations';
+import type { MastSelectionTarget } from '@/shared/state/uiStore';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
+import { VerticalMastElevation2D } from '@/widgets/mast-tower/VerticalMastElevation2D';
+import { ReportToolbarActions, usePrintPageSetup } from '@/widgets/report/PrintPageControls';
 import {
   ReportLetterhead,
   ReportSignoffFooter,
   resolveReportDetails,
-  triggerReportPrint,
 } from '@/widgets/report/ReportLetterhead';
 
 export function DailyLogPrintModal({
@@ -33,6 +36,7 @@ export function DailyLogPrintModal({
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   const projectName =
     log.projectName?.trim() ||
@@ -50,6 +54,8 @@ export function DailyLogPrintModal({
     reportDate: log.date,
     preparedBy,
   });
+
+  const { dialogMaxWidthClass } = usePrintPageSetup(true);
 
   useEffect(() => {
     document.body.classList.add('report-modal-open');
@@ -95,7 +101,7 @@ export function DailyLogPrintModal({
       onClick={onClose}
     >
       <div
-        className="report-modal-dialog max-w-5xl mx-auto bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden print:border-none print:shadow-none print:rounded-none print:max-w-none"
+        className={`report-modal-dialog ${dialogMaxWidthClass} mx-auto bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden print:border-none print:shadow-none print:rounded-none print:max-w-none`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Toolbar (hidden when printing) */}
@@ -106,7 +112,7 @@ export function DailyLogPrintModal({
               <select
                 value={log.id}
                 onChange={(e) => onSelectLog(e.target.value)}
-                className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
+                className="w-full sm:w-auto max-w-full min-w-0 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
               >
                 {project.dailyLogs.map((entry) => (
                   <option key={entry.id} value={entry.id}>
@@ -117,7 +123,7 @@ export function DailyLogPrintModal({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleCopyText}
@@ -126,14 +132,7 @@ export function DailyLogPrintModal({
               {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
               {copied ? 'Copied' : 'Copy Text'}
             </button>
-            <button
-              type="button"
-              onClick={() => triggerReportPrint(reportDocTitle)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold cursor-pointer shadow-xs"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              Print / Save PDF
-            </button>
+            <ReportToolbarActions targetRef={sheetRef} documentTitle={reportDocTitle} />
             <button
               type="button"
               onClick={onClose}
@@ -146,7 +145,10 @@ export function DailyLogPrintModal({
         </div>
 
         {/* Printable Sheet */}
-        <div className="report-modal-scroll-area report-printable-card bg-white text-slate-900 p-4 sm:p-6 print:p-2">
+        <div
+          ref={sheetRef}
+          className="report-modal-scroll-area report-printable-card bg-white text-slate-900 p-4 sm:p-6 print:p-2"
+        >
             <ReportLetterhead
             details={{
               ...effectiveDetails,
@@ -177,14 +179,55 @@ export function DailyLogPrintModal({
                   )
                 </div>
                 <div className="flex-1 min-h-[340px] sm:min-h-[380px] flex items-stretch justify-stretch">
-                  <GroundAnchorPlan2D
-                    foundations={project.foundations}
-                    highlightedIds={workedIds}
-                    calloutTitle="CURRENT WORK"
-                    compact
-                    hideHeader
-                    fillParent
-                  />
+                  {project.projectType === 'vertical_mast' ? (
+                    (() => {
+                      const { vm, projectedAnchorStatuses, anchorGuyStates } =
+                        buildVerticalMastOverviewData(project);
+                      const mappedFoundations = project.foundations.map((f) => ({
+                        ...f,
+                        status: projectedAnchorStatuses.get(f.id) ?? 'completed',
+                      }));
+                      const firstGuy = workedIds.find((id) => id.startsWith('L'));
+                      const firstSec = workedIds.find((id) => id.startsWith('S'));
+                      const target: MastSelectionTarget = firstGuy
+                        ? { kind: 'guy_layer', id: firstGuy }
+                        : { kind: 'section', id: firstSec ?? 'S01' };
+                      const firstGuyLayer = firstGuy
+                        ? vm.guyLayers.find((g) => g.id === firstGuy)
+                        : undefined;
+                      const highlightedAnchors = firstGuyLayer
+                        ? Object.values(firstGuyLayer.anchorIds)
+                        : workedIds;
+                      return (
+                        <div className="grid grid-cols-2 gap-1.5 w-full">
+                          <VerticalMastElevation2D
+                            verticalMast={vm}
+                            selectedTarget={target}
+                            compact
+                            fillParent
+                          />
+                          <GroundAnchorPlan2D
+                            foundations={mappedFoundations}
+                            anchorGuyStates={anchorGuyStates}
+                            highlightedIds={highlightedAnchors}
+                            calloutTitle="CURRENT WORK"
+                            compact
+                            hideHeader
+                            fillParent
+                          />
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <GroundAnchorPlan2D
+                      foundations={project.foundations}
+                      highlightedIds={workedIds}
+                      calloutTitle="CURRENT WORK"
+                      compact
+                      hideHeader
+                      fillParent
+                    />
+                  )}
                 </div>
               </div>
 
@@ -219,7 +262,11 @@ export function DailyLogPrintModal({
                 {/* Foundations Worked */}
                 <div className="border-b-2 border-slate-900 bg-slate-50 p-2 text-[11px]">
                   <div>
-                    <span className="font-bold text-slate-700">Foundations Worked:</span>{' '}
+                    <span className="font-bold text-slate-700">
+                      {project.projectType === 'vertical_mast'
+                        ? 'Elements Worked:'
+                        : 'Foundations Worked:'}
+                    </span>{' '}
                     <span className="font-semibold text-sky-700">
                       {workedIds.length > 0 ? workedIds.join(', ') : 'General Site'}
                     </span>
@@ -363,15 +410,19 @@ export function DailyLogPrintModal({
               </table>
             </div>
 
-            {/* Materials on Site Table */}
+            {/* Materials / Tower Parts on Site Table */}
             <div className="border-b-2 border-slate-900">
               <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
-                Materials on Site
+                {project.projectType === 'vertical_mast'
+                  ? 'Tower Parts & Materials on Site'
+                  : 'Materials on Site'}
               </div>
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
-                    <th className="px-2 py-1 border-r border-slate-900">Material</th>
+                    <th className="px-2 py-1 border-r border-slate-900">
+                      {project.projectType === 'vertical_mast' ? 'Tower Part' : 'Material'}
+                    </th>
                     <th className="px-2 py-1 border-r border-slate-900 w-14 text-center">Unit</th>
                     <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">On Site</th>
                     <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Delivered</th>

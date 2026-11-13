@@ -1,12 +1,12 @@
 import {
   buildFoundationActivityReportData,
+  deriveOverallInspectionStatus,
   formatDateWithWeekday,
   getReportableInspections,
 } from '@/entities/project/calculations';
 import { FOUNDATION_SPECS, STATUS_META } from '@/entities/project/mast2Baseline';
 import type {
   FoundationInspectionItemKey,
-  FoundationInspectionStatus,
   FoundationRecord,
   MastProjectState,
 } from '@/entities/project/types';
@@ -17,17 +17,6 @@ import {
   ReportSignoffFooter,
   resolveReportDetails,
 } from '@/widgets/report/ReportLetterhead';
-
-function deriveOverallInspectionStatus(
-  explicitStatus: FoundationInspectionStatus | undefined,
-  items: { status: FoundationInspectionStatus }[]
-): FoundationInspectionStatus {
-  if (explicitStatus) return explicitStatus;
-  if (items.some((i) => i.status === 'For Rectification')) return 'For Rectification';
-  const relevant = items.filter((i) => i.status !== 'N/A');
-  if (relevant.length > 0 && relevant.every((i) => i.status === 'Passed')) return 'Passed';
-  return 'Pending';
-}
 
 export function InspectionReportSheet({
   project,

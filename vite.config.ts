@@ -9,6 +9,9 @@ export default defineConfig({
     port: 5175,
     strictPort: true,
   },
+  optimizeDeps: {
+    include: ['jspdf', 'html-to-image'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, 'src'),

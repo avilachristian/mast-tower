@@ -1,12 +1,43 @@
 import { formatDateWithWeekday } from '@/entities/project/calculations';
 import type { MastProjectState, ReportDetailsSpec } from '@/entities/project/types';
+import type { PrintOrientation, PrintPaperSize } from '@/shared/state/uiStore';
+
+const PRINT_PAGE_STYLE_ID = 'mast-dynamic-print-page-style';
 
 /**
- * Temporarily sets `document.title` before invoking browser Print / Save as PDF
- * so the browser proposes a clean filename matching the report title.
+ * Injects or updates the dynamic `@page { size: ... }` rule so the browser print
+ * dialog defaults cleanly to the chosen paper size and orientation.
  */
-export function triggerReportPrint(documentTitle?: string): void {
+export function applyPrintPageStyle(
+  paperSize: PrintPaperSize = 'A4',
+  orientation: PrintOrientation = 'portrait'
+): void {
+  if (typeof document === 'undefined') return;
+  let styleEl = document.getElementById(PRINT_PAGE_STYLE_ID) as HTMLStyleElement | null;
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = PRINT_PAGE_STYLE_ID;
+    document.head.appendChild(styleEl);
+  }
+  const margin = paperSize === 'A3' ? '12mm' : '10mm';
+  styleEl.textContent = `@media print { @page { size: ${paperSize} ${orientation}; margin: ${margin}; } }`;
+}
+
+/**
+ * Temporarily sets `document.title` and ensures `@page` size/orientation rules
+ * are applied before invoking browser Print / Save as PDF.
+ */
+export function triggerReportPrint(
+  documentTitle?: string,
+  pageOptions?: { paperSize?: PrintPaperSize; orientation?: PrintOrientation }
+): void {
   if (typeof window === 'undefined') return;
+  if (pageOptions?.paperSize || pageOptions?.orientation) {
+    applyPrintPageStyle(
+      pageOptions.paperSize ?? 'A4',
+      pageOptions.orientation ?? 'portrait'
+    );
+  }
   const previousTitle = document.title;
   const sanitized = (documentTitle ?? '').replace(/[\\/:*?"<>|]+/g, '-').trim();
   if (sanitized) {

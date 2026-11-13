@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import {
+  computeSmartPdfPageBreaks,
+  getPdfPageDimensionsMm,
+  sanitizePdfFilename,
+} from '@/shared/print/pdfGenerator';
 import { resolveReportDetails } from '@/widgets/report/ReportLetterhead';
 import {
   bagsToCuM,
@@ -32,7 +37,24 @@ import {
   deriveStatusFromChecklist,
   emptyChecklist,
 } from '@/entities/project/mast2Baseline';
+import {
+  buildSectionActivityReportData,
+  buildVerticalMastInspectionRows,
+  buildVerticalMastOverviewData,
+  computeVerticalMastMetrics,
+} from '@/entities/project/verticalMastCalculations';
+import {
+  GUY_LAYER_DEFINITIONS,
+  VERTICAL_MAST_DESIGN_SPECS,
+  createCleanVerticalMastProject,
+  createSampleVerticalMastProject,
+  getSectionGuyChecklistItems,
+} from '@/entities/project/verticalMastBaseline';
 import { useUiStore } from '@/shared/state/uiStore';
+import {
+  PRINT_PAPER_OPTIONS,
+  getPrintDialogMaxWidthClass,
+} from '@/widgets/report/PrintPageControls';
 import { useProjectStore } from '@/shared/state/projectStore';
 import {
   computeCalloutBoxWidth,
@@ -183,7 +205,7 @@ describe('Workspace UI & Foundation Activity Report', () => {
     expect(report.materials.find((m) => m.key === 'sand')?.needed).toBe(65);
 
     expect(report.tasks).toHaveLength(8);
-    expect(report.tasks[0].done).toBe(true); // Excavation already completed
+    expect(report.tasks[0].done).toBe(false); // Starts clean without pre-filled excavation default
     expect(report.tasks.map((t) => t.description)).toEqual([
       'Excavation',
       'Excavation Inspection and Retrofit',
@@ -807,6 +829,356 @@ describe('Workspace UI & Foundation Activity Report', () => {
     useProjectStore.getState().deleteProject(copyId);
     useProjectStore.getState().deleteProject(secondId);
     expect(useProjectStore.getState().activeProjectId).toBe(firstId);
+  });
+
+  it('creates a Vertical Mast Tower project with ZT-120-01 specs, 41 sections & 16 guy layers', () => {
+    const mastId = useProjectStore.getState().createProject({
+      projectType: 'vertical_mast',
+      projectName: 'Philippines 120m MET MAST — Tower Erection',
+      location: 'Camarines Norte Ridge',
+      template: 'clean',
+    });
+
+    const project = useProjectStore.getState().project;
+    expect(project.projectType).toBe('vertical_mast');
+    expect(project.foundations).toHaveLength(13);
+    expect(project.verticalMast?.sections).toHaveLength(41);
+    expect(project.verticalMast?.guyLayers).toHaveLength(16);
+    expect(GUY_LAYER_DEFINITIONS).toHaveLength(16);
+    expect(VERTICAL_MAST_DESIGN_SPECS.drawingNo).toBe('ZT-120-01');
+
+    const s01 = project.verticalMast!.sections.find((s) => s.id === 'S01')!;
+    const s03 = project.verticalMast!.sections.find((s) => s.id === 'S03')!;
+    const s40 = project.verticalMast!.sections.find((s) => s.id === 'S40')!;
+    const s41 = project.verticalMast!.sections.find((s) => s.id === 'S41')!;
+    expect(s01.legSpec).toContain('89');
+    expect(s03.hasPlatform).toBe(true);
+    expect(s40.hasLightningRod).toBe(false);
+    expect(s41.hasLightningRod).toBe(true);
+    expect(s41.guyLayerIds).toHaveLength(0);
+    expect(s41.elevationFromM).toBe(120);
+    expect(s41.elevationToM).toBe(123);
+
+    // Simplified tower leg activity checklist: single "Tower Leg Installed" step
+    useProjectStore.getState().toggleTowerSectionChecklistItem('S01', 'plumbedAndInspected');
+    expect(
+      useProjectStore.getState().project.verticalMast!.sections.find((s) => s.id === 'S01')!.status
+    ).toBe('plumbed_verified');
+
+    // Batch update sections S02..S05 to Installed
+    useProjectStore.getState().batchUpdateTowerSectionRange(2, 5, 'plumbed_verified');
+    const s05 = useProjectStore.getState().project.verticalMast!.sections.find((s) => s.id === 'S05')!;
+    expect(s05.status).toBe('plumbed_verified');
+
+    // Update all 3 sectors of Guy Layer L01 -> status becomes tensioned_verified
+    useProjectStore.getState().updateGuyLayerSector('L01', 'I', {
+      pulled: true,
+      terminated: true,
+      tensioned: true,
+      tensionKn: '16.5',
+    });
+    useProjectStore.getState().updateGuyLayerSector('L01', 'II', {
+      pulled: true,
+      terminated: true,
+      tensioned: true,
+      tensionKn: '16.4',
+    });
+    useProjectStore.getState().updateGuyLayerSector('L01', 'III', {
+      pulled: true,
+      terminated: true,
+      tensioned: true,
+      tensionKn: '16.6',
+    });
+    const l01 = useProjectStore.getState().project.verticalMast!.guyLayers.find((g) => g.id === 'L01')!;
+    expect(l01.status).toBe('tensioned_verified');
+
+    const metrics = computeVerticalMastMetrics(useProjectStore.getState().project);
+    expect(metrics.erectedSections).toBe(5);
+    expect(metrics.erectedHeightM).toBe(15);
+    expect(metrics.tensionedGuyLayers).toBe(1);
+    expect(metrics.tensionedStrands).toBe(3);
+
+    const overview = buildVerticalMastOverviewData(useProjectStore.getState().project);
+    expect(overview.projectedAnchorStatuses.get('PF-0')).toBe('completed');
+    expect(overview.projectedAnchorStatuses.get('I-C1')).toBe('rebar_and_anchor'); // L01 tensioned, L02-L03 pending on C1
+    expect(overview.anchorGuyStates['I-C1'].stage).toBe('guy_1');
+    expect(overview.anchorGuyStates['I-C1'].anchoredCount).toBe(1);
+    expect(overview.anchorGuyStates['I-C1'].totalGuys).toBe(4);
+    expect(overview.anchorGuyStates['II-C1'].stage).toBe('guy_1');
+    expect(overview.anchorGuyStates['I-B1'].stage).toBe('pending');
+
+    // Load sample data and check realistic partial progress
+    useProjectStore.getState().loadSampleData();
+    const sampleMetrics = computeVerticalMastMetrics(useProjectStore.getState().project);
+    expect(sampleMetrics.overallProgressPct).toBeGreaterThan(20);
+    expect(sampleMetrics.erectedSections).toBeGreaterThan(10);
+
+    // Flexible mast inspection add/edit/remove/reset on section & guy layer
+    useProjectStore.getState().addMastInspectionItem('guy_layer', 'L01', {
+      description: 'Turnbuckle safety wire lock check',
+      planMeasurement: 'Locked w/ stainless safety pin',
+    });
+    let l01Updated = useProjectStore.getState().project.verticalMast!.guyLayers.find((g) => g.id === 'L01')!;
+    let rows = buildVerticalMastInspectionRows('guy_layer', undefined, l01Updated);
+    const customRow = rows.find((r) => r.description === 'Turnbuckle safety wire lock check')!;
+    expect(customRow).toBeTruthy();
+
+    useProjectStore.getState().updateMastInspectionItem('guy_layer', 'L01', customRow.key, {
+      status: 'Passed',
+      actualMeasurement: 'Verified all 3 sectors',
+    });
+    l01Updated = useProjectStore.getState().project.verticalMast!.guyLayers.find((g) => g.id === 'L01')!;
+    rows = buildVerticalMastInspectionRows('guy_layer', undefined, l01Updated);
+    expect(rows.find((r) => r.key === customRow.key)?.status).toBe('Passed');
+
+    useProjectStore.getState().removeMastInspectionItem('guy_layer', 'L01', customRow.key);
+    useProjectStore.getState().resetMastInspectionChecklist('guy_layer', 'L01');
+    l01Updated = useProjectStore.getState().project.verticalMast!.guyLayers.find((g) => g.id === 'L01')!;
+    rows = buildVerticalMastInspectionRows('guy_layer', undefined, l01Updated);
+    expect(rows.some((r) => r.key === customRow.key)).toBe(false);
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+
+    // Clean up extra project
+    useProjectStore.getState().deleteProject(mastId);
+  });
+
+  it('supports selectable paper sizes and page orientations in print preferences', () => {
+    expect(PRINT_PAPER_OPTIONS.map((o) => o.id)).toEqual(['A4', 'A3', 'letter', 'legal']);
+
+    const store = useUiStore.getState();
+    expect(store.printPaperSize).toBe('A4');
+    expect(store.printOrientation).toBe('portrait');
+    expect(getPrintDialogMaxWidthClass('A4', 'portrait')).toBe('max-w-5xl');
+
+    store.setPrintPaperSize('A3');
+    store.setPrintOrientation('landscape');
+    expect(useUiStore.getState().printPaperSize).toBe('A3');
+    expect(useUiStore.getState().printOrientation).toBe('landscape');
+    expect(getPrintDialogMaxWidthClass('A3', 'landscape')).toBe('max-w-[1320px]');
+    expect(getPrintDialogMaxWidthClass('letter', 'landscape')).toBe('max-w-6xl');
+    expect(getPrintDialogMaxWidthClass('legal', 'landscape')).toBe('max-w-[1320px]');
+
+    // Restore defaults
+    store.setPrintPaperSize('A4');
+    store.setPrintOrientation('portrait');
+  });
+
+  it('integrates attached guy cable checklist steps into tower sections', () => {
+    const mastId = useProjectStore.getState().createProject({
+      projectType: 'vertical_mast',
+      projectName: 'Mast Checklist Cable Test',
+      location: 'Site X',
+      contractor: 'Crew Y',
+      preparedBy: 'Eng Z',
+      template: 'clean',
+    });
+
+    const vm0 = useProjectStore.getState().project.verticalMast!;
+    const s02 = vm0.sections.find((s) => s.id === 'S02')!;
+    const s03 = vm0.sections.find((s) => s.id === 'S03')!;
+    const l01 = vm0.guyLayers.find((g) => g.id === 'L01')!;
+
+    expect(getSectionGuyChecklistItems(undefined)).toEqual([]);
+    const guySteps = getSectionGuyChecklistItems(l01);
+    expect(guySteps.map((s) => `${s.stepNumber}. ${s.label}`)).toEqual([
+      '2. Sector I (30°) · Anchor I-C1 installed',
+      '3. Sector II (150°) · Anchor II-C1 installed',
+      '4. Sector III (270°) · Anchor III-C1 installed',
+      '5. All Cables Tensioned',
+    ]);
+
+    expect(buildSectionActivityReportData(s02).tasks).toHaveLength(1);
+    const s03ReportBefore = buildSectionActivityReportData(s03, l01);
+    expect(s03ReportBefore.tasks).toHaveLength(5);
+    expect(s03ReportBefore.tasks.every((t) => !t.done)).toBe(true);
+
+    // Toggle Sector I & II installed
+    useProjectStore.getState().toggleGuyLayerSectorInstalled('L01', 'I');
+    useProjectStore.getState().toggleGuyLayerSectorInstalled('L01', 'II');
+    let updatedL01 = useProjectStore
+      .getState()
+      .project.verticalMast!.guyLayers.find((g) => g.id === 'L01')!;
+    expect(updatedL01.sectors.I.terminated).toBe(true);
+    expect(updatedL01.sectors.II.terminated).toBe(true);
+    expect(updatedL01.sectors.III.terminated).toBe(false);
+    expect(updatedL01.status).toBe('strands_pulled');
+
+    // Toggle Sector III installed -> anchored
+    useProjectStore.getState().toggleGuyLayerSectorInstalled('L01', 'III');
+    updatedL01 = useProjectStore
+      .getState()
+      .project.verticalMast!.guyLayers.find((g) => g.id === 'L01')!;
+    expect(updatedL01.status).toBe('anchored');
+
+    // Toggle All Cables Tensioned -> tensioned_verified
+    useProjectStore.getState().toggleGuyLayerAllTensioned('L01');
+    updatedL01 = useProjectStore
+      .getState()
+      .project.verticalMast!.guyLayers.find((g) => g.id === 'L01')!;
+    expect(updatedL01.status).toBe('tensioned_verified');
+    expect(updatedL01.sectors.I.tensioned).toBe(true);
+    expect(updatedL01.sectors.II.tensioned).toBe(true);
+    expect(updatedL01.sectors.III.tensioned).toBe(true);
+
+    const s03Updated = useProjectStore
+      .getState()
+      .project.verticalMast!.sections.find((s) => s.id === 'S03')!;
+    const s03ReportAfter = buildSectionActivityReportData(s03Updated, updatedL01);
+    expect(s03ReportAfter.tasks.slice(1).every((t) => t.done)).toBe(true);
+
+    // Toggling All Cables Tensioned off keeps anchors installed cleanly
+    useProjectStore.getState().toggleGuyLayerAllTensioned('L01');
+    updatedL01 = useProjectStore
+      .getState()
+      .project.verticalMast!.guyLayers.find((g) => g.id === 'L01')!;
+    expect(updatedL01.status).toBe('anchored');
+    expect(updatedL01.sectors.I.terminated).toBe(true);
+    expect(updatedL01.sectors.I.tensioned).toBe(false);
+
+    useProjectStore.getState().deleteProject(mastId);
+  });
+
+  it('combines Foundation and Vertical Mast phases via setProjectPhase without losing either phase data', () => {
+    const unifiedId = useProjectStore.getState().createProject({
+      projectType: 'foundation',
+      projectName: 'Unified Tower Project',
+      location: 'Site Unified',
+      contractor: 'Contractor U',
+      preparedBy: 'Engineer U',
+      template: 'clean',
+    });
+
+    // Newly created foundation project also initializes verticalMast (41 sections & 16 guy layers)
+    let state = useProjectStore.getState().project;
+    expect(state.projectType).toBe('foundation');
+    expect(state.foundations).toHaveLength(13);
+    expect(state.verticalMast?.sections).toHaveLength(41);
+    expect(state.verticalMast?.guyLayers).toHaveLength(16);
+
+    // Record foundation progress
+    useProjectStore.getState().updateFoundationStatus('PF-0', 'completed');
+    useProjectStore.getState().toggleFoundationChecklistItem('I-A1', 'excavationVerified');
+
+    // Toggle to Vertical Mast Phase and record mast + cable progress
+    useProjectStore.getState().setProjectPhase('vertical_mast');
+    state = useProjectStore.getState().project;
+    expect(state.projectType).toBe('vertical_mast');
+    expect(state.foundations.find((f) => f.id === 'PF-0')?.status).toBe('completed');
+
+    useProjectStore.getState().updateTowerSectionStatus('S01', 'plumbed_verified');
+    useProjectStore.getState().toggleGuyLayerSectorInstalled('L01', 'I');
+
+    // Toggle back to Foundation Phase and confirm both foundation and vertical mast progress remain intact
+    useProjectStore.getState().setProjectPhase('foundation');
+    state = useProjectStore.getState().project;
+    expect(state.projectType).toBe('foundation');
+    expect(state.foundations.find((f) => f.id === 'PF-0')?.status).toBe('completed');
+    expect(state.foundations.find((f) => f.id === 'I-A1')?.checklist.excavationVerified).toBe(true);
+    expect(state.verticalMast?.sections.find((s) => s.id === 'S01')?.status).toBe('plumbed_verified');
+    expect(state.verticalMast?.guyLayers.find((g) => g.id === 'L01')?.sectors.I.terminated).toBe(true);
+
+    useProjectStore.getState().deleteProject(unifiedId);
+  });
+
+  it('computes exact PDF paper dimensions, filenames, and row-safe page breaks', () => {
+    const a4Portrait = getPdfPageDimensionsMm('A4', 'portrait');
+    expect(a4Portrait.widthMm).toBe(210);
+    expect(a4Portrait.heightMm).toBe(297);
+    expect(a4Portrait.contentWidthMm).toBe(190);
+
+    const a4Landscape = getPdfPageDimensionsMm('A4', 'landscape');
+    expect(a4Landscape.widthMm).toBe(297);
+    expect(a4Landscape.heightMm).toBe(210);
+
+    const legalLandscape = getPdfPageDimensionsMm('legal', 'landscape');
+    expect(legalLandscape.widthMm).toBe(355.6);
+    expect(legalLandscape.heightMm).toBe(215.9);
+
+    expect(sanitizePdfFilename('Daily Log: Day 1 / Mast 2')).toBe(
+      'Daily Log- Day 1 - Mast 2.pdf'
+    );
+
+    // Slight overflow (<=5%) stays on a single page cleanly
+    expect(computeSmartPdfPageBreaks(1040, 1000)).toEqual([{ startPx: 0, endPx: 1040 }]);
+
+    // Straddling row/block at y=[960..1040] snaps page break above 960
+    expect(
+      computeSmartPdfPageBreaks(1800, 1000, [{ topPx: 960, bottomPx: 1040 }])
+    ).toEqual([
+      { startPx: 0, endPx: 960 },
+      { startPx: 960, endPx: 1800 },
+    ]);
+  });
+
+  it('starts clean projects without contractor boilerplate notes and defaults vertical mast daily logs to tower parts', () => {
+    const cleanFoundations = createInitialFoundations();
+    expect(cleanFoundations.every((f) => f.status === 'not_started')).toBe(true);
+    expect(cleanFoundations.every((f) => !f.checklist.excavationVerified)).toBe(true);
+    expect(cleanFoundations.every((f) => f.notes === '')).toBe(true);
+
+    const cleanVerticalMast = createCleanVerticalMastProject();
+    expect(cleanVerticalMast.foundations.every((f) => f.notes === '')).toBe(true);
+
+    const sampleVerticalMast = createSampleVerticalMastProject();
+    expect(sampleVerticalMast.foundations.every((f) => f.notes === '')).toBe(true);
+    expect(
+      sampleVerticalMast.dailyLogs?.[0]?.materialsOnSite?.some(
+        (m) => m.name === 'Modular Tower Section (3.0m)'
+      )
+    ).toBe(true);
+
+    const mastParts = createDefaultDailyLogMaterials('vertical_mast');
+    expect(mastParts).toHaveLength(6);
+    expect(mastParts.map((m) => m.name)).toEqual([
+      'Modular Tower Section (3.0m)',
+      'Flange Splice Bolt (M16×70)',
+      'Guy Wire Strand (Ø11.4mm)',
+      'Turnbuckle & Shackle Set',
+      'U-Ring & NUT-3 Clamp',
+      'Working Platform / Lightning Rod',
+    ]);
+
+    const prevFoundationLog = {
+      id: 'dl-found-1',
+      date: '2026-11-12',
+      dayNumber: 1,
+      weather: 'Sunny' as const,
+      schedulePhaseId: 'ph-2',
+      foundationsWorked: ['PF-0'],
+      workers: [],
+      totalWorkers: 0,
+      totalManHours: 0,
+      cementUsedBags: 0,
+      sandUsedBags: 0,
+      gravelUsedBags: 0,
+      rebarPcsUsed: 0,
+      activitiesSummary: '',
+      issuesOrDelays: '',
+      materialsOnSite: [
+        {
+          id: 'mat-cement',
+          name: 'Cement',
+          unit: 'bags',
+          onSiteQty: 0,
+          deliveredQty: 0,
+          usedTodayQty: 0,
+          remainingQty: 0,
+        },
+        {
+          id: 'mat-sand',
+          name: 'Sand',
+          unit: 'bags',
+          onSiteQty: 5,
+          deliveredQty: 0,
+          usedTodayQty: 2,
+          remainingQty: 3,
+        },
+      ],
+    };
+    const nextMastMaterials = buildNextDayMaterialsFromLog(prevFoundationLog, 'vertical_mast');
+    expect(nextMastMaterials.some((m) => m.name === 'Cement')).toBe(false);
+    expect(nextMastMaterials.some((m) => m.name === 'Modular Tower Section (3.0m)')).toBe(true);
+    expect(nextMastMaterials.find((m) => m.name === 'Sand')?.onSiteQty).toBe(3);
   });
 });
 

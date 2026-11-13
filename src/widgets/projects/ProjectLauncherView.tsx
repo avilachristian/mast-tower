@@ -14,7 +14,11 @@ import {
   Upload,
 } from 'lucide-react';
 import { computeProjectMetrics, formatDateWithWeekday } from '@/entities/project/calculations';
-import type { SavedProjectRecord } from '@/entities/project/types';
+import type { ProjectType, SavedProjectRecord } from '@/entities/project/types';
+import {
+  computeVerticalMastMetrics,
+  type VerticalMastMetrics,
+} from '@/entities/project/verticalMastCalculations';
 import { useProjectStore } from '@/shared/state/projectStore';
 
 function slugifyFilename(name: string): string {
@@ -54,6 +58,7 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
     activeProject.reportDetails?.preparedBy || activeProject.preparedBy
   );
   const [newHeightM, setNewHeightM] = useState(String(activeProject.towerHeightM || 120));
+  const [newProjectType, setNewProjectType] = useState<ProjectType>('foundation');
   const [newTemplate, setNewTemplate] = useState<'clean' | 'sample'>('clean');
   const [copyLogos, setCopyLogos] = useState(hasCurrentLogos);
 
@@ -64,6 +69,7 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
     return projects
       .map((record) => {
         const state = record.state;
+        const projectType: ProjectType = state.projectType ?? 'foundation';
         const displayName = state.reportDetails?.projectName?.trim() || state.projectName;
         const displayLocation =
           state.reportDetails?.projectLocation?.trim() || state.location;
@@ -71,13 +77,16 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
           state.reportDetails?.contractor?.trim() || state.contractor;
         const displayRef = state.reportDetails?.referenceNo?.trim() || '';
         const metrics = computeProjectMetrics(state);
+        const mastMetrics: VerticalMastMetrics = computeVerticalMastMetrics(state);
         return {
           record,
+          projectType,
           displayName,
           displayLocation,
           displayContractor,
           displayRef,
           metrics,
+          mastMetrics,
         };
       })
       .filter((item) => {
@@ -98,6 +107,7 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
     setNewContractor(activeProject.reportDetails?.contractor || activeProject.contractor);
     setNewPreparedBy(activeProject.reportDetails?.preparedBy || activeProject.preparedBy);
     setNewHeightM(String(activeProject.towerHeightM || 120));
+    setNewProjectType('foundation');
     setNewTemplate('clean');
     setCopyLogos(hasCurrentLogos);
     setCreatingOpen(true);
@@ -108,6 +118,7 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
     if (!newName.trim()) return;
     const parsedHeight = Number(newHeightM);
     createProject({
+      projectType: newProjectType,
       projectName: newName.trim(),
       location: newLocation.trim() || undefined,
       referenceNo: newReferenceNo.trim() || undefined,
@@ -224,7 +235,7 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Create New Project</h3>
                 <p className="text-[11px] text-slate-500">
-                  Creates an independent 13-foundation workspace with its own logs, inspections, and letterhead
+                  Unified workspace with both Foundation Phase (13 pads) &amp; Vertical Mast Phase (S01–S41 &amp; L01–L16) — switch anytime via the Phase Toggle
                 </p>
               </div>
               <button
@@ -233,6 +244,53 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
                 className="px-2.5 py-1 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 cursor-pointer"
               >
                 Cancel
+              </button>
+            </div>
+
+            {/* Starting Phase Selector */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setNewProjectType('foundation')}
+                className={`text-left rounded-lg border p-3 transition cursor-pointer ${
+                  newProjectType === 'foundation'
+                    ? 'border-sky-500 bg-sky-50/70 ring-1 ring-sky-500'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                }`}
+              >
+                <div className="font-bold text-slate-900 flex items-center justify-between">
+                  <span>Start on Foundation Phase</span>
+                  {newProjectType === 'foundation' && (
+                    <span className="text-[10px] font-bold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded">
+                      Starting Phase
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Opens on Civil Works (13 foundation pads PF-0 + anchors). Vertical Mast Phase remains ready to toggle.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setNewProjectType('vertical_mast')}
+                className={`text-left rounded-lg border p-3 transition cursor-pointer ${
+                  newProjectType === 'vertical_mast'
+                    ? 'border-teal-500 bg-teal-50/70 ring-1 ring-teal-500'
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                }`}
+              >
+                <div className="font-bold text-slate-900 flex items-center justify-between">
+                  <span>Start on Vertical Mast Phase</span>
+                  {newProjectType === 'vertical_mast' && (
+                    <span className="text-[10px] font-bold text-teal-700 bg-teal-100 px-1.5 py-0.5 rounded">
+                      Starting Phase
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Opens on Tower Erection (S01–S41 legs &amp; L01–L16 guys). Foundation Phase remains ready to toggle.
+                </p>
               </button>
             </div>
 
@@ -337,7 +395,9 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  All 13 foundations start pending (0%) with empty daily logs and clean checklists.
+                  {newProjectType === 'vertical_mast'
+                    ? 'All 41 sections and 16 guy layers start pending (0%) with empty logs and clean checklists.'
+                    : 'All 13 foundations start pending (0%) with empty daily logs and clean checklists.'}
                 </p>
               </button>
 
@@ -422,13 +482,19 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
           {enrichedProjects.map(
             ({
               record,
+              projectType,
               displayName,
               displayLocation,
               displayContractor,
               displayRef,
               metrics,
+              mastMetrics,
             }) => {
               const isActive = record.id === activeProjectId;
+              const cardProgressPct =
+                projectType === 'vertical_mast'
+                  ? mastMetrics.overallProgressPct
+                  : metrics.overallProgressPct;
 
               return (
                 <div
@@ -447,6 +513,17 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
                           {displayName}
                         </h3>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`inline-block text-[10px] font-semibold px-1.5 py-0.2 rounded border ${
+                              projectType === 'vertical_mast'
+                                ? 'text-teal-700 bg-teal-50 border-teal-200'
+                                : 'text-amber-700 bg-amber-50 border-amber-200'
+                            }`}
+                          >
+                            {projectType === 'vertical_mast'
+                              ? 'Vertical Mast Phase'
+                              : 'Foundation Phase'}
+                          </span>
                           <span className="inline-block text-[10px] font-semibold text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.2 rounded">
                             {record.state.towerHeightM}m Tower
                           </span>
@@ -485,13 +562,17 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
                           Overall Progress
                         </span>
                         <span className="font-bold text-slate-900">
-                          {metrics.overallProgressPct}%
+                          {cardProgressPct}%
                         </span>
                       </div>
                       <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
                         <div
-                          className="h-full bg-sky-600 rounded-full transition-all"
-                          style={{ width: `${metrics.overallProgressPct}%` }}
+                          className={`h-full rounded-full transition-all ${
+                            projectType === 'vertical_mast'
+                              ? 'bg-teal-600'
+                              : 'bg-sky-600'
+                          }`}
+                          style={{ width: `${cardProgressPct}%` }}
                         />
                       </div>
                       <div className="grid grid-cols-3 gap-1.5 pt-1 text-center text-[10px]">
@@ -499,13 +580,13 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
                           <div className="font-bold text-slate-900">
                             {metrics.completedCount}/{record.state.foundations.length}
                           </div>
-                          <div className="text-slate-500">Completed</div>
+                          <div className="text-slate-500">Foundations</div>
                         </div>
                         <div className="rounded-md bg-slate-50 border border-slate-200 py-1 px-1.5">
                           <div className="font-bold text-slate-900">
-                            {metrics.pouredOrBeyondCount}/{record.state.foundations.length}
+                            {mastMetrics.erectedSections}/{mastMetrics.totalSections}
                           </div>
-                          <div className="text-slate-500">Poured+</div>
+                          <div className="text-slate-500">Mast Sec.</div>
                         </div>
                         <div className="rounded-md bg-slate-50 border border-slate-200 py-1 px-1.5">
                           <div className="font-bold text-slate-900">

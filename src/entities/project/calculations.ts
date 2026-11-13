@@ -24,6 +24,7 @@ import type {
   FoundationType,
   HaulingLogEntry,
   MastProjectState,
+  ProjectType,
   SectorId,
 } from './types';
 
@@ -838,8 +839,20 @@ export function computeDailyLogMaterialRemaining(
   return Math.max(0, Number((onSite + delivered - used).toFixed(2)));
 }
 
-/** Returns the default 6-item manual Materials on Site list for a new Daily Log. */
-export function createDefaultDailyLogMaterials(): DailyLogMaterialItem[] {
+/** Returns the default manual Materials / Tower Parts on Site list for a new Daily Log. */
+export function createDefaultDailyLogMaterials(
+  projectType: ProjectType = 'foundation'
+): DailyLogMaterialItem[] {
+  if (projectType === 'vertical_mast') {
+    return [
+      { id: 'part-tower-section', name: 'Modular Tower Section (3.0m)', unit: 'sec', onSiteQty: 0, deliveredQty: 0, usedTodayQty: 0, remainingQty: 0, remarks: '' },
+      { id: 'part-flange-bolts', name: 'Flange Splice Bolt (M16×70)', unit: 'pcs', onSiteQty: 0, deliveredQty: 0, usedTodayQty: 0, remainingQty: 0, remarks: '' },
+      { id: 'part-guy-cable', name: 'Guy Wire Strand (Ø11.4mm)', unit: 'pcs', onSiteQty: 0, deliveredQty: 0, usedTodayQty: 0, remainingQty: 0, remarks: '' },
+      { id: 'part-turnbuckle', name: 'Turnbuckle & Shackle Set', unit: 'sets', onSiteQty: 0, deliveredQty: 0, usedTodayQty: 0, remainingQty: 0, remarks: '' },
+      { id: 'part-uring-nut3', name: 'U-Ring & NUT-3 Clamp', unit: 'sets', onSiteQty: 0, deliveredQty: 0, usedTodayQty: 0, remainingQty: 0, remarks: '' },
+      { id: 'part-accessories', name: 'Working Platform / Lightning Rod', unit: 'sets', onSiteQty: 0, deliveredQty: 0, usedTodayQty: 0, remainingQty: 0, remarks: '' },
+    ];
+  }
   return [
     { id: 'mat-cement', name: 'Cement', unit: 'bags', onSiteQty: 0, deliveredQty: 0, usedTodayQty: 0, remainingQty: 0, remarks: '' },
     { id: 'mat-sand', name: 'Sand', unit: 'bags', onSiteQty: 0, deliveredQty: 0, usedTodayQty: 0, remainingQty: 0, remarks: '' },
@@ -852,18 +865,25 @@ export function createDefaultDailyLogMaterials(): DailyLogMaterialItem[] {
 
 /**
  * Auto-fills the next day's starting `onSiteQty` from the previous day's `remainingQty`,
- * keeping standard 6 materials plus any custom items recorded on the previous log.
+ * keeping standard phase defaults (Foundation Materials or Vertical Mast Tower Parts)
+ * plus any custom or carried-over items recorded on the previous log.
  */
 export function buildNextDayMaterialsFromLog(
-  prevLog?: DailyActivityLogEntry | null
+  prevLog?: DailyActivityLogEntry | null,
+  projectType: ProjectType = 'foundation'
 ): DailyLogMaterialItem[] {
-  const defaults = createDefaultDailyLogMaterials();
+  const defaults = createDefaultDailyLogMaterials(projectType);
   if (!prevLog) return defaults;
 
   const prevRows = getDailyLogMaterialRows(prevLog);
   if (prevRows.length === 0) return defaults;
 
   const normalizeName = (s: string) => s.trim().toLowerCase();
+  const otherPhaseType: ProjectType =
+    projectType === 'vertical_mast' ? 'foundation' : 'vertical_mast';
+  const otherPhaseNames = new Set(
+    createDefaultDailyLogMaterials(otherPhaseType).map((d) => normalizeName(d.name))
+  );
   const prevByName = new Map(prevRows.map((m) => [normalizeName(m.name), m]));
   const usedNames = new Set<string>();
 
@@ -886,8 +906,10 @@ export function buildNextDayMaterialsFromLog(
   for (const row of prevRows) {
     const key = normalizeName(row.name);
     if (!key || usedNames.has(key)) continue;
-    usedNames.add(key);
     const carryOver = computeDailyLogMaterialRemaining(row);
+    // Avoid pulling zero-quantity defaults from the opposite phase when toggling phases
+    if (otherPhaseNames.has(key) && carryOver === 0) continue;
+    usedNames.add(key);
     merged.push({
       ...row,
       onSiteQty: carryOver,
@@ -1293,4 +1315,17 @@ export function formatDailyLogPlainText(
 
   return lines.join('\n');
 }
+
+/** Derives overall QA/QC inspection outcome from an optional explicit override or row statuses. */
+export function deriveOverallInspectionStatus(
+  explicitStatus: FoundationInspectionStatus | undefined,
+  items: { status: FoundationInspectionStatus }[]
+): FoundationInspectionStatus {
+  if (explicitStatus) return explicitStatus;
+  if (items.some((i) => i.status === 'For Rectification')) return 'For Rectification';
+  const relevant = items.filter((i) => i.status !== 'N/A');
+  if (relevant.length > 0 && relevant.every((i) => i.status === 'Passed')) return 'Passed';
+  return 'Pending';
+}
+
 

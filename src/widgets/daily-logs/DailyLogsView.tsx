@@ -157,7 +157,15 @@ function createEmptyDocumentation(): DailyLogDocumentationItem {
   };
 }
 
-function createDefaultWorkers(): WorkerAttendanceEntry[] {
+function createDefaultWorkers(isVerticalMast = false): WorkerAttendanceEntry[] {
+  if (isVerticalMast) {
+    return [
+      { role: 'Foreman', count: 1, names: '', hours: 0 },
+      { role: 'Skilled', count: 0, names: '', hours: 0 },
+      { role: 'Safety Officer', count: 0, names: '', hours: 0 },
+      { role: 'Operator', count: 0, names: '', hours: 0 },
+    ];
+  }
   return [
     { role: 'Foreman', count: 1, names: '', hours: 0 },
     { role: 'Mason', count: 0, names: '', hours: 0 },
@@ -181,6 +189,9 @@ export function DailyLogsView({
   const setDailyLogPrintId = useUiStore((s) => s.setDailyLogPrintId);
 
   const project = projectProp ?? storeProject;
+  const isVerticalMast = project.projectType === 'vertical_mast';
+  const verticalMastSections = project.verticalMast?.sections ?? [];
+  const verticalMastGuyLayers = project.verticalMast?.guyLayers ?? [];
 
   const [mobilePane, setMobilePane] = useState<'form' | 'history'>('form');
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
@@ -206,15 +217,16 @@ export function DailyLogsView({
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [dayNumber, setDayNumber] = useState(nextDayNum);
   const [dayNumberTouched, setDayNumberTouched] = useState(false);
+  const [workersTouched, setWorkersTouched] = useState(false);
   const [materialsTouched, setMaterialsTouched] = useState(false);
   const [weather, setWeather] = useState<DailyLogWeather>('Sunny');
   const [weatherNotes, setWeatherNotes] = useState('');
   const [selectedFoundations, setSelectedFoundations] = useState<string[]>([]);
   const [workers, setWorkers] = useState<WorkerAttendanceEntry[]>(
-    createDefaultWorkers
+    () => createDefaultWorkers(isVerticalMast)
   );
   const [materialsOnSite, setMaterialsOnSite] = useState<DailyLogMaterialItem[]>(
-    () => buildNextDayMaterialsFromLog(latestLog)
+    () => buildNextDayMaterialsFromLog(latestLog, project.projectType ?? 'foundation')
   );
   const [activities, setActivities] = useState<DailyLogActivityItem[]>([
     createEmptyActivity(),
@@ -251,8 +263,20 @@ export function DailyLogsView({
 
   useEffect(() => {
     if (editingLogId || materialsTouched) return;
-    setMaterialsOnSite(buildNextDayMaterialsFromLog(prevLogForDraft));
-  }, [editingLogId, materialsTouched, prevLogForDraft]);
+    setMaterialsOnSite(
+      buildNextDayMaterialsFromLog(prevLogForDraft, project.projectType ?? 'foundation')
+    );
+  }, [editingLogId, materialsTouched, prevLogForDraft, project.projectType]);
+
+  useEffect(() => {
+    if (editingLogId || workersTouched) return;
+    setWorkers(createDefaultWorkers(isVerticalMast));
+  }, [editingLogId, workersTouched, isVerticalMast]);
+
+  useEffect(() => {
+    if (editingLogId) return;
+    setSelectedFoundations([]);
+  }, [editingLogId, isVerticalMast]);
 
   const totalPreviewWorkers = workers.reduce(
     (sum, w) => sum + Math.max(0, w.count),
@@ -275,8 +299,11 @@ export function DailyLogsView({
     setWeather('Sunny');
     setWeatherNotes('');
     setSelectedFoundations([]);
-    setWorkers(createDefaultWorkers());
-    setMaterialsOnSite(buildNextDayMaterialsFromLog(sourceLog));
+    setWorkersTouched(false);
+    setWorkers(createDefaultWorkers(isVerticalMast));
+    setMaterialsOnSite(
+      buildNextDayMaterialsFromLog(sourceLog, project.projectType ?? 'foundation')
+    );
     setActivities([createEmptyActivity()]);
     setEquipmentItems([createEmptyEquipment()]);
     setDelayItems([createEmptyDelay()]);
@@ -299,16 +326,17 @@ export function DailyLogsView({
     setWeather(log.weather);
     setWeatherNotes(log.weatherNotes ?? '');
     setSelectedFoundations([...log.foundationsWorked]);
+    setWorkersTouched(true);
     setWorkers(
       log.workers.length > 0
         ? log.workers.map((w) => ({ ...w }))
-        : createDefaultWorkers()
+        : createDefaultWorkers(isVerticalMast)
     );
     const resolvedMats = getDailyLogMaterialRows(log);
     setMaterialsOnSite(
       resolvedMats.length > 0
         ? resolvedMats.map((m) => ({ ...m }))
-        : createDefaultDailyLogMaterials()
+        : createDefaultDailyLogMaterials(project.projectType ?? 'foundation')
     );
     const resolvedActs = getDailyLogActivityRows(log);
     setActivities(
@@ -355,10 +383,13 @@ export function DailyLogsView({
     const latest = latestLog;
     if (!latest) return;
     if (latest.workers.length > 0) {
+      setWorkersTouched(true);
       setWorkers(latest.workers.map((w) => ({ ...w })));
     }
     setMaterialsTouched(false);
-    setMaterialsOnSite(buildNextDayMaterialsFromLog(latest));
+    setMaterialsOnSite(
+      buildNextDayMaterialsFromLog(latest, project.projectType ?? 'foundation')
+    );
     const prevEq = getDailyLogEquipmentRows(latest);
     if (prevEq.length > 0) {
       setEquipmentItems(prevEq.map((eq) => ({ ...eq })));
@@ -373,17 +404,20 @@ export function DailyLogsView({
 
   // Manpower helpers
   const updateWorkerRow = (idx: number, patch: Partial<WorkerAttendanceEntry>) => {
+    setWorkersTouched(true);
     setWorkers((prev) => prev.map((w, i) => (i === idx ? { ...w, ...patch } : w)));
   };
 
   const addWorkerRow = () => {
+    setWorkersTouched(true);
     setWorkers((prev) => [
       ...prev,
-      { role: 'Carpenter', count: 1, names: '', hours: 0 },
+      { role: isVerticalMast ? 'Skilled' : 'Carpenter', count: 1, names: '', hours: 0 },
     ]);
   };
 
   const removeWorkerRow = (idx: number) => {
+    setWorkersTouched(true);
     setWorkers((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -997,7 +1031,7 @@ export function DailyLogsView({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   <Package className="w-3.5 h-3.5 text-sky-600" />
-                  4. Materials on Site
+                  {isVerticalMast ? '4. Tower Parts on Site' : '4. Materials on Site'}
                 </div>
                 <div className="flex items-center gap-2">
                   {prevLogForDraft && !editingLogId && (
@@ -1005,7 +1039,12 @@ export function DailyLogsView({
                       type="button"
                       onClick={() => {
                         setMaterialsTouched(false);
-                        setMaterialsOnSite(buildNextDayMaterialsFromLog(prevLogForDraft));
+                        setMaterialsOnSite(
+                          buildNextDayMaterialsFromLog(
+                            prevLogForDraft,
+                            project.projectType ?? 'foundation'
+                          )
+                        );
                       }}
                       title="Fill On Site from previous day's Remaining quantities"
                       className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 text-[10px] font-semibold cursor-pointer"
@@ -1018,7 +1057,7 @@ export function DailyLogsView({
                     onClick={addMaterialRow}
                     className="text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
                   >
-                    + Add Material
+                    + {isVerticalMast ? 'Add Tower Part' : 'Add Material'}
                   </button>
                 </div>
               </div>
@@ -1027,7 +1066,9 @@ export function DailyLogsView({
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
                     <tr>
-                      <th className="px-2 py-1.5 font-semibold">Material</th>
+                      <th className="px-2 py-1.5 font-semibold">
+                        {isVerticalMast ? 'Tower Part' : 'Material'}
+                      </th>
                       <th className="px-2 py-1.5 font-semibold w-14 text-center">Unit</th>
                       <th className="px-2 py-1.5 font-semibold text-right w-16">On Site</th>
                       <th className="px-2 py-1.5 font-semibold text-right w-16">Delivered</th>
@@ -1159,27 +1200,78 @@ export function DailyLogsView({
 
               <div>
                 <span className="text-[11px] font-medium text-slate-600 block mb-1">
-                  Foundations Worked On
+                  {isVerticalMast
+                    ? 'Tower Sections & Guy Layers Worked On'
+                    : 'Foundations Worked On'}
                 </span>
-                <div className="flex flex-wrap gap-1">
-                  {foundations.map((f) => {
-                    const active = selectedFoundations.includes(f.id);
-                    return (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => toggleFoundation(f.id)}
-                        className={`px-2 py-1 rounded border text-[11px] font-semibold transition cursor-pointer ${
-                          active
-                            ? 'bg-sky-600 text-white border-sky-600'
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        {f.id}
-                      </button>
-                    );
-                  })}
-                </div>
+                {isVerticalMast ? (
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase mr-1">
+                        Guy Layers:
+                      </span>
+                      {verticalMastGuyLayers.map((g) => {
+                        const active = selectedFoundations.includes(g.id);
+                        return (
+                          <button
+                            key={g.id}
+                            type="button"
+                            onClick={() => toggleFoundation(g.id)}
+                            className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold transition cursor-pointer ${
+                              active
+                                ? 'bg-teal-600 text-white border-teal-600'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {g.id}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1 max-h-20 overflow-y-auto p-1 rounded border border-slate-200 bg-slate-50/50">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase mr-1">
+                        Sections:
+                      </span>
+                      {verticalMastSections.map((s) => {
+                        const active = selectedFoundations.includes(s.id);
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => toggleFoundation(s.id)}
+                            className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold transition cursor-pointer ${
+                              active
+                                ? 'bg-sky-600 text-white border-sky-600'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {s.id}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {foundations.map((f) => {
+                      const active = selectedFoundations.includes(f.id);
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => toggleFoundation(f.id)}
+                          className={`px-2 py-1 rounded border text-[11px] font-semibold transition cursor-pointer ${
+                            active
+                              ? 'bg-sky-600 text-white border-sky-600'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {f.id}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="rounded-lg border border-slate-200 overflow-x-auto">
@@ -1206,11 +1298,37 @@ export function DailyLogsView({
                             className="w-full min-w-[78px] rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-semibold text-slate-700"
                           >
                             <option value="">Site</option>
-                            {foundations.map((f) => (
-                              <option key={f.id} value={f.id}>
-                                {f.id}
-                              </option>
-                            ))}
+                            {isVerticalMast ? (
+                              <>
+                                <optgroup label="Guy Layers">
+                                  {verticalMastGuyLayers.map((g) => (
+                                    <option key={g.id} value={g.id}>
+                                      {g.id} (+{g.elevationM}m)
+                                    </option>
+                                  ))}
+                                </optgroup>
+                                <optgroup label="Tower Sections">
+                                  {verticalMastSections.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {s.id} ({s.elevationFromM}–{s.elevationToM}m)
+                                    </option>
+                                  ))}
+                                </optgroup>
+                                <optgroup label="Ground Anchors">
+                                  {foundations.map((f) => (
+                                    <option key={f.id} value={f.id}>
+                                      {f.id}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              </>
+                            ) : (
+                              foundations.map((f) => (
+                                <option key={f.id} value={f.id}>
+                                  {f.id}
+                                </option>
+                              ))
+                            )}
                           </select>
                         </td>
                         <td className="px-1 py-1">

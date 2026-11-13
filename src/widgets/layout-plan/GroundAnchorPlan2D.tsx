@@ -1,5 +1,11 @@
 import { FOUNDATION_SPECS, STATUS_META } from '@/entities/project/mast2Baseline';
-import type { FoundationRecord, FoundationStatus } from '@/entities/project/types';
+import type {
+  AnchorGuyNodeState,
+  AnchorGuyStage,
+  FoundationRecord,
+  FoundationStatus,
+} from '@/entities/project/types';
+import { ANCHOR_GUY_STAGE_META } from '@/entities/project/verticalMastBaseline';
 
 export function computeCalloutBoxWidth(labelText: string, isSingle: boolean): number {
   if (!isSingle) return 74;
@@ -83,6 +89,7 @@ export function getSelectionLeaderLayout(
 
 export function GroundAnchorPlan2D({
   foundations,
+  anchorGuyStates,
   selectedId,
   highlightedIds,
   calloutTitle = 'CURRENT FOUNDATION',
@@ -95,6 +102,8 @@ export function GroundAnchorPlan2D({
   hideHeader = false,
 }: {
   foundations: FoundationRecord[];
+  /** When provided (Vertical Mast Tower Phase), switches colors, badges, and legend to guy cable count/anchorage stages. */
+  anchorGuyStates?: Record<string, AnchorGuyNodeState>;
   selectedId?: string;
   highlightedIds?: string[];
   calloutTitle?: string;
@@ -106,6 +115,7 @@ export function GroundAnchorPlan2D({
   fillParent?: boolean;
   hideHeader?: boolean;
 }) {
+  const isGuyingMode = Boolean(anchorGuyStates);
   const highlightedSet = new Set(highlightedIds ?? []);
   // SVG coordinate space: 1 meter = 4.2 px; origin at (380, 315)
   const cx = 380;
@@ -128,6 +138,24 @@ export function GroundAnchorPlan2D({
       concreted: 0,
       curing: 0,
       completed: 0,
+    }
+  );
+
+  const guyStageCounts = foundations.reduce<Record<AnchorGuyStage, number>>(
+    (acc, f) => {
+      if (f.type === 'principal') return acc;
+      const stage = anchorGuyStates?.[f.id]?.stage ?? 'pending';
+      acc[stage] = (acc[stage] ?? 0) + 1;
+      return acc;
+    },
+    {
+      pending: 0,
+      pulled: 0,
+      guy_1: 0,
+      guy_2: 0,
+      guy_3: 0,
+      guy_4: 0,
+      all_tensioned: 0,
     }
   );
 
@@ -154,34 +182,61 @@ export function GroundAnchorPlan2D({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-          {(
-            [
-              'completed',
-              'curing',
-              'concreted',
-              'formwork',
-              'rebar_and_anchor',
-              'lean_concrete',
-              'excavated',
-              'not_started',
-            ] as FoundationStatus[]
-          ).map((st) => {
-              const count = statusCounts[st];
-              if (count === 0 && compact) return null;
-              return (
-                <span
-                  key={st}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200"
-                >
+          {isGuyingMode
+            ? (
+                [
+                  'all_tensioned',
+                  'guy_4',
+                  'guy_3',
+                  'guy_2',
+                  'guy_1',
+                  'pulled',
+                  'pending',
+                ] as AnchorGuyStage[]
+              ).map((gs) => {
+                const count = guyStageCounts[gs];
+                if (gs === 'pulled' && count === 0) return null;
+                if (count === 0 && compact) return null;
+                return (
                   <span
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: STATUS_META[st].color }}
-                  />
-                  {STATUS_META[st].shortLabel}: <strong>{count}</strong>
-                </span>
-              );
-            }
-          )}
+                    key={gs}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200"
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: ANCHOR_GUY_STAGE_META[gs].color }}
+                    />
+                    {ANCHOR_GUY_STAGE_META[gs].shortLabel}: <strong>{count}</strong>
+                  </span>
+                );
+              })
+            : (
+                [
+                  'completed',
+                  'curing',
+                  'concreted',
+                  'formwork',
+                  'rebar_and_anchor',
+                  'lean_concrete',
+                  'excavated',
+                  'not_started',
+                ] as FoundationStatus[]
+              ).map((st) => {
+                const count = statusCounts[st];
+                if (count === 0 && compact) return null;
+                return (
+                  <span
+                    key={st}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200"
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: STATUS_META[st].color }}
+                    />
+                    {STATUS_META[st].shortLabel}: <strong>{count}</strong>
+                  </span>
+                );
+              })}
         </div>
       </div>
       )}
@@ -347,6 +402,12 @@ export function GroundAnchorPlan2D({
             const [fx, fy] = toSvg(f.xM, f.zM);
             const spec = FOUNDATION_SPECS[f.type];
             const meta = STATUS_META[f.status];
+            const guyState = anchorGuyStates?.[f.id];
+            const guyMeta = guyState ? ANCHOR_GUY_STAGE_META[guyState.stage] : null;
+            const nodeColor = guyMeta ? guyMeta.color : meta.color;
+            const isNodePending = guyState
+              ? guyState.stage === 'pending'
+              : f.status === 'not_started';
             const isSelected = f.id === selectedId || highlightedSet.has(f.id);
             const isPrincipal = f.type === 'principal';
 
@@ -389,8 +450,8 @@ export function GroundAnchorPlan2D({
                     width={boxSize}
                     height={boxSize}
                     rx="2"
-                    fill={meta.color}
-                    fillOpacity={f.status === 'not_started' ? 0.2 : 0.85}
+                    fill={nodeColor}
+                    fillOpacity={isNodePending ? 0.2 : 0.85}
                     stroke={isSelected ? '#0369a1' : '#1e293b'}
                     strokeWidth={isSelected ? 2.4 : 1.4}
                   />
@@ -448,7 +509,9 @@ export function GroundAnchorPlan2D({
                 </g>
 
                 <title>
-                  {`${f.name} (${spec.lengthM}×${spec.widthM}×${spec.thicknessM}m)\nStatus: ${meta.label} (${meta.pct}%)\n${spec.anchorSummary}`}
+                  {guyState && guyMeta
+                    ? `${f.name} (${spec.label})\nGuying: ${guyState.summaryLabel}\nStage: ${guyMeta.label}`
+                    : `${f.name} (${spec.lengthM}×${spec.widthM}×${spec.thicknessM}m)\nStatus: ${meta.label} (${meta.pct}%)\n${spec.anchorSummary}`}
                 </title>
               </g>
             );
@@ -459,7 +522,13 @@ export function GroundAnchorPlan2D({
             foundations.map((f) => {
               const [fx, fy] = toSvg(f.xM, f.zM);
               const meta = STATUS_META[f.status];
-              const badgeText = `${f.id} · ${meta.pct}%`;
+              const guyState = anchorGuyStates?.[f.id];
+              const badgeColor = guyState
+                ? ANCHOR_GUY_STAGE_META[guyState.stage].color
+                : meta.color;
+              const badgeText = guyState
+                ? `${f.id} · ${guyState.anchoredCount}/${guyState.totalGuys}`
+                : `${f.id} · ${meta.pct}%`;
               const badgeW = Math.max(54, Math.ceil(badgeText.length * 5.2) + 10);
               const badgeH = 15;
               let bx = fx - badgeW / 2;
@@ -488,7 +557,7 @@ export function GroundAnchorPlan2D({
                     rx="3.5"
                     fill="#ffffff"
                     fillOpacity={0.94}
-                    stroke={meta.color}
+                    stroke={badgeColor}
                     strokeWidth="1.2"
                   />
                   <text
@@ -520,48 +589,82 @@ export function GroundAnchorPlan2D({
               y="18"
               className="fill-slate-900 text-[10.5px] font-bold tracking-wider uppercase"
             >
-              Legend — Activities
+              {isGuyingMode ? 'Legend — Guy Anchorage' : 'Legend — Activities'}
             </text>
             <line x1="10" y1="25" x2="232" y2="25" stroke="#cbd5e1" strokeWidth="0.9" />
 
-            {/* Activity Status Swatches matching the 8 construction stages */}
-            {(
-              [
-                { status: 'not_started' as FoundationStatus, label: 'Pending / Not Started' },
-                { status: 'excavated' as FoundationStatus, label: '1–2. Excavation & Inspection / Retrofit' },
-                { status: 'lean_concrete' as FoundationStatus, label: '3. Lean Concrete Pour' },
-                { status: 'rebar_and_anchor' as FoundationStatus, label: '4. Rebar, Anchor / Bolt & Forms Install' },
-                { status: 'formwork' as FoundationStatus, label: '5. Rebar, Anchor / Bolt & Forms Inspect' },
-                { status: 'concreted' as FoundationStatus, label: '6. Concrete Pouring' },
-                { status: 'curing' as FoundationStatus, label: '7. Curing' },
-                { status: 'completed' as FoundationStatus, label: '8. Backfill (Completed)' },
-              ]
-            ).map(({ status, label }, idx) => {
-              const sy = 33 + idx * 17;
-              const stMeta = STATUS_META[status];
-              return (
-                <g key={status} transform={`translate(12, ${sy})`}>
-                  <rect
-                    x="0"
-                    y="0"
-                    width="11"
-                    height="11"
-                    rx="2"
-                    fill={stMeta.color}
-                    fillOpacity={status === 'not_started' ? 0.22 : 0.88}
-                    stroke="#1e293b"
-                    strokeWidth="0.9"
-                  />
-                  <text x="17" y="9" className="fill-slate-700 text-[9.5px] font-medium">
-                    {label}
-                  </text>
-                </g>
-              );
-            })}
+            {isGuyingMode ? (
+              (
+                [
+                  'pending',
+                  'guy_1',
+                  'guy_2',
+                  'guy_3',
+                  'guy_4',
+                  'all_tensioned',
+                ] as AnchorGuyStage[]
+              ).map((stage, idx) => {
+                const sy = 37 + idx * 21;
+                const meta = ANCHOR_GUY_STAGE_META[stage];
+                return (
+                  <g key={stage} transform={`translate(12, ${sy})`}>
+                    <rect
+                      x="0"
+                      y="0"
+                      width="11"
+                      height="11"
+                      rx="2"
+                      fill={meta.color}
+                      fillOpacity={stage === 'pending' ? 0.22 : 0.88}
+                      stroke="#1e293b"
+                      strokeWidth="0.9"
+                    />
+                    <text x="17" y="9" className="fill-slate-700 text-[9.5px] font-medium">
+                      {meta.legendLabel}
+                    </text>
+                  </g>
+                );
+              })
+            ) : (
+              /* Activity Status Swatches matching the 8 civil construction stages */
+              (
+                [
+                  { status: 'not_started' as FoundationStatus, label: 'Pending / Not Started' },
+                  { status: 'excavated' as FoundationStatus, label: '1–2. Excavation & Inspection / Retrofit' },
+                  { status: 'lean_concrete' as FoundationStatus, label: '3. Lean Concrete Pour' },
+                  { status: 'rebar_and_anchor' as FoundationStatus, label: '4. Rebar, Anchor / Bolt & Forms Install' },
+                  { status: 'formwork' as FoundationStatus, label: '5. Rebar, Anchor / Bolt & Forms Inspect' },
+                  { status: 'concreted' as FoundationStatus, label: '6. Concrete Pouring' },
+                  { status: 'curing' as FoundationStatus, label: '7. Curing' },
+                  { status: 'completed' as FoundationStatus, label: '8. Backfill (Completed)' },
+                ]
+              ).map(({ status, label }, idx) => {
+                const sy = 33 + idx * 17;
+                const stMeta = STATUS_META[status];
+                return (
+                  <g key={status} transform={`translate(12, ${sy})`}>
+                    <rect
+                      x="0"
+                      y="0"
+                      width="11"
+                      height="11"
+                      rx="2"
+                      fill={stMeta.color}
+                      fillOpacity={status === 'not_started' ? 0.22 : 0.88}
+                      stroke="#1e293b"
+                      strokeWidth="0.9"
+                    />
+                    <text x="17" y="9" className="fill-slate-700 text-[9.5px] font-medium">
+                      {label}
+                    </text>
+                  </g>
+                );
+              })
+            )}
 
             <line x1="10" y1="173" x2="232" y2="173" stroke="#e2e8f0" strokeWidth="0.9" />
 
-            {/* Selected Foundation Ring */}
+            {/* Selected Foundation / Anchor Ring */}
             <g transform="translate(17, 188)">
               <circle
                 cx="0"
@@ -584,7 +687,9 @@ export function GroundAnchorPlan2D({
                 strokeWidth="1.1"
               />
               <text x="14" y="3.5" className="fill-slate-800 text-[9.5px] font-semibold">
-                Selected / Current Foundation
+                {isGuyingMode
+                  ? 'Selected / Active Guy Anchor'
+                  : 'Selected / Current Foundation'}
               </text>
             </g>
 
@@ -602,7 +707,9 @@ export function GroundAnchorPlan2D({
               />
               <polygon points="0,3.5 3.5,-2.5 -3.5,-2.5" fill="none" stroke="#0f172a" strokeWidth="1" />
               <text x="14" y="3.5" className="fill-slate-700 text-[9.5px] font-medium">
-                PF-0 Principal Base (Bolt Frame)
+                {isGuyingMode
+                  ? 'PF-0 Mast Tower Base (S01–S41)'
+                  : 'PF-0 Principal Base (Bolt Frame)'}
               </text>
             </g>
 
@@ -621,7 +728,9 @@ export function GroundAnchorPlan2D({
               <line x1="0" y1="-2" x2="0" y2="6.5" stroke="#0f172a" strokeWidth="1.2" />
               <rect x="-1.5" y="1" width="3" height="2.2" fill="#0284c7" />
               <text x="14" y="3.5" className="fill-slate-700 text-[9.5px] font-medium">
-                Pull Anchor (Ground Anchor Rods)
+                {isGuyingMode
+                  ? 'Guy Pull Anchor (Up to 4 Guy Strands)'
+                  : 'Pull Anchor (Ground Anchor Rods)'}
               </text>
             </g>
           </g>
@@ -641,7 +750,10 @@ export function GroundAnchorPlan2D({
               const [fx, fy] = toSvg(sel.xM, sel.zM);
               const spec = FOUNDATION_SPECS[sel.type];
               const meta = STATUS_META[sel.status];
-              const singleLabel = `${sel.id} · ${spec.label} (${meta.pct}%)`;
+              const guyState = anchorGuyStates?.[sel.id];
+              const singleLabel = guyState
+                ? `${sel.id} · ${spec.label} (${guyState.summaryLabel})`
+                : `${sel.id} · ${spec.label} (${meta.pct}%)`;
               const boxW = computeCalloutBoxWidth(singleLabel, isSingle);
               const { elbowX, elbowY, boxX, align } = getSelectionLeaderLayout(
                 sel,

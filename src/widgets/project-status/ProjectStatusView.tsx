@@ -125,7 +125,7 @@ export function ProjectStatusView({ project }: { project: MastProjectState }) {
 
       {viewMode === 'report' ? (
         <div className="p-2 sm:p-5">
-          <div className="max-w-6xl mx-auto bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="max-w-6xl mx-auto bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
             <OverallProjectStatusSheet
               project={project}
               onSelectFoundation={(id) => openFoundationTab(id, 'activity')}
@@ -140,7 +140,7 @@ export function ProjectStatusView({ project }: { project: MastProjectState }) {
               <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 Overall Project Progress
               </div>
-              <div className="mt-1 flex items-baseline justify-between">
+              <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
                 <span className="text-xl font-bold text-sky-700 tabular-nums">
                   {metrics.overallProgressPct}%
                 </span>

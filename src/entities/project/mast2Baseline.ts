@@ -432,12 +432,12 @@ export function createInitialFoundations(): FoundationRecord[] {
       angleDeg: 0,
       xM: 0,
       zM: 0,
-      status: 'excavated',
-      checklist: { ...emptyChecklist(), excavationVerified: true },
+      status: 'not_started',
+      checklist: emptyChecklist(),
       actualCementBagsUsed: 0,
       actualSandBagsUsed: 0,
       actualGravelBagsUsed: 0,
-      notes: 'Excavation completed by previous contractor. Principal base with M27 embedded bolt frame & locating plate.',
+      notes: '',
     },
   ];
 
@@ -458,12 +458,12 @@ export function createInitialFoundations(): FoundationRecord[] {
         angleDeg: sec.angleDeg,
         xM,
         zM,
-        status: 'excavated',
-        checklist: { ...emptyChecklist(), excavationVerified: true },
+        status: 'not_started',
+        checklist: emptyChecklist(),
         actualCementBagsUsed: 0,
         actualSandBagsUsed: 0,
         actualGravelBagsUsed: 0,
-        notes: 'Excavation completed by previous contractor.',
+        notes: '',
       });
     }
   }

@@ -9,7 +9,18 @@ import {
   deriveStatusFromChecklist,
   emptyChecklist,
 } from '@/entities/project/mast2Baseline';
+import {
+  createCleanVerticalMastProject,
+  createInitialVerticalMastState,
+  createSampleVerticalMastProject,
+  deriveGuyLayerStatusFromSectors,
+  deriveSectionStatusFromChecklist,
+  guySectorsFromStatus,
+  normalizeVerticalMastState,
+  sectionChecklistFromStatus,
+} from '@/entities/project/verticalMastBaseline';
 import type {
+  CustomFoundationInspectionItem,
   DailyActivityLogEntry,
   FoundationCustomSpecs,
   FoundationInspectionEntry,
@@ -21,18 +32,45 @@ import type {
   FoundationRecord,
   FoundationStageChecklist,
   FoundationStatus,
+  GuyLayerRecord,
+  GuyLayerStatus,
+  GuySectorProgress,
   HaulingLogEntry,
   MastProjectState,
+  ProjectType,
   ReportDetailsSpec,
   SavedProjectRecord,
   ScheduleActivityItem,
+  SectorId,
   SiteEquipmentItem,
+  TowerSectionChecklist,
+  TowerSectionRecord,
+  TowerSectionStatus,
+  VerticalMastState,
 } from '@/entities/project/types';
 
 const LEGACY_STORAGE_KEY = 'mast2-tower-report-generator-v1';
 const WORKSPACE_STORAGE_KEY = 'mast2-tower-projects-workspace-v1';
 
+const LEGACY_BOILERPLATE_NOTES = new Set([
+  'Excavation completed by previous contractor.',
+  'Excavation completed by previous contractor. Principal base with M27 embedded bolt frame & locating plate.',
+]);
+
+function stripLegacyBoilerplateNotes(state: MastProjectState): MastProjectState {
+  let changed = false;
+  const foundations = state.foundations.map((f) => {
+    if (f.notes && LEGACY_BOILERPLATE_NOTES.has(f.notes.trim())) {
+      changed = true;
+      return { ...f, notes: '' };
+    }
+    return f;
+  });
+  return changed ? { ...state, foundations } : state;
+}
+
 export interface CreateProjectOptions {
+  projectType?: ProjectType;
   projectName?: string;
   location?: string;
   contractor?: string;
@@ -88,7 +126,20 @@ function loadInitialWorkspace(): WorkspacePayload {
     if (workspaceRaw) {
       const parsed = JSON.parse(workspaceRaw) as Partial<WorkspacePayload>;
       const validProjects = Array.isArray(parsed.projects)
-        ? parsed.projects.filter((p) => p && p.id && isValidProjectState(p.state))
+        ? parsed.projects
+            .filter((p) => p && p.id && isValidProjectState(p.state))
+            .map((p) => {
+              const cleaned = stripLegacyBoilerplateNotes(p.state);
+              return cleaned.verticalMast
+                ? {
+                    ...p,
+                    state: {
+                      ...cleaned,
+                      verticalMast: normalizeVerticalMastState(cleaned.verticalMast),
+                    },
+                  }
+                : { ...p, state: cleaned };
+            })
         : [];
       if (validProjects.length > 0) {
         const active =
@@ -139,6 +190,139 @@ function commitActiveProject(
       ];
   persistWorkspace(s.activeProjectId, projects);
   return { project: nextProject, projects };
+}
+
+type InspectionHolder = {
+  inspectionChecklist?: Partial<
+    Record<FoundationInspectionItemKey, FoundationInspectionEntry>
+  >;
+  customInspectionItems?: CustomFoundationInspectionItem[];
+  removedInspectionKeys?: string[];
+  inspectionMeta?: FoundationInspectionMeta;
+};
+
+function patchInspectionItemInHolder<T extends InspectionHolder>(
+  holder: T,
+  key: FoundationInspectionItemKey,
+  patch: Partial<FoundationInspectionEntry>
+): T {
+  const currentMap = holder.inspectionChecklist ?? {};
+  const prevEntry: FoundationInspectionEntry = currentMap[key] ?? {
+    status: 'Pending',
+    remarks: '',
+  };
+  const customInspectionItems = holder.customInspectionItems?.map((ci) =>
+    ci.key === key
+      ? {
+          ...ci,
+          ...(patch.description !== undefined ? { description: patch.description } : {}),
+          ...(patch.planMeasurement !== undefined
+            ? { planMeasurement: patch.planMeasurement }
+            : {}),
+        }
+      : ci
+  );
+  return {
+    ...holder,
+    ...(customInspectionItems ? { customInspectionItems } : {}),
+    inspectionChecklist: {
+      ...currentMap,
+      [key]: {
+        ...prevEntry,
+        ...patch,
+      },
+    },
+  };
+}
+
+function addInspectionItemInHolder<T extends InspectionHolder>(
+  holder: T,
+  item: {
+    description: string;
+    planMeasurement: string;
+    status?: FoundationInspectionStatus;
+    actualMeasurement?: string;
+    remarks?: string;
+  }
+): T {
+  const description = item.description.trim();
+  if (!description) return holder;
+  const newKey = `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const customInspectionItems = [
+    ...(holder.customInspectionItems ?? []),
+    { key: newKey, description, planMeasurement: item.planMeasurement },
+  ];
+  return {
+    ...holder,
+    customInspectionItems,
+    inspectionChecklist: {
+      ...(holder.inspectionChecklist ?? {}),
+      [newKey]: {
+        status: item.status ?? 'Pending',
+        description,
+        planMeasurement: item.planMeasurement,
+        actualMeasurement: item.actualMeasurement ?? '',
+        remarks: item.remarks ?? '',
+      },
+    },
+  };
+}
+
+function removeInspectionItemInHolder<T extends InspectionHolder>(
+  holder: T,
+  key: FoundationInspectionItemKey
+): T {
+  const isCustom = (holder.customInspectionItems ?? []).some((ci) => ci.key === key);
+  const nextMap = { ...(holder.inspectionChecklist ?? {}) };
+  delete nextMap[key];
+  const hasEntries = Object.keys(nextMap).length > 0;
+  if (isCustom) {
+    const remainingCustom = (holder.customInspectionItems ?? []).filter(
+      (ci) => ci.key !== key
+    );
+    return {
+      ...holder,
+      customInspectionItems: remainingCustom.length > 0 ? remainingCustom : undefined,
+      inspectionChecklist: hasEntries ? nextMap : undefined,
+    };
+  }
+  const removedSet = new Set(holder.removedInspectionKeys ?? []);
+  removedSet.add(key);
+  return {
+    ...holder,
+    removedInspectionKeys: Array.from(removedSet),
+    inspectionChecklist: hasEntries ? nextMap : undefined,
+  };
+}
+
+function resetInspectionChecklistInHolder<T extends InspectionHolder>(holder: T): T {
+  return {
+    ...holder,
+    inspectionChecklist: undefined,
+    customInspectionItems: undefined,
+    removedInspectionKeys: undefined,
+  };
+}
+
+function syncVerticalMastFlags(vm: VerticalMastState): VerticalMastState {
+  const normalized = normalizeVerticalMastState(vm);
+  const s03 = normalized.sections.find((s) => s.hasPlatform);
+  const topSec = normalized.sections.find((s) => s.hasLightningRod);
+  return {
+    ...normalized,
+    platformStatus:
+      s03?.status === 'plumbed_verified'
+        ? 'verified'
+        : s03?.checklist.guyPlatesOrFixturesReady || s03?.status === 'bolted_torqued'
+          ? 'installed'
+          : 'not_started',
+    lightningRodStatus:
+      topSec?.status === 'plumbed_verified'
+        ? 'verified'
+        : topSec?.checklist.guyPlatesOrFixturesReady || topSec?.status === 'bolted_torqued'
+          ? 'installed'
+          : 'not_started',
+  };
 }
 
 function buildHaulingRecord(
@@ -243,10 +427,80 @@ interface ProjectStore {
     id: string,
     patch: Partial<Pick<SiteEquipmentItem, 'onHandQty' | 'deliveredQty' | 'remarks'>>
   ) => void;
+  setProjectPhase: (phase: ProjectType) => void;
   loadSampleData: () => void;
   resetCleanBaseline: () => void;
   importProjectJson: (jsonText: string) => void;
   exportProjectJson: () => string;
+
+  // Vertical Mast Tower phase actions
+  updateTowerSectionStatus: (id: string, status: TowerSectionStatus) => void;
+  toggleTowerSectionChecklistItem: (
+    id: string,
+    key: keyof TowerSectionChecklist
+  ) => void;
+  updateTowerSectionDetails: (
+    id: string,
+    patch: Partial<
+      Pick<
+        TowerSectionRecord,
+        'installedDate' | 'verifiedDate' | 'verticalityMm' | 'notes' | 'legSpec' | 'boltSpec'
+      >
+    >
+  ) => void;
+  batchUpdateTowerSectionRange: (
+    fromSectionNo: number,
+    toSectionNo: number,
+    status: TowerSectionStatus
+  ) => void;
+  updateGuyLayerStatus: (id: string, status: GuyLayerStatus) => void;
+  updateGuyLayerSector: (
+    id: string,
+    sector: Exclude<SectorId, 'CENTER'>,
+    patch: Partial<GuySectorProgress>
+  ) => void;
+  toggleGuyLayerSectorInstalled: (
+    id: string,
+    sector: Exclude<SectorId, 'CENTER'>
+  ) => void;
+  toggleGuyLayerAllTensioned: (id: string) => void;
+  updateGuyLayerDetails: (
+    id: string,
+    patch: Partial<
+      Pick<GuyLayerRecord, 'installedDate' | 'verifiedDate' | 'notes' | 'cableSpec'>
+    >
+  ) => void;
+  updateMastInspectionItem: (
+    targetKind: 'section' | 'guy_layer',
+    id: string,
+    key: FoundationInspectionItemKey,
+    patch: Partial<FoundationInspectionEntry>
+  ) => void;
+  addMastInspectionItem: (
+    targetKind: 'section' | 'guy_layer',
+    id: string,
+    item: {
+      description: string;
+      planMeasurement: string;
+      status?: FoundationInspectionStatus;
+      actualMeasurement?: string;
+      remarks?: string;
+    }
+  ) => void;
+  removeMastInspectionItem: (
+    targetKind: 'section' | 'guy_layer',
+    id: string,
+    key: FoundationInspectionItemKey
+  ) => void;
+  resetMastInspectionChecklist: (
+    targetKind: 'section' | 'guy_layer',
+    id: string
+  ) => void;
+  updateMastInspectionMeta: (
+    targetKind: 'section' | 'guy_layer',
+    id: string,
+    patch: Partial<FoundationInspectionMeta>
+  ) => void;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => {
@@ -263,21 +517,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     createProject: (options = {}) => {
       const s = get();
+      const projectType: ProjectType = options.projectType ?? 'foundation';
       const base =
-        options.template === 'sample'
-          ? createSampleMast2Project()
-          : (() => {
-              const clean = createCleanBaselineProject();
-              return {
-                ...clean,
-                foundations: clean.foundations.map((f) => ({
-                  ...f,
-                  status: 'not_started' as const,
-                  checklist: emptyChecklist(),
-                  notes: '',
-                })),
-              };
-            })();
+        projectType === 'vertical_mast'
+          ? options.template === 'sample'
+            ? createSampleVerticalMastProject()
+            : createCleanVerticalMastProject()
+          : options.template === 'sample'
+            ? createSampleMast2Project()
+            : (() => {
+                const clean = createCleanBaselineProject();
+                return {
+                  ...clean,
+                  foundations: clean.foundations.map((f) => ({
+                    ...f,
+                    status: 'not_started' as const,
+                    checklist: emptyChecklist(),
+                    notes: '',
+                  })),
+                };
+              })();
       const projectName = options.projectName?.trim() || `Project ${s.projects.length + 1}`;
       const location = options.location?.trim() || base.location;
       const contractor = options.contractor?.trim() || base.contractor;
@@ -292,6 +551,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           : undefined;
       const nextState: MastProjectState = {
         ...base,
+        projectType,
+        verticalMast: base.verticalMast ?? createInitialVerticalMastState(),
         projectName,
         location,
         contractor,
@@ -876,11 +1137,36 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       return commitActiveProject(s, next);
     }),
 
+  setProjectPhase: (phase) =>
+    set((s) =>
+      commitActiveProject(s, {
+        ...s.project,
+        projectType: phase,
+        verticalMast: s.project.verticalMast
+          ? normalizeVerticalMastState(s.project.verticalMast)
+          : createInitialVerticalMastState(),
+      })
+    ),
+
   loadSampleData: () =>
-    set((s) => commitActiveProject(s, createSampleMast2Project())),
+    set((s) =>
+      commitActiveProject(
+        s,
+        s.project.projectType === 'vertical_mast'
+          ? createSampleVerticalMastProject()
+          : createSampleMast2Project()
+      )
+    ),
 
   resetCleanBaseline: () =>
-    set((s) => commitActiveProject(s, createCleanBaselineProject())),
+    set((s) =>
+      commitActiveProject(
+        s,
+        s.project.projectType === 'vertical_mast'
+          ? createCleanVerticalMastProject()
+          : createCleanBaselineProject()
+      )
+    ),
 
   importProjectJson: (jsonText) => {
     const parsed = JSON.parse(jsonText) as MastProjectState;
@@ -894,6 +1180,368 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
   },
 
   exportProjectJson: () => JSON.stringify(get().project, null, 2),
+
+  updateTowerSectionStatus: (id, status) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const isInstalled =
+        status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
+      const sections = vm.sections.map((sec) =>
+        sec.id === id
+          ? {
+              ...sec,
+              status,
+              checklist: sectionChecklistFromStatus(status),
+              installedDate: isInstalled ? sec.installedDate || today : sec.installedDate,
+              verifiedDate:
+                status === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
+            }
+          : sec
+      );
+      const next: MastProjectState = {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: syncVerticalMastFlags({ ...vm, sections }),
+      };
+      return commitActiveProject(s, next);
+    }),
+
+  toggleTowerSectionChecklistItem: (id, key) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const sections = vm.sections.map((sec) => {
+        if (sec.id !== id) return sec;
+        const nextVal = !sec.checklist[key];
+        const checklist =
+          key === 'plumbedAndInspected'
+            ? sectionChecklistFromStatus(nextVal ? 'plumbed_verified' : 'not_started')
+            : {
+                ...sec.checklist,
+                [key]: nextVal,
+              };
+        const status = deriveSectionStatusFromChecklist(checklist);
+        return {
+          ...sec,
+          checklist,
+          status,
+          installedDate:
+            checklist.hoistedInPosition || checklist.plumbedAndInspected
+              ? sec.installedDate || today
+              : undefined,
+          verifiedDate:
+            status === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
+        };
+      });
+      const next: MastProjectState = {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: syncVerticalMastFlags({ ...vm, sections }),
+      };
+      return commitActiveProject(s, next);
+    }),
+
+  updateTowerSectionDetails: (id, patch) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const sections = vm.sections.map((sec) =>
+        sec.id === id ? { ...sec, ...patch } : sec
+      );
+      const next: MastProjectState = {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: { ...vm, sections },
+      };
+      return commitActiveProject(s, next);
+    }),
+
+  batchUpdateTowerSectionRange: (fromSectionNo, toSectionNo, status) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const lo = Math.min(fromSectionNo, toSectionNo);
+      const hi = Math.max(fromSectionNo, toSectionNo);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const isInstalled =
+        status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
+      const sections = vm.sections.map((sec) =>
+        sec.sectionNo >= lo && sec.sectionNo <= hi
+          ? {
+              ...sec,
+              status,
+              checklist: sectionChecklistFromStatus(status),
+              installedDate: isInstalled ? sec.installedDate || today : sec.installedDate,
+              verifiedDate:
+                status === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
+            }
+          : sec
+      );
+      const next: MastProjectState = {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: syncVerticalMastFlags({ ...vm, sections }),
+      };
+      return commitActiveProject(s, next);
+    }),
+
+  updateGuyLayerStatus: (id, status) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const template = guySectorsFromStatus(status);
+      const guyLayers = vm.guyLayers.map((g) =>
+        g.id === id
+          ? {
+              ...g,
+              status,
+              sectors: {
+                I: { ...g.sectors.I, ...template.I },
+                II: { ...g.sectors.II, ...template.II },
+                III: { ...g.sectors.III, ...template.III },
+              },
+              installedDate: status !== 'not_started' ? g.installedDate || today : undefined,
+              verifiedDate:
+                status === 'tensioned_verified' ? g.verifiedDate || today : undefined,
+            }
+          : g
+      );
+      const next: MastProjectState = {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: { ...vm, guyLayers },
+      };
+      return commitActiveProject(s, next);
+    }),
+
+  updateGuyLayerSector: (id, sector, patch) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const guyLayers = vm.guyLayers.map((g) => {
+        if (g.id !== id) return g;
+        const prevSector = g.sectors[sector];
+        const nextSector: GuySectorProgress = {
+          ...prevSector,
+          ...patch,
+        };
+        if (patch.tensioned) {
+          nextSector.pulled = true;
+          nextSector.terminated = true;
+        } else if (patch.terminated) {
+          nextSector.pulled = true;
+        }
+        const sectors = {
+          ...g.sectors,
+          [sector]: nextSector,
+        };
+        const status = deriveGuyLayerStatusFromSectors(sectors);
+        return {
+          ...g,
+          sectors,
+          status,
+          installedDate: status !== 'not_started' ? g.installedDate || today : undefined,
+          verifiedDate:
+            status === 'tensioned_verified' ? g.verifiedDate || today : undefined,
+        };
+      });
+      const next: MastProjectState = {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: { ...vm, guyLayers },
+      };
+      return commitActiveProject(s, next);
+    }),
+
+  toggleGuyLayerSectorInstalled: (id, sector) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const guyLayers = vm.guyLayers.map((g) => {
+        if (g.id !== id) return g;
+        const prev = g.sectors[sector];
+        const currentlyInstalled = Boolean(prev.terminated || prev.tensioned);
+        const nextSector: GuySectorProgress = currentlyInstalled
+          ? { ...prev, pulled: false, terminated: false, tensioned: false }
+          : { ...prev, pulled: true, terminated: true };
+        const sectors = { ...g.sectors, [sector]: nextSector };
+        const status = deriveGuyLayerStatusFromSectors(sectors);
+        return {
+          ...g,
+          sectors,
+          status,
+          installedDate: status !== 'not_started' ? g.installedDate || today : undefined,
+          verifiedDate:
+            status === 'tensioned_verified' ? g.verifiedDate || today : undefined,
+        };
+      });
+      return commitActiveProject(s, {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: { ...vm, guyLayers },
+      });
+    }),
+
+  toggleGuyLayerAllTensioned: (id) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const guyLayers = vm.guyLayers.map((g) => {
+        if (g.id !== id) return g;
+        const allTensioned = (['I', 'II', 'III'] as const).every(
+          (k) => g.sectors[k].tensioned
+        );
+        const sectors = allTensioned
+          ? {
+              I: { ...g.sectors.I, pulled: true, terminated: true, tensioned: false },
+              II: { ...g.sectors.II, pulled: true, terminated: true, tensioned: false },
+              III: { ...g.sectors.III, pulled: true, terminated: true, tensioned: false },
+            }
+          : {
+              I: { ...g.sectors.I, pulled: true, terminated: true, tensioned: true },
+              II: { ...g.sectors.II, pulled: true, terminated: true, tensioned: true },
+              III: { ...g.sectors.III, pulled: true, terminated: true, tensioned: true },
+            };
+        const status = deriveGuyLayerStatusFromSectors(sectors);
+        return {
+          ...g,
+          sectors,
+          status,
+          installedDate: status !== 'not_started' ? g.installedDate || today : undefined,
+          verifiedDate:
+            status === 'tensioned_verified' ? g.verifiedDate || today : undefined,
+        };
+      });
+      return commitActiveProject(s, {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: { ...vm, guyLayers },
+      });
+    }),
+
+  updateGuyLayerDetails: (id, patch) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const guyLayers = vm.guyLayers.map((g) =>
+        g.id === id ? { ...g, ...patch } : g
+      );
+      const next: MastProjectState = {
+        ...s.project,
+        lastUpdated: today,
+        verticalMast: { ...vm, guyLayers },
+      };
+      return commitActiveProject(s, next);
+    }),
+
+  updateMastInspectionItem: (targetKind, id, key, patch) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const nextVm: VerticalMastState =
+        targetKind === 'section'
+          ? {
+              ...vm,
+              sections: vm.sections.map((sec) =>
+                sec.id === id ? patchInspectionItemInHolder(sec, key, patch) : sec
+              ),
+            }
+          : {
+              ...vm,
+              guyLayers: vm.guyLayers.map((g) =>
+                g.id === id ? patchInspectionItemInHolder(g, key, patch) : g
+              ),
+            };
+      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+    }),
+
+  addMastInspectionItem: (targetKind, id, item) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const nextVm: VerticalMastState =
+        targetKind === 'section'
+          ? {
+              ...vm,
+              sections: vm.sections.map((sec) =>
+                sec.id === id ? addInspectionItemInHolder(sec, item) : sec
+              ),
+            }
+          : {
+              ...vm,
+              guyLayers: vm.guyLayers.map((g) =>
+                g.id === id ? addInspectionItemInHolder(g, item) : g
+              ),
+            };
+      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+    }),
+
+  removeMastInspectionItem: (targetKind, id, key) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const nextVm: VerticalMastState =
+        targetKind === 'section'
+          ? {
+              ...vm,
+              sections: vm.sections.map((sec) =>
+                sec.id === id ? removeInspectionItemInHolder(sec, key) : sec
+              ),
+            }
+          : {
+              ...vm,
+              guyLayers: vm.guyLayers.map((g) =>
+                g.id === id ? removeInspectionItemInHolder(g, key) : g
+              ),
+            };
+      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+    }),
+
+  resetMastInspectionChecklist: (targetKind, id) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const nextVm: VerticalMastState =
+        targetKind === 'section'
+          ? {
+              ...vm,
+              sections: vm.sections.map((sec) =>
+                sec.id === id ? resetInspectionChecklistInHolder(sec) : sec
+              ),
+            }
+          : {
+              ...vm,
+              guyLayers: vm.guyLayers.map((g) =>
+                g.id === id ? resetInspectionChecklistInHolder(g) : g
+              ),
+            };
+      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+    }),
+
+  updateMastInspectionMeta: (targetKind, id, patch) =>
+    set((s) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+      const nextVm: VerticalMastState =
+        targetKind === 'section'
+          ? {
+              ...vm,
+              sections: vm.sections.map((sec) =>
+                sec.id === id
+                  ? { ...sec, inspectionMeta: { ...(sec.inspectionMeta ?? {}), ...patch } }
+                  : sec
+              ),
+            }
+          : {
+              ...vm,
+              guyLayers: vm.guyLayers.map((g) =>
+                g.id === id
+                  ? { ...g, inspectionMeta: { ...(g.inspectionMeta ?? {}), ...patch } }
+                  : g
+              ),
+            };
+      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+    }),
   };
 });
 
