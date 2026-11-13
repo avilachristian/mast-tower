@@ -1,0 +1,543 @@
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  CheckCircle2,
+  ClipboardCheck,
+  Edit3,
+  Layers,
+  Printer,
+  X,
+} from 'lucide-react';
+import {
+  buildOverallProjectStatusReportData,
+  formatDateWithWeekday,
+} from '@/entities/project/calculations';
+import { STATUS_META } from '@/entities/project/mast2Baseline';
+import type { FoundationStatus, MastProjectState } from '@/entities/project/types';
+import { useProjectStore } from '@/shared/state/projectStore';
+import { useUiStore } from '@/shared/state/uiStore';
+import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
+import { OverallProjectStatusSheet } from './OverallProjectStatusSheet';
+
+export function ProjectStatusView({ project }: { project: MastProjectState }) {
+  const [viewMode, setViewMode] = useState<'overview' | 'report'>('overview');
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [draftPourDate, setDraftPourDate] = useState('');
+  const [draftCompletedDate, setDraftCompletedDate] = useState('');
+  const [draftNotes, setDraftNotes] = useState('');
+
+  const selectFoundation = useProjectStore((s) => s.selectFoundation);
+  const updateFoundationStatus = useProjectStore((s) => s.updateFoundationStatus);
+  const updateFoundationDetails = useProjectStore((s) => s.updateFoundationDetails);
+  const setActiveAppTab = useUiStore((s) => s.setActiveAppTab);
+  const setOverallReportOpen = useUiStore((s) => s.setOverallReportOpen);
+
+  const overview = buildOverallProjectStatusReportData(project);
+  const { metrics, stageCounts, sectorSummaries, foundationRows } = overview;
+
+  const editingRow = editingRowId
+    ? foundationRows.find((r) => r.id === editingRowId) ?? null
+    : null;
+
+  useEffect(() => {
+    if (!editingRowId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setEditingRowId(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editingRowId]);
+
+  const openEditDetailsModal = (row: (typeof foundationRows)[number]) => {
+    setEditingRowId(row.id);
+    setDraftPourDate(row.pourDate ?? '');
+    setDraftCompletedDate(row.completedDate ?? '');
+    setDraftNotes(row.notes ?? '');
+  };
+
+  const handleSaveDetailsModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRowId) return;
+    updateFoundationDetails(editingRowId, {
+      pourDate: draftPourDate.trim() || undefined,
+      completedDate: draftCompletedDate.trim() || undefined,
+      notes: draftNotes,
+    });
+    setEditingRowId(null);
+  };
+
+  const openFoundationTab = (id: string, tab: 'activity' | 'inspection') => {
+    selectFoundation(id);
+    setActiveAppTab(tab);
+  };
+
+  return (
+    <div className="flex flex-col bg-slate-50 min-h-full">
+      {/* Top Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2.5 bg-white border-b border-slate-200 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-sky-50 border border-sky-200 text-xs font-bold text-sky-800">
+            <CheckCircle2 className="w-3.5 h-3.5 text-sky-600" />
+            Overall Progress: {metrics.overallProgressPct}%
+          </span>
+          <span className="text-xs text-slate-600 font-medium">
+            {metrics.completedCount}/{metrics.totalFoundations} Completed ·{' '}
+            {metrics.pouredConcreteCuM.toFixed(2)}/{metrics.totalConcreteCuM.toFixed(2)} m³ Poured
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('overview')}
+              className={`px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
+                viewMode === 'overview'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Status Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('report')}
+              className={`px-2.5 py-1.5 rounded-md font-medium transition cursor-pointer ${
+                viewMode === 'report'
+                  ? 'bg-white text-sky-700 shadow-xs font-semibold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Report Preview
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setOverallReportOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            <span>Print / PDF</span>
+          </button>
+        </div>
+      </div>
+
+      {viewMode === 'report' ? (
+        <div className="p-2 sm:p-5">
+          <div className="max-w-6xl mx-auto bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <OverallProjectStatusSheet
+              project={project}
+              onSelectFoundation={(id) => openFoundationTab(id, 'activity')}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="p-3 sm:p-4 max-w-7xl w-full mx-auto space-y-4">
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Overall Project Progress
+              </div>
+              <div className="mt-1 flex items-baseline justify-between">
+                <span className="text-xl font-bold text-sky-700 tabular-nums">
+                  {metrics.overallProgressPct}%
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Updated {formatDateWithWeekday(project.lastUpdated)}
+                </span>
+              </div>
+              <div className="mt-2 h-2 w-full rounded-full bg-slate-100 overflow-hidden border border-slate-200">
+                <div
+                  className="h-full bg-sky-600 transition-all"
+                  style={{ width: `${metrics.overallProgressPct}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Foundations Completed
+              </div>
+              <div className="mt-1 text-xl font-bold text-slate-900 tabular-nums">
+                {metrics.completedCount} / {metrics.totalFoundations}
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500">
+                {metrics.pouredOrBeyondCount} concreted / curing / backfilled
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Concrete Volume Poured
+              </div>
+              <div className="mt-1 text-xl font-bold text-slate-900 tabular-nums">
+                {metrics.pouredConcreteCuM.toFixed(2)} m³
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500">
+                of {metrics.totalConcreteCuM.toFixed(2)} m³ design total
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                Field Logs &amp; Manpower
+              </div>
+              <div className="mt-1 text-xl font-bold text-slate-900 tabular-nums">
+                {project.dailyLogs.length} Daily Logs
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500">
+                {metrics.totalManDays} total man-days ({metrics.totalManHours} man-hrs)
+              </div>
+            </div>
+          </div>
+
+          {/* 2D Layout + Stage/Sector Rollup */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            <div className="lg:col-span-7">
+              <GroundAnchorPlan2D
+                foundations={project.foundations}
+                showNodeLabels
+                title={`Site Foundation Status Layout — ${project.reportDetails?.projectName?.trim() || project.projectName}${
+                  project.reportDetails?.referenceNo?.trim()
+                    ? ` (${project.reportDetails.referenceNo.trim()})`
+                    : ''
+                }`}
+                subtitle="Overview of all 13 foundation pads by construction stage — click any pad to open its activity sheet"
+                onSelect={(id) => openFoundationTab(id, 'activity')}
+              />
+            </div>
+
+            <div className="lg:col-span-5 space-y-4">
+              {/* Stage Distribution Card */}
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                    Stage Breakdown ({metrics.totalFoundations} Foundations)
+                  </h2>
+                </div>
+                <div className="divide-y divide-slate-100 text-xs">
+                  {stageCounts.map((stage) => (
+                    <div
+                      key={stage.status}
+                      className="px-3.5 py-2 flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-3 h-3 rounded-xs border border-slate-700 shrink-0"
+                          style={{
+                            backgroundColor: stage.color,
+                            opacity: stage.status === 'not_started' ? 0.3 : 0.9,
+                          }}
+                        />
+                        <span className="font-medium text-slate-800 truncate">
+                          {stage.label}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[11px] text-slate-500 hidden sm:inline">
+                          {stage.foundationIds.length > 0
+                            ? stage.foundationIds.join(', ')
+                            : '—'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 font-bold text-[11px] tabular-nums">
+                          {stage.count}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Sector Rollup Card */}
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                    Sector Progress Summary
+                  </h2>
+                </div>
+                <div className="divide-y divide-slate-100 text-xs">
+                  {sectorSummaries.map((sec) => (
+                    <div key={sec.sector} className="px-3.5 py-2.5 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-800">{sec.label}</span>
+                        <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
+                          {sec.completedCount}/{sec.foundationCount} Done ·{' '}
+                          <span className="text-sky-700 font-bold">{sec.avgProgressPct}%</span>
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                        <div
+                          className="h-full bg-sky-600 transition-all"
+                          style={{ width: `${sec.avgProgressPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Individual Foundation Status Table */}
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                  Individual Status of Each Foundation
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Update foundation stage, dates, and notes inline or open a pad in 2D Activity / Inspection
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 text-[11px]">
+                  <tr>
+                    <th className="px-3 py-2 font-bold">Pad ID</th>
+                    <th className="px-3 py-2 font-bold">Foundation / Sector</th>
+                    <th className="px-3 py-2 font-bold">Size &amp; Volume</th>
+                    <th className="px-3 py-2 font-bold text-center">Tasks</th>
+                    <th className="px-3 py-2 font-bold">Stage Status</th>
+                    <th className="px-3 py-2 font-bold text-center">Progress</th>
+                    <th className="px-3 py-2 font-bold">Dates / Notes</th>
+                    <th className="px-3 py-2 font-bold text-right">Open</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {foundationRows.map((row) => (
+                    <tr key={row.id} className="hover:bg-slate-50/80">
+                      <td className="px-3 py-2 font-bold text-sky-700 whitespace-nowrap">
+                        {row.id}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="font-semibold text-slate-900">{row.typeLabel}</div>
+                        <div className="text-[11px] text-slate-500">{row.sectorLabel}</div>
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        <div className="font-medium text-slate-800">{row.sizeLabel}</div>
+                        <div className="text-[11px] text-slate-500">
+                          {row.totalVolumeCuM.toFixed(2)} m³ total
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-center font-semibold tabular-nums text-slate-700">
+                        {row.completedSteps}/{row.totalSteps}
+                      </td>
+                      <td className="px-3 py-2">
+                        <select
+                          aria-label={`Status for ${row.id}`}
+                          value={row.status}
+                          onChange={(e) =>
+                            updateFoundationStatus(
+                              row.id,
+                              e.target.value as FoundationStatus
+                            )
+                          }
+                          className={`rounded-md border px-2 py-1 text-[11px] font-semibold cursor-pointer ${
+                            STATUS_META[row.status].bgClass
+                          } ${STATUS_META[row.status].textClass}`}
+                        >
+                          {(Object.keys(STATUS_META) as FoundationStatus[]).map((st) => (
+                            <option key={st} value={st}>
+                              {STATUS_META[st].label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2 text-center font-bold tabular-nums text-slate-900">
+                        {row.progressPct}%
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-slate-600 max-w-xs">
+                        <button
+                          type="button"
+                          onClick={() => openEditDetailsModal(row)}
+                          className="group w-full text-left rounded-md px-2 py-1 -mx-2 -my-1 hover:bg-sky-50/80 border border-transparent hover:border-sky-200 transition flex items-start justify-between gap-2 cursor-pointer"
+                          title={`Edit dates & notes for ${row.id}`}
+                        >
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            {row.completedDate && (
+                              <div className="font-medium text-emerald-700">
+                                Done: {formatDateWithWeekday(row.completedDate)}
+                              </div>
+                            )}
+                            {row.pourDate && (
+                              <div className="font-medium text-slate-700">
+                                Pour: {formatDateWithWeekday(row.pourDate)}
+                              </div>
+                            )}
+                            {row.notes.trim() ? (
+                              <div className="truncate text-slate-500">{row.notes}</div>
+                            ) : (
+                              !row.completedDate &&
+                              !row.pourDate && (
+                                <span className="text-slate-400 italic">Add dates / notes...</span>
+                              )
+                            )}
+                          </div>
+                          <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600 shrink-0 mt-0.5" />
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openFoundationTab(row.id, 'activity')}
+                            title={`Open ${row.id} in 2D Activity`}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white hover:bg-sky-50 hover:border-sky-300 text-[11px] font-semibold text-slate-700 hover:text-sky-700 cursor-pointer"
+                          >
+                            <Layers className="w-3 h-3" />
+                            <span>Activity</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openFoundationTab(row.id, 'inspection')}
+                            title={`Open ${row.id} in Foundation Inspection`}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white hover:bg-sky-50 hover:border-sky-300 text-[11px] font-semibold text-slate-700 hover:text-sky-700 cursor-pointer"
+                          >
+                            <ClipboardCheck className="w-3 h-3" />
+                            <span>Inspect</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Editing Dates & Notes */}
+      {editingRow &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+            onClick={() => setEditingRowId(null)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit-foundation-dates-notes-title"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-2xl overflow-hidden"
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+                <div>
+                  <h3
+                    id="edit-foundation-dates-notes-title"
+                    className="text-sm font-bold text-slate-900"
+                  >
+                    Edit Dates &amp; Notes — {editingRow.id}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {editingRow.typeLabel} · {editingRow.sectorLabel}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingRowId(null)}
+                  aria-label="Close edit dates and notes modal"
+                  className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-200 hover:text-slate-900 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveDetailsModal} className="p-4 space-y-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="block space-y-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                      Pour Date
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        value={draftPourDate}
+                        onChange={(e) => setDraftPourDate(e.target.value)}
+                        className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                      />
+                      {draftPourDate && (
+                        <button
+                          type="button"
+                          onClick={() => setDraftPourDate('')}
+                          className="px-2 py-1.5 rounded-lg border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-100 cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {draftPourDate ? formatDateWithWeekday(draftPourDate) : 'Not set'}
+                    </div>
+                  </label>
+
+                  <label className="block space-y-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                      Completed Date
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        value={draftCompletedDate}
+                        onChange={(e) => setDraftCompletedDate(e.target.value)}
+                        className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                      />
+                      {draftCompletedDate && (
+                        <button
+                          type="button"
+                          onClick={() => setDraftCompletedDate('')}
+                          className="px-2 py-1.5 rounded-lg border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-100 cursor-pointer"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {draftCompletedDate
+                        ? formatDateWithWeekday(draftCompletedDate)
+                        : 'Not set'}
+                    </div>
+                  </label>
+                </div>
+
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                    Field Notes / Remarks
+                  </span>
+                  <textarea
+                    rows={4}
+                    value={draftNotes}
+                    onChange={(e) => setDraftNotes(e.target.value)}
+                    placeholder="Record concrete slump, bolt frame alignment, backfill compaction, or site remarks..."
+                    className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
+                  />
+                </label>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setEditingRowId(null)}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold shadow-xs cursor-pointer"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+

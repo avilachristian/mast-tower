@@ -1,0 +1,812 @@
+import { describe, expect, it } from 'vitest';
+import { resolveReportDetails } from '@/widgets/report/ReportLetterhead';
+import {
+  bagsToCuM,
+  buildFoundationActivityReportData,
+  buildNextDayMaterialsFromLog,
+  buildOverallProjectStatusReportData,
+  computeDailyLogMaterialRemaining,
+  computeProjectMetrics,
+  createDefaultDailyLogMaterials,
+  cuMToBags,
+  findPreviousDailyLogForDraft,
+  formatDailyLogPlainText,
+  formatDateWithWeekday,
+  getDailyLogDelayRows,
+  getDailyLogEquipmentRows,
+  getDailyLogMaterialRows,
+  getDailyLogSafetyRows,
+  getDailyLogVisitorRows,
+  getReportableInspections,
+  getWeekdayName,
+  kgToBags,
+  sortDailyLogsNewestFirst,
+  summarizeHaulingData,
+} from '@/entities/project/calculations';
+import {
+  BAGS_PER_CUBIC_METER,
+  DEFAULT_KG_PER_BAG,
+  createCleanBaselineProject,
+  createInitialFoundations,
+  createSampleMast2Project,
+  deriveStatusFromChecklist,
+  emptyChecklist,
+} from '@/entities/project/mast2Baseline';
+import { useUiStore } from '@/shared/state/uiStore';
+import { useProjectStore } from '@/shared/state/projectStore';
+import {
+  computeCalloutBoxWidth,
+  getSelectionLeaderLayout,
+} from '@/widgets/layout-plan/GroundAnchorPlan2D';
+
+describe('Mast 2 Baseline & Conversions', () => {
+  it('creates 13 foundations (1 Principal + 12 Pull Anchors across 3 sectors)', () => {
+    const foundations = createInitialFoundations();
+    expect(foundations).toHaveLength(13);
+    expect(foundations.filter((f) => f.type === 'principal')).toHaveLength(1);
+    expect(foundations.filter((f) => f.type === 'anchor_a')).toHaveLength(3);
+    expect(foundations.filter((f) => f.type === 'anchor_b')).toHaveLength(6);
+    expect(foundations.filter((f) => f.type === 'anchor_c')).toHaveLength(3);
+  });
+
+  it('converts between kg, bags, and cubic meters (40kg = 1 bag, 36 bags/cu.m)', () => {
+    expect(DEFAULT_KG_PER_BAG).toBe(40);
+    expect(kgToBags(40)).toBe(1);
+    expect(kgToBags(100)).toBe(2.5);
+    expect(BAGS_PER_CUBIC_METER).toBe(36);
+    expect(bagsToCuM(36)).toBe(1);
+    expect(bagsToCuM(72)).toBe(2);
+    expect(cuMToBags(28)).toBe(1008);
+  });
+
+  it('derives foundation status accurately from checklist progression', () => {
+    const c = emptyChecklist();
+    expect(deriveStatusFromChecklist(c)).toBe('not_started');
+    c.excavationVerified = true;
+    expect(deriveStatusFromChecklist(c)).toBe('excavated');
+    c.leanConcretePoured = true;
+    expect(deriveStatusFromChecklist(c)).toBe('lean_concrete');
+    c.rebarCageInstalled = true;
+    expect(deriveStatusFromChecklist(c)).toBe('rebar_and_anchor');
+    c.formworkBraced = true;
+    expect(deriveStatusFromChecklist(c)).toBe('formwork');
+    c.concretePoured = true;
+    expect(deriveStatusFromChecklist(c)).toBe('concreted');
+    c.curingStarted = true;
+    expect(deriveStatusFromChecklist(c)).toBe('curing');
+    c.curingAndBackfillDone = true;
+    expect(deriveStatusFromChecklist(c)).toBe('completed');
+  });
+
+  it('computes project hauling and progress metrics accurately', () => {
+    const clean = createCleanBaselineProject();
+    const cleanMetrics = computeProjectMetrics(clean);
+    expect(cleanMetrics.completedCount).toBe(0);
+    expect(cleanMetrics.cementHauledBags).toBe(0);
+
+    const sample = createSampleMast2Project();
+    const sampleMetrics = computeProjectMetrics(sample);
+    expect(sampleMetrics.completedCount).toBe(2); // PF-0 and I-C1
+    expect(sampleMetrics.pouredOrBeyondCount).toBe(3); // PF-0, I-C1, II-C1
+    expect(sampleMetrics.cementHauledBags).toBe(164);
+    expect(sampleMetrics.sandHauledBags).toBe(160);
+    expect(sampleMetrics.gravelHauledBags).toBe(304);
+    expect(sampleMetrics.totalManDays).toBe(46);
+  });
+
+  it('summarizes daily Trip 1 & Trip 2 hauling per individual hauler for settlement', () => {
+    const { dailySheets, settlements } = summarizeHaulingData([
+      {
+        id: 't1-cem',
+        date: '2026-11-13',
+        haulerName: 'Christian Avila',
+        tripNumber: 1,
+        horsesUsed: 1,
+        tripsCount: 1,
+        material: 'cement',
+        unitLabel: 'bags',
+        quantity: 2,
+        kgPerUnit: 40,
+        totalKg: 80,
+        equivalentCuM: 0,
+        destinationFoundationId: 'STOCKPILE',
+        weather: 'Field Log',
+        remarks: '',
+      },
+      {
+        id: 't2-sand',
+        date: '2026-11-13',
+        haulerName: 'Christian Avila',
+        tripNumber: 2,
+        horsesUsed: 1,
+        tripsCount: 1,
+        material: 'sand',
+        unitLabel: 'sacks',
+        quantity: 3,
+        kgPerUnit: 40,
+        totalKg: 120,
+        equivalentCuM: 0.08,
+        destinationFoundationId: 'STOCKPILE',
+        weather: 'Field Log',
+        remarks: '',
+      },
+      {
+        id: 't2-bar',
+        date: '2026-11-13',
+        haulerName: 'Christian Avila',
+        tripNumber: 2,
+        horsesUsed: 1,
+        tripsCount: 0,
+        material: 'chair_bar_a',
+        unitLabel: 'pcs',
+        quantity: 5,
+        kgPerUnit: 8,
+        totalKg: 40,
+        equivalentCuM: 0,
+        destinationFoundationId: 'I-A1',
+        weather: 'Field Log',
+        remarks: '',
+      },
+    ]);
+
+    expect(dailySheets).toHaveLength(1);
+    expect(dailySheets[0].haulers[0].tripsCompleted).toBe(2);
+    expect(dailySheets[0].haulers[0].trip1).toHaveLength(1);
+    expect(dailySheets[0].haulers[0].trip2).toHaveLength(2);
+    expect(dailySheets[0].haulers[0].dailyTotalBags).toBe(5); // 80kg + 120kg = 200kg -> 5 bags
+    expect(settlements[0].tripsCompleted).toBe(2);
+    expect(settlements[0].totalBags).toBe(5);
+    expect(settlements[0].rebarAndHardwarePcs).toBe(5);
+  });
+});
+
+describe('Workspace UI & Foundation Activity Report', () => {
+  it('builds foundation activity report data, custom specs, and inspection items', () => {
+
+    const project = createSampleMast2Project();
+    const metrics = computeProjectMetrics(project);
+    const padA = project.foundations.find((f) => f.id === 'I-A1')!;
+
+    // Manual materials default to 0 On site until manually entered
+    const emptyReport = buildFoundationActivityReportData(project, metrics, padA);
+    expect(emptyReport.materials.every((m) => m.onSite === 0)).toBe(true);
+
+    // Persisted manualMaterials on FoundationRecord are reflected in the report
+    padA.manualMaterials = {
+      sand: { onSite: 45, remarks: 'Counted at pad' },
+    };
+    const report = buildFoundationActivityReportData(project, metrics, padA, {
+      cement: { onSite: 20, remarks: 'Partial warehouse draw' },
+      main_rebar: { onSite: 40 },
+    });
+    expect(report.materials.find((m) => m.key === 'sand')?.onSite).toBe(45);
+    expect(report.materials.find((m) => m.key === 'sand')?.needed).toBe(65);
+
+    expect(report.tasks).toHaveLength(8);
+    expect(report.tasks[0].done).toBe(true); // Excavation already completed
+    expect(report.tasks.map((t) => t.description)).toEqual([
+      'Excavation',
+      'Excavation Inspection and Retrofit',
+      'Lean Concrete Pour',
+      'Rebar, Ground Anchor Rod, and Formworks Installation',
+      'Rebar, Ground Anchor Rod, and Formworks Inspection',
+      'Concrete Pouring',
+      'Curing',
+      'Backfill',
+    ]);
+    const pf0Report = buildFoundationActivityReportData(
+      project,
+      metrics,
+      project.foundations.find((f) => f.id === 'PF-0')!
+    );
+    expect(pf0Report.tasks[3].description).toBe(
+      'Rebar, Bolt Frame, and Formworks Installation'
+    );
+    expect(pf0Report.tasks[4].description).toBe(
+      'Rebar, Bolt Frame, and Formworks Inspection'
+    );
+    expect(pf0Report.rebarDetails[0]).toBe('Main Rebar (M_02): 40 pcs');
+    expect(pf0Report.rebarDetails[1]).toBe('Chair Bar (M_26): 9 pcs');
+    expect(pf0Report.specDetails).toEqual({
+      size: '2.0 × 2.0 × 1.0 m',
+      foundationVolume: '4.0 m³ (Class AA)',
+      leanConcreteVolume: '0.20 m³ (50 mm)',
+      excavationDepth: '1.05 m (1,050 mm from N.G.L.)',
+      cover: '50 mm',
+      mainRebar: 'M_02: 40 pcs (Ø20 mm @ 200 mm O.C.)',
+      chairBar: 'M_26: 9 pcs',
+      towerAccessoriesLabel: 'Bolt Frame',
+      towerAccessories:
+        'M27 Bolt Frame (3×M27 Embedded Bolts, 1200mm, 400×400 Locating Plate)',
+    });
+
+    useProjectStore.getState().updateFoundationCustomSpecs('PF-0', {
+      cover: '75 mm',
+      excavationDepth: '1.15 m (1,150 mm)',
+      towerAccessories: 'M27 Bolt Frame (Verified)',
+    });
+    const editedPf0 = useProjectStore
+      .getState()
+      .project.foundations.find((f) => f.id === 'PF-0')!;
+    const editedReport = buildFoundationActivityReportData(project, metrics, editedPf0);
+    expect(editedReport.specDetails.cover).toBe('75 mm');
+    expect(editedReport.specDetails.excavationDepth).toBe('1.15 m (1,150 mm)');
+    expect(editedReport.specDetails.towerAccessories).toBe('M27 Bolt Frame (Verified)');
+
+    useProjectStore.getState().resetFoundationCustomSpecs('PF-0');
+    const resetPf0 = useProjectStore
+      .getState()
+      .project.foundations.find((f) => f.id === 'PF-0')!;
+    expect(resetPf0.customSpecs).toBeUndefined();
+    expect(report.inspections.map((i) => i.description)).toEqual([
+      'Excavation Size & Depth (vs N.G.L.)',
+      'Lean Concrete Bedding (Class A)',
+      'Concrete Covers & Rebar Cage Height',
+      'Main & Chair Rebar Size, Count, Cut & Spacing',
+      'Rebar Lap Lengths (Outer / Inner)',
+      'Ground Anchor Rod Installation & Alignment',
+    ]);
+    expect(report.inspections[0]?.planMeasurement).toContain('2000 × 2000 mm');
+    expect(report.inspections[0]?.actualMeasurement).toBe('');
+
+    // Verify PF-0 uses Bolt Frame wording & Anchor C uses 1500x1500mm + 32-bar plan specs, with no tower accessories
+    expect(pf0Report.inspections.at(-1)?.description).toBe(
+      'Bolt Frame (M27) Installation & Alignment'
+    );
+    expect(pf0Report.inspections.at(-1)?.planMeasurement).toContain('M27 Embedded Bolts');
+
+    const padC = project.foundations.find((f) => f.id === 'I-C1')!;
+    padC.inspectionChecklist = {
+      ...padC.inspectionChecklist,
+      excavation_size_depth: {
+        status: 'Passed',
+        actualMeasurement: '1505 × 1500 × 2055 mm',
+        remarks: 'Verified with tape',
+      },
+    };
+    const anchorCReport = buildFoundationActivityReportData(project, metrics, padC);
+    expect(anchorCReport.inspections[0]?.planMeasurement).toContain('1500 × 1500 mm');
+    expect(anchorCReport.inspections[0]?.actualMeasurement).toBe('1505 × 1500 × 2055 mm');
+    expect(anchorCReport.inspections[3]?.planMeasurement).toContain('32 pcs @ 2.20 m');
+    const serialized = JSON.stringify([pf0Report.inspections, anchorCReport.inspections]);
+    expect(serialized).not.toMatch(/Guy Plate|U-Ring|NUT-3/i);
+
+    padA.inspectionChecklist = {
+      excavation_size_depth: {
+        status: 'Passed',
+        planMeasurement: '2050 × 2050 mm pad (custom field revision)',
+        remarks: '2.05m verified with tape',
+        photoDataUrl: 'data:image/jpeg;base64,test',
+        photoName: 'pit.jpg',
+      },
+      lean_concrete_50mm: {
+        status: 'Pending',
+        planMeasurement: '   ',
+        remarks: 'Cleared by engineer',
+      },
+    };
+    const reportWithInspection = buildFoundationActivityReportData(project, metrics, padA);
+    expect(reportWithInspection.inspections[0].status).toBe('Passed');
+    expect(reportWithInspection.inspections[0].planMeasurement).toBe(
+      '2050 × 2050 mm pad (custom field revision)'
+    );
+    expect(reportWithInspection.inspections[0].photoDataUrl).toBe(
+      'data:image/jpeg;base64,test'
+    );
+    expect(reportWithInspection.inspections[1].planMeasurement).toBe('   ');
+    const reportable = getReportableInspections(reportWithInspection.inspections);
+    expect(reportable).toHaveLength(5);
+    expect(reportable.some((r) => r.key === 'lean_concrete_50mm')).toBe(false);
+
+    expect(report.materials.map((m) => m.description)).toEqual([
+      'Cement',
+      'Sand',
+      'Gravel',
+      'Main Rebar',
+      'Chair Bar',
+      'Phenolic',
+    ]);
+    const cementRow = report.materials.find((m) => m.key === 'cement')!;
+    expect(cementRow.required).toBe(70);
+    expect(cementRow.onSite).toBe(20);
+    expect(cementRow.needed).toBe(50);
+    expect(cementRow.remarks).toBe('Partial warehouse draw');
+    const rebarRow = report.materials.find((m) => m.key === 'main_rebar')!;
+    expect(rebarRow.needed).toBe(0);
+    expect(rebarRow.remarks).toBe('For I-A1');
+  });
+
+  it('switches to Daily Logs tab and formats daily logs with project name, weather, manpower, materials, activities & other info', () => {
+    expect(useUiStore.getState().activeAppTab).toBe('activity');
+    useUiStore.getState().setActiveAppTab('daily_logs');
+    expect(useUiStore.getState().activeAppTab).toBe('daily_logs');
+    useUiStore.getState().setActiveAppTab('activity');
+
+    const defaultMats = createDefaultDailyLogMaterials();
+    expect(defaultMats).toHaveLength(6);
+    expect(defaultMats[0].name).toBe('Cement');
+
+    useProjectStore.getState().resetCleanBaseline();
+    useProjectStore.getState().addDailyLog({
+      projectName: 'Mt. Labo Relay Mast 2',
+      location: 'Mt. Labo Peak',
+      preparedBy: 'Engr. Christian',
+      date: '2026-11-13',
+      dayNumber: 1,
+      weather: 'Foggy / Windy',
+      weatherNotes: 'Low visibility after 3 PM',
+      schedulePhaseId: 'phase-3',
+      activitiesSummary: 'Excavated I-A1 pit and hauled rebar.',
+      activities: [
+        {
+          id: 'act-1',
+          foundationId: 'I-A1',
+          description: 'Excavation to 2.0m depth',
+          status: 'Ongoing',
+          remarks: '1.6m reached',
+        },
+      ],
+      foundationsWorked: ['I-A1'],
+      workers: [
+        { role: 'Foreman', count: 1, names: 'Emmarote', hours: 8 },
+        { role: 'Laborer', count: 4, names: 'Site crew', hours: 8 },
+      ],
+      materialsOnSite: [
+        {
+          id: 'mat-cement',
+          name: 'Cement',
+          unit: 'bags',
+          onSiteQty: 42,
+          deliveredQty: 18,
+          usedTodayQty: 15,
+          remainingQty: computeDailyLogMaterialRemaining({
+            onSiteQty: 42,
+            deliveredQty: 18,
+            usedTodayQty: 15,
+          }),
+          remarks: 'Covered with tarp',
+        },
+      ],
+      documentationItems: [
+        {
+          id: 'doc-1',
+          photoDataUrl: 'data:image/jpeg;base64,docphoto',
+          photoName: 'pit.jpg',
+          description: 'I-A1 pit excavation check',
+          remarks: 'Verified depth',
+        },
+      ],
+      cementUsedBags: 0,
+      sandUsedBags: 0,
+      gravelUsedBags: 0,
+      equipmentOnSite: 'Shovels, dewatering pump',
+      safetyAndVisitors: 'Morning PPE briefing done',
+      nextDayPlan: 'Finish 2.0m depth & pour lean mix',
+      issuesOrDelays: 'Muddy access trail',
+    });
+
+    const saved = useProjectStore.getState().project.dailyLogs[0];
+    expect(saved.totalWorkers).toBe(5);
+    const savedMats = getDailyLogMaterialRows(saved);
+    expect(savedMats).toHaveLength(1);
+    expect(savedMats[0].deliveredQty).toBe(18);
+    expect(savedMats[0].remainingQty).toBe(45); // 42 + 18 - 15
+    expect(getDailyLogEquipmentRows(saved)[0].name).toBe('Shovels, dewatering pump');
+    expect(getDailyLogDelayRows(saved)[0].description).toBe('Muddy access trail');
+    expect(getDailyLogVisitorRows(saved)[0].name).toBe('Morning PPE briefing done');
+    expect(saved.documentationItems?.[0].description).toBe('I-A1 pit excavation check');
+
+    // Auto-fill next day's On Site materials from Day 1 Remaining
+    const nextDayMats = buildNextDayMaterialsFromLog(saved);
+    const nextDayCement = nextDayMats.find((m) => m.name === 'Cement')!;
+    expect(nextDayCement.onSiteQty).toBe(45);
+    expect(nextDayCement.deliveredQty).toBe(0);
+    expect(nextDayCement.usedTodayQty).toBe(0);
+    expect(nextDayCement.remainingQty).toBe(45);
+
+    const text = formatDailyLogPlainText(saved, useProjectStore.getState().project);
+    expect(text).toContain('Mt. Labo Relay Mast 2');
+    expect(text).toContain('Foggy / Windy (Low visibility after 3 PM)');
+    expect(text).toContain('MANPOWER (5 workers):');
+    expect(text).toContain('- 1x Foreman — Emmarote');
+    expect(text).not.toContain('man-hrs');
+    expect(text).toContain('[I-A1] Excavation to 2.0m depth — Ongoing');
+    expect(text).toContain('Cement (bags): On Site 42, Delivered 18, Used 15, Remaining 45');
+    expect(text).toContain('1x Shovels, dewatering pump — Operational');
+    expect(text).toContain('[Photo attached] I-A1 pit excavation check (Verified depth)');
+
+    useProjectStore.getState().updateDailyLog(saved.id, {
+      workers: [{ role: 'Foreman', count: 2, names: 'Lead', hours: 0 }],
+      equipmentItems: [{ id: 'eq-1', name: 'Concrete Mixer', qty: 2, status: 'Active', remarks: 'PF-0' }],
+      delayItems: [{ id: 'del-1', description: 'Heavy fog', impact: 'Haul paused', remarks: 'Resumed 10AM' }],
+      visitorItems: [{ id: 'vis-1', name: 'Engr. Reyes', roleOrCompany: 'Client QA', purpose: 'Rebar check', remarks: 'Approved' }],
+    });
+    const updated = useProjectStore.getState().project.dailyLogs[0];
+    expect(updated.totalWorkers).toBe(2);
+    expect(getDailyLogEquipmentRows(updated)[0].qty).toBe(2);
+    expect(getDailyLogDelayRows(updated)[0].impact).toBe('Haul paused');
+    expect(getDailyLogVisitorRows(updated)[0].roleOrCompany).toBe('Client QA');
+  });
+
+  it('cascades updated Day 1 remaining materials into Day 2 onSiteQty and remainingQty and seeds sample Day 18 balances', () => {
+    const sample = createSampleMast2Project();
+    const sortedSample = sortDailyLogsNewestFirst(sample.dailyLogs);
+    expect(sortedSample[0].dayNumber).toBe(18);
+    const day19Auto = buildNextDayMaterialsFromLog(sortedSample[0]);
+    expect(day19Auto.find((m) => m.name === 'Cement')?.onSiteQty).toBe(84);
+
+    useProjectStore.getState().resetCleanBaseline();
+    useProjectStore.getState().addDailyLog({
+      date: '2026-11-12',
+      dayNumber: 1,
+      weather: 'Sunny',
+      schedulePhaseId: '',
+      activitiesSummary: 'Day 1 stock',
+      foundationsWorked: ['PF-0'],
+      workers: [{ role: 'Foreman', count: 1, names: 'Lead', hours: 0 }],
+      materialsOnSite: [
+        { id: 'mat-cement', name: 'Cement', unit: 'bags', onSiteQty: 10, deliveredQty: 50, usedTodayQty: 15, remainingQty: 45, remarks: '' },
+      ],
+      cementUsedBags: 0,
+      sandUsedBags: 0,
+      gravelUsedBags: 0,
+      issuesOrDelays: 'None.',
+    });
+    const day1 = useProjectStore.getState().project.dailyLogs[0];
+
+    useProjectStore.getState().addDailyLog({
+      date: '2026-11-13',
+      dayNumber: 2,
+      weather: 'Sunny',
+      schedulePhaseId: '',
+      activitiesSummary: 'Day 2 pour',
+      foundationsWorked: ['PF-0'],
+      workers: [{ role: 'Foreman', count: 1, names: 'Lead', hours: 0 }],
+      materialsOnSite: [
+        { id: 'mat-cement', name: 'Cement', unit: 'bags', onSiteQty: 45, deliveredQty: 10, usedTodayQty: 20, remainingQty: 35, remarks: '' },
+      ],
+      cementUsedBags: 0,
+      sandUsedBags: 0,
+      gravelUsedBags: 0,
+      issuesOrDelays: 'None.',
+    });
+    const day2 = useProjectStore.getState().project.dailyLogs[0];
+
+    expect(
+      findPreviousDailyLogForDraft(useProjectStore.getState().project.dailyLogs, '2026-11-14', 3)?.id
+    ).toBe(day2.id);
+
+    // Edit Day 1 Used from 15 -> 5 (Remaining becomes 10 + 50 - 5 = 55)
+    useProjectStore.getState().updateDailyLog(day1.id, {
+      materialsOnSite: [
+        { id: 'mat-cement', name: 'Cement', unit: 'bags', onSiteQty: 10, deliveredQty: 50, usedTodayQty: 5, remainingQty: 55, remarks: '' },
+      ],
+    });
+
+    const refreshedDay2 = useProjectStore.getState().project.dailyLogs.find((l) => l.id === day2.id)!;
+    const day2Cement = getDailyLogMaterialRows(refreshedDay2).find((m) => m.name === 'Cement')!;
+    expect(day2Cement.onSiteQty).toBe(55);
+    expect(day2Cement.remainingQty).toBe(45); // 55 + 10 - 20
+  });
+
+  it('formats weekday names on dates and supports separate Foundation Inspection tab and metadata', () => {
+    expect(getWeekdayName('2026-11-10')).toBe('Tuesday');
+    expect(formatDateWithWeekday('2026-11-10')).toBe('Tuesday, 2026-11-10');
+    expect(getWeekdayName('2026-11-13')).toBe('Friday');
+
+    useUiStore.getState().setActiveAppTab('inspection');
+    expect(useUiStore.getState().activeAppTab).toBe('inspection');
+    useUiStore.getState().setInspectionReportOpen(true);
+    expect(useUiStore.getState().inspectionReportOpen).toBe(true);
+    useUiStore.getState().setInspectionReportOpen(false);
+    useUiStore.getState().setActiveAppTab('activity');
+
+    useProjectStore.getState().resetCleanBaseline();
+    useProjectStore.getState().updateFoundationInspectionMeta('PF-0', {
+      inspectionDate: '2026-11-10',
+      inspectorName: 'Engr. Christian',
+      contractorRep: 'Foreman Emmarote',
+      overallStatus: 'Passed',
+      generalNotes: 'Ready for pour',
+    });
+    const pf0 = useProjectStore
+      .getState()
+      .project.foundations.find((f) => f.id === 'PF-0')!;
+    expect(pf0.inspectionMeta?.inspectionDate).toBe('2026-11-10');
+    expect(pf0.inspectionMeta?.overallStatus).toBe('Passed');
+  });
+
+  it('places all 13 multi-work layout tags without overlaps or legend collisions and persists safety logs', () => {
+    const foundations = createInitialFoundations();
+    const boxW = 74;
+    const boxH = 18;
+    const rects = foundations.map((f) => {
+      const fx = 380 + f.xM * 4.2;
+      const fy = 315 + f.zM * 4.2;
+      const layout = getSelectionLeaderLayout(f, fx, fy, boxW, false);
+      const top = layout.elbowY - boxH / 2;
+      return {
+        id: f.id,
+        left: layout.boxX,
+        right: layout.boxX + boxW,
+        top,
+        bottom: top + boxH,
+      };
+    });
+
+    const overlaps = (
+      a: { left: number; right: number; top: number; bottom: number },
+      b: { left: number; right: number; top: number; bottom: number }
+    ) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
+    const legendRect = { left: 476, right: 718, top: 412, bottom: 654 };
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      expect(r.left).toBeGreaterThanOrEqual(30);
+      expect(r.right).toBeLessThanOrEqual(730);
+      expect(r.top).toBeGreaterThanOrEqual(8);
+      expect(r.bottom).toBeLessThanOrEqual(680);
+      expect(overlaps(r, legendRect)).toBe(false);
+      for (let j = i + 1; j < rects.length; j++) {
+        expect(overlaps(r, rects[j])).toBe(false);
+      }
+    }
+
+    // Verify single-foundation callout pills dynamically size to fit PF-0 and anchor labels without clipping viewBox
+    for (const f of foundations) {
+      const fx = 380 + f.xM * 4.2;
+      const fy = 315 + f.zM * 4.2;
+      const label = `${f.id} · Principal Foundation (100%)`;
+      const singleW = computeCalloutBoxWidth(label, true);
+      expect(singleW).toBeGreaterThanOrEqual(220);
+      const layout = getSelectionLeaderLayout(f, fx, fy, singleW, true);
+      expect(layout.boxX).toBeGreaterThanOrEqual(30);
+      expect(layout.boxX + singleW).toBeLessThanOrEqual(730);
+    }
+
+    useProjectStore.getState().resetCleanBaseline();
+    useProjectStore.getState().addDailyLog({
+      date: '2026-11-13',
+      dayNumber: 1,
+      weather: 'Light Rain',
+      schedulePhaseId: '',
+      activitiesSummary: 'Safety check and formwork',
+      foundationsWorked: ['PF-0', 'I-B1'],
+      workers: [
+        { role: 'Site Engineer', count: 1, names: 'Engr. Avila', hours: 8 },
+        { role: 'Safety Officer', count: 1, names: 'Engr. Reyes', hours: 8 },
+        { role: 'First Aider', count: 1, names: 'M. Cruz', hours: 8 },
+        { role: 'Skilled', count: 3, names: 'Crew A', hours: 8 },
+      ],
+      cementUsedBags: 0,
+      sandUsedBags: 0,
+      gravelUsedBags: 0,
+      safetyOfficer: 'Engr. Marco Reyes (SO2)',
+      safetyLogs: [
+        {
+          id: 'saf-1',
+          timeOrActivity: '07:30 Toolbox Talk',
+          hazardOrFinding: 'Slippery footing near pit edge',
+          actionTaken: 'Installed perimeter warning tape & rubber boots check',
+          status: 'Action Taken',
+        },
+      ],
+      issuesOrDelays: 'None.',
+    });
+    const saved = useProjectStore.getState().project.dailyLogs[0];
+    expect(saved.safetyOfficer).toBe('Engr. Marco Reyes (SO2)');
+    expect(getDailyLogSafetyRows(saved)).toHaveLength(1);
+    const plain = formatDailyLogPlainText(saved, useProjectStore.getState().project);
+    expect(plain).toContain('SAFETY LOGS (Safety Officer: Engr. Marco Reyes (SO2)):');
+    expect(plain).toContain('07:30 Toolbox Talk');
+    expect(plain.indexOf('ACTIVITIES & STATUS:')).toBeGreaterThan(-1);
+    expect(plain.indexOf('SAFETY LOGS')).toBeGreaterThan(
+      plain.indexOf('ACTIVITIES & STATUS:')
+    );
+    expect(plain.indexOf('MATERIALS ON SITE:')).toBeGreaterThan(
+      plain.indexOf('SAFETY LOGS')
+    );
+  });
+
+  it('syncs project metadata, logos, and signatories via updateReportDetails and resolveReportDetails', () => {
+    useProjectStore.getState().resetCleanBaseline();
+    useProjectStore.getState().updateReportDetails({
+      projectName: 'Guyed Mast Tower – Mast 5',
+      projectLocation: 'Daet, Camarines Norte',
+      contractor: 'Apex Tower Civil Works',
+      preparedBy: 'Engr. Juan Dela Cruz',
+      clientName: 'PhilTower Consortium',
+      referenceNo: 'REF-CIV-2026-005',
+      revision: 'Rev. B',
+      checkedBy: 'Engr. Maria Santos',
+      approvedBy: 'Engr. Pedro Reyes',
+      notes: 'All anchor rods torqued prior to concrete pour.',
+      logoHeightPx: 54,
+      logos: {
+        left: {
+          dataUrl:
+            'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          caption: 'CLIENT',
+        },
+      },
+    });
+
+    const updated = useProjectStore.getState().project;
+    expect(updated.projectName).toBe('Guyed Mast Tower – Mast 5');
+    expect(updated.location).toBe('Daet, Camarines Norte');
+    expect(updated.contractor).toBe('Apex Tower Civil Works');
+    expect(updated.preparedBy).toBe('Engr. Juan Dela Cruz');
+    expect(updated.reportDetails?.logos?.left?.caption).toBe('CLIENT');
+    expect(updated.reportDetails?.clientName).toBe('PhilTower Consortium');
+
+    const resolved = resolveReportDetails(updated, {
+      reportDate: '2026-11-14',
+      preparedBy: 'Inspector Override',
+    });
+    expect(resolved.projectName).toBe('Guyed Mast Tower – Mast 5');
+    expect(resolved.projectLocation).toBe('Daet, Camarines Norte');
+    expect(resolved.referenceNo).toBe('REF-CIV-2026-005');
+    expect(resolved.revision).toBe('Rev. B');
+    expect(resolved.reportDate).toBe('2026-11-14');
+    expect(resolved.preparedBy).toBe('Inspector Override');
+    expect(resolved.checkedBy).toBe('Engr. Maria Santos');
+    expect(resolved.approvedBy).toBe('Engr. Pedro Reyes');
+    expect(resolved.logoHeightPx).toBe(54);
+    expect(resolved.logos?.left?.caption).toBe('CLIENT');
+  });
+
+  it('builds overall project status summary, stage distribution, sector rollups, and individual foundation rows', () => {
+    useProjectStore.getState().resetCleanBaseline();
+    useProjectStore.getState().updateFoundationStatus('PF-0', 'completed');
+    useProjectStore.getState().updateFoundationStatus('I-C1', 'concreted');
+
+    const project = useProjectStore.getState().project;
+    const overview = buildOverallProjectStatusReportData(project);
+
+    expect(overview.foundationRows).toHaveLength(13);
+    expect(overview.metrics.completedCount).toBe(1);
+    expect(overview.metrics.pouredOrBeyondCount).toBe(2);
+
+    const pf0Row = overview.foundationRows.find((r) => r.id === 'PF-0')!;
+    expect(pf0Row.status).toBe('completed');
+    expect(pf0Row.progressPct).toBe(100);
+    expect(pf0Row.completedSteps).toBe(8);
+
+    const c1Row = overview.foundationRows.find((r) => r.id === 'I-C1')!;
+    expect(c1Row.status).toBe('concreted');
+    expect(c1Row.progressPct).toBe(80);
+
+    const completedStage = overview.stageCounts.find((s) => s.status === 'completed')!;
+    expect(completedStage.count).toBe(1);
+    expect(completedStage.foundationIds).toEqual(['PF-0']);
+
+    const sectorI = overview.sectorSummaries.find((s) => s.sector === 'I')!;
+    expect(sectorI.foundationCount).toBe(4);
+    expect(sectorI.pouredCount).toBe(1);
+
+    useUiStore.getState().setActiveAppTab('project_status');
+    useUiStore.getState().setOverallReportOpen(true);
+    expect(useUiStore.getState().activeAppTab).toBe('project_status');
+    expect(useUiStore.getState().overallReportOpen).toBe(true);
+    useUiStore.getState().setOverallReportOpen(false);
+    useUiStore.getState().setActiveAppTab('activity');
+  });
+
+  it('allows adding, editing, removing, and resetting foundation inspection checklist items', () => {
+    useProjectStore.getState().resetCleanBaseline();
+
+    // Add custom item
+    useProjectStore.getState().addFoundationInspectionItem('I-A1', {
+      description: 'Concrete Slump & Temperature Check',
+      planMeasurement: '100 ± 25 mm slump; < 32 °C',
+    });
+    let pad = useProjectStore.getState().project.foundations.find((f) => f.id === 'I-A1')!;
+    let report = buildFoundationActivityReportData(useProjectStore.getState().project, null, pad);
+    expect(report.inspections).toHaveLength(7);
+    const customRow = report.inspections.find((i) => i.isCustom)!;
+    expect(customRow.description).toBe('Concrete Slump & Temperature Check');
+    expect(customRow.planMeasurement).toBe('100 ± 25 mm slump; < 32 °C');
+
+    // Edit built-in & custom item descriptions and plan measurements
+    useProjectStore.getState().updateFoundationInspectionItem('I-A1', 'excavation_size_depth', {
+      description: 'Pit Dimensions & Subgrade Level',
+      planMeasurement: '2050 × 2050 mm; depth 2050 mm',
+      status: 'Passed',
+    });
+    useProjectStore.getState().updateFoundationInspectionItem('I-A1', customRow.key, {
+      description: 'Slump Cone & Mix Temp',
+      actualMeasurement: '105 mm / 29 °C',
+      status: 'Passed',
+    });
+
+    pad = useProjectStore.getState().project.foundations.find((f) => f.id === 'I-A1')!;
+    report = buildFoundationActivityReportData(useProjectStore.getState().project, null, pad);
+    expect(report.inspections[0].description).toBe('Pit Dimensions & Subgrade Level');
+    expect(report.inspections[0].planMeasurement).toBe('2050 × 2050 mm; depth 2050 mm');
+    const editedCustom = report.inspections.find((i) => i.key === customRow.key)!;
+    expect(editedCustom.description).toBe('Slump Cone & Mix Temp');
+    expect(editedCustom.actualMeasurement).toBe('105 mm / 29 °C');
+
+    // Remove a built-in item and the custom item
+    useProjectStore.getState().removeFoundationInspectionItem('I-A1', 'lean_concrete_50mm');
+    useProjectStore.getState().removeFoundationInspectionItem('I-A1', customRow.key);
+    pad = useProjectStore.getState().project.foundations.find((f) => f.id === 'I-A1')!;
+    report = buildFoundationActivityReportData(useProjectStore.getState().project, null, pad);
+    expect(report.inspections).toHaveLength(5);
+    expect(report.inspections.some((i) => i.key === 'lean_concrete_50mm')).toBe(false);
+    expect(report.inspections.some((i) => i.key === customRow.key)).toBe(false);
+
+    // Reset checklist restores all 6 baseline items cleanly
+    useProjectStore.getState().resetFoundationInspectionChecklist('I-A1');
+    pad = useProjectStore.getState().project.foundations.find((f) => f.id === 'I-A1')!;
+    report = buildFoundationActivityReportData(useProjectStore.getState().project, null, pad);
+    expect(report.inspections).toHaveLength(6);
+    expect(report.inspections[0].description).toBe('Excavation Size & Depth (vs N.G.L.)');
+    expect(report.inspections[0].status).toBe('Pending');
+    expect(report.inspections.some((i) => i.key === 'lean_concrete_50mm')).toBe(true);
+  });
+
+  it('creates, switches, duplicates, imports, and deletes multiple isolated projects cleanly', () => {
+    const firstId = useProjectStore.getState().activeProjectId;
+    useProjectStore.getState().resetCleanBaseline();
+    useProjectStore.getState().updateReportDetails({
+      projectName: 'Mast 2 — Alpha',
+      referenceNo: 'REF-ALPHA',
+      logos: {
+        left: { dataUrl: 'data:image/png;base64,alphaLogo', caption: 'CLIENT' },
+      },
+    });
+    useProjectStore.getState().updateFoundationStatus('PF-0', 'completed');
+
+    // Create a second clean project inheriting letterhead logos
+    const secondId = useProjectStore.getState().createProject({
+      projectName: 'Mast 3 — Beta',
+      location: 'Naga City Site',
+      referenceNo: 'REF-BETA',
+      towerHeightM: 90,
+      template: 'clean',
+      copyLogosFromCurrent: true,
+    });
+    expect(useProjectStore.getState().activeProjectId).toBe(secondId);
+    expect(useProjectStore.getState().project.projectName).toBe('Mast 3 — Beta');
+    expect(useProjectStore.getState().project.towerHeightM).toBe(90);
+    expect(useProjectStore.getState().project.reportDetails?.logos?.left?.caption).toBe('CLIENT');
+    expect(
+      useProjectStore.getState().project.foundations.find((f) => f.id === 'PF-0')?.status
+    ).toBe('not_started');
+
+    // Switch back to Alpha and verify isolation
+    useProjectStore.getState().switchProject(firstId);
+    expect(useProjectStore.getState().project.reportDetails?.projectName).toBe('Mast 2 — Alpha');
+    expect(
+      useProjectStore.getState().project.foundations.find((f) => f.id === 'PF-0')?.status
+    ).toBe('completed');
+
+    // Duplicate Alpha
+    const copyId = useProjectStore.getState().duplicateProject(firstId, 'Mast 2 — Alpha Backup')!;
+    expect(copyId).toBeTruthy();
+    expect(useProjectStore.getState().project.projectName).toBe('Mast 2 — Alpha Backup');
+    useProjectStore.getState().updateFoundationStatus('PF-0', 'excavated');
+    // Original Alpha remains 'completed'
+    const alphaRecord = useProjectStore.getState().projects.find((p) => p.id === firstId)!;
+    expect(alphaRecord.state.foundations.find((f) => f.id === 'PF-0')?.status).toBe('completed');
+
+    // Import JSON as new project
+    const exported = useProjectStore.getState().exportProjectJson();
+    const importedId = useProjectStore.getState().importProjectAsNew(exported);
+    expect(useProjectStore.getState().projects.some((p) => p.id === importedId)).toBe(true);
+
+    // UI browser toggle
+    expect(useUiStore.getState().projectBrowserOpen).toBe(false);
+    useUiStore.getState().setProjectBrowserOpen(true);
+    expect(useUiStore.getState().projectBrowserOpen).toBe(true);
+    useUiStore.getState().setProjectBrowserOpen(false);
+
+    // Delete created extra projects
+    useProjectStore.getState().deleteProject(importedId);
+    useProjectStore.getState().deleteProject(copyId);
+    useProjectStore.getState().deleteProject(secondId);
+    expect(useProjectStore.getState().activeProjectId).toBe(firstId);
+  });
+});
+
