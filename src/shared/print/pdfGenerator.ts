@@ -152,6 +152,20 @@ function collectAtomicBlockIntervals(
 }
 
 /**
+ * Returns a consistent desktop capture/render width in CSS pixels for the chosen
+ * paper size and orientation so PDFs always render with desktop proportions.
+ */
+export function getPdfCaptureWidthPx(
+  paperSize: PrintPaperSize = 'A4',
+  orientation: PrintOrientation = 'portrait'
+): number {
+  if (orientation === 'landscape') {
+    return paperSize === 'A3' || paperSize === 'legal' ? 1280 : 1120;
+  }
+  return paperSize === 'A3' ? 1060 : 900;
+}
+
+/**
  * Generates and directly downloads a `.pdf` file from a printable DOM sheet
  * using the exact configured paper size and orientation — bypassing the
  * browser's native print dialog completely.
@@ -173,21 +187,27 @@ export async function exportElementToPdf(
 
   // Measure target render width so desktop/print grids render consistently
   // according to the chosen paper size & orientation regardless of small viewport widths.
-  const targetCaptureWidthPx =
-    options.orientation === 'landscape'
-      ? options.paperSize === 'A3' || options.paperSize === 'legal'
-        ? 1280
-        : 1120
-      : options.paperSize === 'A3'
-        ? 1060
-        : 900;
+  const targetCaptureWidthPx = getPdfCaptureWidthPx(
+    options.paperSize,
+    options.orientation
+  );
 
   const prevWidth = element.style.width;
   const prevMinWidth = element.style.minWidth;
   const prevMaxWidth = element.style.maxWidth;
   const prevBackground = element.style.backgroundColor;
+  const hadDesktopClass = element.classList.contains('pdf-desktop-layout');
+  const hadCapturingClass = element.classList.contains('pdf-capturing');
 
-  const needsTemporaryResize = element.clientWidth < targetCaptureWidthPx - 40;
+  if (!hadDesktopClass) {
+    element.classList.add('pdf-desktop-layout');
+  }
+  if (!hadCapturingClass) {
+    element.classList.add('pdf-capturing');
+  }
+
+  const needsTemporaryResize =
+    Math.abs(element.clientWidth - targetCaptureWidthPx) > 2;
   if (needsTemporaryResize) {
     element.style.width = `${targetCaptureWidthPx}px`;
     element.style.minWidth = `${targetCaptureWidthPx}px`;
@@ -306,6 +326,12 @@ export async function exportElementToPdf(
 
     pdf.save(filename);
   } finally {
+    if (!hadDesktopClass) {
+      element.classList.remove('pdf-desktop-layout');
+    }
+    if (!hadCapturingClass) {
+      element.classList.remove('pdf-capturing');
+    }
     element.style.width = prevWidth;
     element.style.minWidth = prevMinWidth;
     element.style.maxWidth = prevMaxWidth;

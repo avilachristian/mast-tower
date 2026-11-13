@@ -124,7 +124,7 @@ export function ReportLetterhead({
   return (
     <div className="break-inside-avoid border-b-2 border-slate-900 pb-3 mb-3">
       {hasAnyLogo && (
-        <div className="grid grid-cols-3 items-center gap-2 sm:gap-4 pb-3 mb-3 border-b border-slate-200">
+        <div className="grid grid-cols-3 items-center gap-2 sm:gap-4 pdf-desktop:gap-4 pb-3 mb-3 border-b border-slate-200">
           {(['left', 'center', 'right'] as const).map((slot) => {
             const logo = logos?.[slot];
             const alignClass =
@@ -166,7 +166,7 @@ export function ReportLetterhead({
               {kicker.trim()}
             </div>
           )}
-          <h1 className="text-base sm:text-lg font-bold text-slate-900 leading-tight uppercase">
+          <h1 className="text-base sm:text-lg pdf-desktop:text-lg font-bold text-slate-900 leading-tight uppercase">
             {mainTitle}
           </h1>
           {subtitle?.trim() && (
@@ -206,7 +206,7 @@ export function ReportLetterhead({
       </div>
 
       {metaItems.length > 0 && (
-        <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-4 print:grid-cols-4 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-200 text-[10.5px]">
+        <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-4 pdf-desktop:grid-cols-4 print:grid-cols-4 gap-x-4 gap-y-1.5 pt-2 border-t border-slate-200 text-[10.5px]">
           {metaItems.map((m) => (
             <div key={m.label} className="min-w-0">
               <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-semibold">
@@ -262,8 +262,8 @@ export function ReportSignoffFooter({
     signatories.length === 1
       ? 'grid-cols-1 max-w-xs'
       : signatories.length === 2
-        ? 'grid-cols-1 sm:grid-cols-2 print:grid-cols-2 max-w-2xl'
-        : 'grid-cols-1 sm:grid-cols-3 print:grid-cols-3';
+        ? 'grid-cols-1 sm:grid-cols-2 pdf-desktop:grid-cols-2 print:grid-cols-2 max-w-2xl'
+        : 'grid-cols-1 sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3';
 
   return (
     <div className="break-inside-avoid pt-3 mt-4 border-t border-slate-300 space-y-3">

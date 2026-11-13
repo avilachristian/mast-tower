@@ -62,7 +62,7 @@ export function InspectionReportSheet({
         : 'bg-amber-50 text-amber-800 border-amber-400';
 
   return (
-    <div className="bg-white text-slate-900 p-4 sm:p-6 print:p-2">
+    <div className="bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2">
       <ReportLetterhead
         details={reportDetails}
         defaultTitle="FOUNDATION INSPECTION CHECKLIST REPORT"
@@ -76,11 +76,11 @@ export function InspectionReportSheet({
         {/* Top Split Row: Left 2D Tower Layout | Right Inspection Details & Specs */}
         <div className="grid grid-cols-12 border-b-2 border-slate-900">
           {/* Left: 2D Layout Highlighting Inspected Foundation */}
-          <div className="col-span-12 md:col-span-7 print:col-span-7 border-b-2 md:border-b-0 md:border-r-2 print:border-b-0 print:border-r-2 border-slate-900 flex flex-col p-1.5">
+          <div className="col-span-12 md:col-span-7 pdf-desktop:col-span-7 print:col-span-7 border-b-2 md:border-b-0 md:border-r-2 pdf-desktop:border-b-0 pdf-desktop:border-r-2 print:border-b-0 print:border-r-2 border-slate-900 flex flex-col p-1.5">
             <div className="text-[11px] font-bold text-slate-700 text-center py-0.5 shrink-0 uppercase tracking-wide">
               Tower Layout — Inspected Location ({foundation.id})
             </div>
-            <div className="flex-1 min-h-[340px] sm:min-h-[370px] flex items-stretch justify-stretch">
+            <div className="flex-1 min-h-[340px] sm:min-h-[370px] pdf-desktop:min-h-[370px] flex items-stretch justify-stretch">
               <GroundAnchorPlan2D
                 foundations={project.foundations}
                 selectedId={foundation.id}
@@ -94,8 +94,8 @@ export function InspectionReportSheet({
           </div>
 
           {/* Right: Foundation & Inspection Metadata */}
-          <div className="col-span-12 md:col-span-5 print:col-span-5 flex flex-col">
-            <div className="border-b-2 border-slate-900 px-3 py-1.5 text-center font-bold text-xs sm:text-sm bg-slate-50">
+          <div className="col-span-12 md:col-span-5 pdf-desktop:col-span-5 print:col-span-5 flex flex-col">
+            <div className="border-b-2 border-slate-900 px-3 py-1.5 text-center font-bold text-xs sm:text-sm pdf-desktop:text-sm bg-slate-50">
               {report.foundationTitle}
             </div>
 
@@ -329,7 +329,7 @@ export function InspectionReportSheet({
         </div>
 
         {/* Sign-off Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 print:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x print:divide-y-0 print:divide-x divide-slate-900 text-[11px]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x pdf-desktop:divide-y-0 pdf-desktop:divide-x print:divide-y-0 print:divide-x divide-slate-900 text-[11px]">
           <div className="p-2.5">
             <div className="text-[10px] font-bold uppercase text-slate-500">
               Inspected By (Site Engineer)

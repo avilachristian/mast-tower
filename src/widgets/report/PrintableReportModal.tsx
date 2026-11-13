@@ -21,7 +21,7 @@ export function PrintableReportModal({
     project.foundations.find((f) => f.id === selectedFoundationId) ??
     project.foundations[0];
 
-  const { dialogMaxWidthClass } = usePrintPageSetup(true);
+  const { dialogMaxWidthClass, sheetWidthPx } = usePrintPageSetup(true);
   const sheetRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -80,14 +80,20 @@ export function PrintableReportModal({
           </div>
         </div>
 
-        <div ref={sheetRef} className="report-modal-scroll-area report-printable-card bg-white">
-          {selectedFoundation && (
-            <ActivityReportSheet
-              project={project}
-              foundation={selectedFoundation}
-              onSelectFoundation={selectFoundation}
-            />
-          )}
+        <div className="report-modal-preview-frame overflow-x-auto bg-slate-100/75 p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">
+          <div
+            ref={sheetRef}
+            style={{ width: `${sheetWidthPx}px`, minWidth: `${sheetWidthPx}px` }}
+            className="report-modal-scroll-area report-printable-card pdf-desktop-layout mx-auto bg-white shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none"
+          >
+            {selectedFoundation && (
+              <ActivityReportSheet
+                project={project}
+                foundation={selectedFoundation}
+                onSelectFoundation={selectFoundation}
+              />
+            )}
+          </div>
         </div>
       </div>
     </div>,

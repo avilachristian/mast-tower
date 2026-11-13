@@ -78,7 +78,7 @@ export function VerticalMastActivitySheet({
   const metaBadge = TOWER_SECTION_STATUS_META[activeSection.status];
 
   return (
-    <div className="bg-white text-slate-900 p-4 sm:p-6 print:p-2">
+    <div className="bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2">
       <ReportLetterhead
         details={reportDetails}
         defaultTitle={`TOWER SECTION ERECTION ACTIVITY REPORT — ${activeSection.id}${
@@ -98,13 +98,13 @@ export function VerticalMastActivitySheet({
       {/* Flush Rectangular Engineering Frame matching Foundation Phase Activity Report */}
       <div className="border-2 border-slate-900 bg-white text-xs">
         {/* Top Full-Width Band: Large Dual 2D Diagrams */}
-        <div className="grid grid-cols-1 sm:grid-cols-12 print:grid-cols-12 border-b-2 border-slate-900 divide-y sm:divide-y-0 sm:divide-x-2 print:divide-y-0 print:divide-x-2 divide-slate-900">
-          <div className="sm:col-span-7 print:col-span-7 flex flex-col p-2">
+        <div className="grid grid-cols-1 sm:grid-cols-12 pdf-desktop:grid-cols-12 print:grid-cols-12 border-b-2 border-slate-900 divide-y sm:divide-y-0 sm:divide-x-2 pdf-desktop:divide-y-0 pdf-desktop:divide-x-2 print:divide-y-0 print:divide-x-2 divide-slate-900">
+          <div className="sm:col-span-7 pdf-desktop:col-span-7 print:col-span-7 flex flex-col p-2">
             <div className="text-[11px] font-bold uppercase text-slate-700 text-center pb-1 tracking-wide shrink-0">
               Vertical Elevation ({activeSection.id}
               {attachedGuyLayer ? ` · ${attachedGuyLayer.id}` : ''})
             </div>
-            <div className="h-[340px] sm:h-[420px] print:h-[360px] flex items-stretch justify-stretch">
+            <div className="h-[340px] sm:h-[420px] pdf-desktop:h-[420px] print:h-[360px] flex items-stretch justify-stretch">
               <VerticalMastElevation2D
                 verticalMast={vm}
                 selectedTarget={{ kind: 'section', id: activeSection.id }}
@@ -115,11 +115,11 @@ export function VerticalMastActivitySheet({
               />
             </div>
           </div>
-          <div className="sm:col-span-5 print:col-span-5 flex flex-col p-2">
+          <div className="sm:col-span-5 pdf-desktop:col-span-5 print:col-span-5 flex flex-col p-2">
             <div className="text-[11px] font-bold uppercase text-slate-700 text-center pb-1 tracking-wide shrink-0">
               Ground Anchor Layout
             </div>
-            <div className="h-[310px] sm:h-[420px] print:h-[360px] flex items-stretch justify-stretch">
+            <div className="h-[310px] sm:h-[420px] pdf-desktop:h-[420px] print:h-[360px] flex items-stretch justify-stretch">
               <GroundAnchorPlan2D
                 foundations={mappedFoundations}
                 anchorGuyStates={anchorGuyStates}
@@ -139,10 +139,10 @@ export function VerticalMastActivitySheet({
         </div>
 
         {/* Second Full-Width Band: Flush Element Specifications | Unified Activity Checklist */}
-        <div className="grid grid-cols-1 md:grid-cols-12 print:grid-cols-12 border-b-2 border-slate-900 divide-y md:divide-y-0 md:divide-x-2 print:divide-y-0 print:divide-x-2 divide-slate-900">
+        <div className="grid grid-cols-1 md:grid-cols-12 pdf-desktop:grid-cols-12 print:grid-cols-12 border-b-2 border-slate-900 divide-y md:divide-y-0 md:divide-x-2 pdf-desktop:divide-y-0 pdf-desktop:divide-x-2 print:divide-y-0 print:divide-x-2 divide-slate-900">
           {/* Left: Engineering Specs & Dates */}
-          <div className="md:col-span-6 print:col-span-6 flex flex-col">
-            <div className="border-b border-slate-900 px-3 py-1.5 font-bold text-xs sm:text-sm bg-slate-100 uppercase tracking-wide">
+          <div className="md:col-span-6 pdf-desktop:col-span-6 print:col-span-6 flex flex-col">
+            <div className="border-b border-slate-900 px-3 py-1.5 font-bold text-xs sm:text-sm pdf-desktop:text-sm bg-slate-100 uppercase tracking-wide">
               {activeSection.id} — {activeSection.label}
             </div>
 
@@ -222,7 +222,7 @@ export function VerticalMastActivitySheet({
           </div>
 
           {/* Right: Unified Installation & Guying Activity Checklist */}
-          <div className="md:col-span-6 print:col-span-6 flex flex-col">
+          <div className="md:col-span-6 pdf-desktop:col-span-6 print:col-span-6 flex flex-col">
             <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-900 font-bold uppercase text-xs text-slate-800">
               {attachedGuyLayer
                 ? `Erection & Guying Activity Checklist (${activeSection.id} · ${attachedGuyLayer.id})`

@@ -7,7 +7,10 @@ import {
   RectangleHorizontal,
   RectangleVertical,
 } from 'lucide-react';
-import { exportElementToPdf } from '@/shared/print/pdfGenerator';
+import {
+  exportElementToPdf,
+  getPdfCaptureWidthPx,
+} from '@/shared/print/pdfGenerator';
 import {
   useUiStore,
   type PrintOrientation,
@@ -32,9 +35,9 @@ export function getPrintDialogMaxWidthClass(
   orientation: PrintOrientation
 ): string {
   if (orientation === 'landscape') {
-    return paperSize === 'A3' || paperSize === 'legal' ? 'max-w-[1320px]' : 'max-w-6xl';
+    return paperSize === 'A3' || paperSize === 'legal' ? 'max-w-[1360px]' : 'max-w-[1200px]';
   }
-  return paperSize === 'A3' ? 'max-w-6xl' : 'max-w-5xl';
+  return paperSize === 'A3' ? 'max-w-[1140px]' : 'max-w-5xl';
 }
 
 /** Syncs the global `<style>` `@page` rule whenever print page settings change while a modal is open. */
@@ -55,6 +58,7 @@ export function usePrintPageSetup(active = true) {
     setPaperSize,
     setOrientation,
     dialogMaxWidthClass: getPrintDialogMaxWidthClass(paperSize, orientation),
+    sheetWidthPx: getPdfCaptureWidthPx(paperSize, orientation),
   };
 }
 

@@ -17,7 +17,7 @@ export function VerticalMastActivityPrintModal({
   project: MastProjectState;
   target: MastSelectionTarget;
 }) {
-  const { dialogMaxWidthClass } = usePrintPageSetup(open);
+  const { dialogMaxWidthClass, sheetWidthPx } = usePrintPageSetup(open);
   const sheetRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -70,8 +70,14 @@ export function VerticalMastActivityPrintModal({
           </div>
         </div>
 
-        <div ref={sheetRef} className="report-modal-scroll-area report-printable-card bg-white">
-          <VerticalMastActivitySheet project={project} target={target} />
+        <div className="report-modal-preview-frame overflow-x-auto bg-slate-100/75 p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">
+          <div
+            ref={sheetRef}
+            style={{ width: `${sheetWidthPx}px`, minWidth: `${sheetWidthPx}px` }}
+            className="report-modal-scroll-area report-printable-card pdf-desktop-layout mx-auto bg-white shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none"
+          >
+            <VerticalMastActivitySheet project={project} target={target} />
+          </div>
         </div>
       </div>
     </div>,

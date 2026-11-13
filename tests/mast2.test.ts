@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeSmartPdfPageBreaks,
+  getPdfCaptureWidthPx,
   getPdfPageDimensionsMm,
   sanitizePdfFilename,
 } from '@/shared/print/pdfGenerator';
@@ -954,9 +955,15 @@ describe('Workspace UI & Foundation Activity Report', () => {
     store.setPrintOrientation('landscape');
     expect(useUiStore.getState().printPaperSize).toBe('A3');
     expect(useUiStore.getState().printOrientation).toBe('landscape');
-    expect(getPrintDialogMaxWidthClass('A3', 'landscape')).toBe('max-w-[1320px]');
-    expect(getPrintDialogMaxWidthClass('letter', 'landscape')).toBe('max-w-6xl');
-    expect(getPrintDialogMaxWidthClass('legal', 'landscape')).toBe('max-w-[1320px]');
+    expect(getPrintDialogMaxWidthClass('A3', 'landscape')).toBe('max-w-[1360px]');
+    expect(getPrintDialogMaxWidthClass('letter', 'landscape')).toBe('max-w-[1200px]');
+    expect(getPrintDialogMaxWidthClass('legal', 'landscape')).toBe('max-w-[1360px]');
+    expect(getPrintDialogMaxWidthClass('A3', 'portrait')).toBe('max-w-[1140px]');
+
+    expect(getPdfCaptureWidthPx('A4', 'portrait')).toBe(900);
+    expect(getPdfCaptureWidthPx('A3', 'portrait')).toBe(1060);
+    expect(getPdfCaptureWidthPx('letter', 'landscape')).toBe(1120);
+    expect(getPdfCaptureWidthPx('A3', 'landscape')).toBe(1280);
 
     // Restore defaults
     store.setPrintPaperSize('A4');

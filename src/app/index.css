@@ -3,6 +3,8 @@
 @import "@fontsource/noto-sans/600.css";
 @import "@fontsource/noto-sans/700.css";
 
+@custom-variant pdf-desktop (&:is(.pdf-desktop-layout, .pdf-desktop-layout *));
+
 @theme {
   --font-sans: 'Noto Sans', ui-sans-serif, system-ui, sans-serif;
 }
@@ -48,6 +50,11 @@
 
   .no-scrollbar::-webkit-scrollbar {
     display: none;
+  }
+
+  .pdf-capturing .no-print,
+  .pdf-capturing .print\:hidden {
+    display: none !important;
   }
 }
 
@@ -120,6 +127,17 @@
     overflow: visible !important;
     height: auto !important;
     max-height: none !important;
+  }
+
+  .report-modal-preview-frame {
+    padding: 0 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+
+  .pdf-desktop-layout {
+    width: 100% !important;
+    min-width: 0 !important;
   }
 
   .report-printable-card {

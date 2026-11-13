@@ -20,7 +20,7 @@ export function ActivityReportSheet({
   const reportDetails = resolveReportDetails(project);
 
   return (
-    <div className="bg-white text-slate-900 p-4 sm:p-6 print:p-2">
+    <div className="bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2">
       <ReportLetterhead
         details={reportDetails}
         defaultTitle="CURRENT FOUNDATION ACTIVITY REPORT"
@@ -35,7 +35,7 @@ export function ActivityReportSheet({
         {/* Top Split Row: Left 2D Layout Image | Right Title, Size, Rebar, Tasks */}
         <div className="grid grid-cols-12">
           {/* Left: Location on the Layout image */}
-          <div className="col-span-12 md:col-span-7 print:col-span-7 border-b-2 md:border-b-0 md:border-r-2 print:border-b-0 print:border-r-2 border-slate-900 flex flex-col p-1">
+          <div className="col-span-12 md:col-span-7 pdf-desktop:col-span-7 print:col-span-7 border-b-2 md:border-b-0 md:border-r-2 pdf-desktop:border-b-0 pdf-desktop:border-r-2 print:border-b-0 print:border-r-2 border-slate-900 flex flex-col p-1">
             <div className="text-[11px] font-semibold text-slate-500 text-center py-0.5 shrink-0">
               Location on the Layout image ({foundation.id})
             </div>
@@ -52,9 +52,9 @@ export function ActivityReportSheet({
           </div>
 
           {/* Right: Foundation metadata, Organized Design Details, Tasks Status */}
-          <div className="col-span-12 md:col-span-5 print:col-span-5 flex flex-col">
+          <div className="col-span-12 md:col-span-5 pdf-desktop:col-span-5 print:col-span-5 flex flex-col">
             {/* [Foundation Title] */}
-            <div className="border-b border-slate-900 px-3 py-1.5 text-center font-bold text-xs sm:text-sm bg-slate-50">
+            <div className="border-b border-slate-900 px-3 py-1.5 text-center font-bold text-xs sm:text-sm pdf-desktop:text-sm bg-slate-50">
               {report.foundationTitle}
             </div>
 

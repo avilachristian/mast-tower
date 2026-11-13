@@ -55,7 +55,7 @@ export function DailyLogPrintModal({
     preparedBy,
   });
 
-  const { dialogMaxWidthClass } = usePrintPageSetup(true);
+  const { dialogMaxWidthClass, sheetWidthPx } = usePrintPageSetup(true);
 
   useEffect(() => {
     document.body.classList.add('report-modal-open');
@@ -145,10 +145,12 @@ export function DailyLogPrintModal({
         </div>
 
         {/* Printable Sheet */}
-        <div
-          ref={sheetRef}
-          className="report-modal-scroll-area report-printable-card bg-white text-slate-900 p-4 sm:p-6 print:p-2"
-        >
+        <div className="report-modal-preview-frame overflow-x-auto bg-slate-100/75 p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">
+          <div
+            ref={sheetRef}
+            style={{ width: `${sheetWidthPx}px`, minWidth: `${sheetWidthPx}px` }}
+            className="report-modal-scroll-area report-printable-card pdf-desktop-layout mx-auto bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2 shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none"
+          >
             <ReportLetterhead
             details={{
               ...effectiveDetails,
@@ -168,7 +170,7 @@ export function DailyLogPrintModal({
             {/* Top Split Row: Left 2D Tower Layout Highlighting Current Work | Right Project Metadata & Manpower */}
             <div className="grid grid-cols-12 border-b-2 border-slate-900">
               {/* Left: 2D Tower & Foundation Layout */}
-              <div className="col-span-12 md:col-span-7 print:col-span-7 border-b-2 md:border-b-0 md:border-r-2 print:border-b-0 print:border-r-2 border-slate-900 flex flex-col p-1.5">
+              <div className="col-span-12 md:col-span-7 pdf-desktop:col-span-7 print:col-span-7 border-b-2 md:border-b-0 md:border-r-2 pdf-desktop:border-b-0 pdf-desktop:border-r-2 print:border-b-0 print:border-r-2 border-slate-900 flex flex-col p-1.5">
                 <div className="text-[11px] font-bold text-slate-700 text-center py-0.5 px-2 shrink-0 uppercase tracking-wide leading-tight">
                   Tower Layout — Current Work (
                   {workedIds.length === 0
@@ -178,7 +180,7 @@ export function DailyLogPrintModal({
                       : workedIds.join(', ')}
                   )
                 </div>
-                <div className="flex-1 min-h-[340px] sm:min-h-[380px] flex items-stretch justify-stretch">
+                <div className="flex-1 min-h-[340px] sm:min-h-[380px] pdf-desktop:min-h-[380px] flex items-stretch justify-stretch">
                   {project.projectType === 'vertical_mast' ? (
                     (() => {
                       const { vm, projectedAnchorStatuses, anchorGuyStates } =
@@ -232,7 +234,7 @@ export function DailyLogPrintModal({
               </div>
 
               {/* Right: Project Info, Date/Weather & Manpower */}
-              <div className="col-span-12 md:col-span-5 print:col-span-5 flex flex-col">
+              <div className="col-span-12 md:col-span-5 pdf-desktop:col-span-5 print:col-span-5 flex flex-col">
                 {/* Project Name & Location */}
                 <div className="border-b-2 border-slate-900 p-2">
                   <div className="text-[10px] font-bold uppercase text-slate-500">Project Name</div>
@@ -632,6 +634,7 @@ export function DailyLogPrintModal({
             fallbackPreparedBy={preparedBy}
             fallbackDate={log.date}
           />
+          </div>
         </div>
       </div>
     </div>,

@@ -39,7 +39,7 @@ export function OverallVerticalMastStatusSheet({
   }));
 
   return (
-    <div className="bg-white text-slate-900 p-4 sm:p-6 print:p-2">
+    <div className="bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2">
       <ReportLetterhead
         details={reportDetails}
         defaultTitle="OVERALL VERTICAL MAST ERECTION STATUS REPORT"
@@ -52,12 +52,12 @@ export function OverallVerticalMastStatusSheet({
 
       <div className="border-2 border-slate-900 bg-white text-xs">
         {/* Top Full-Width Band: Large Dual 2D Engineering Diagrams */}
-        <div className="grid grid-cols-1 sm:grid-cols-12 print:grid-cols-12 border-b-2 border-slate-900 divide-y sm:divide-y-0 sm:divide-x-2 print:divide-y-0 print:divide-x-2 divide-slate-900">
-          <div className="sm:col-span-7 print:col-span-7 flex flex-col p-2">
+        <div className="grid grid-cols-1 sm:grid-cols-12 pdf-desktop:grid-cols-12 print:grid-cols-12 border-b-2 border-slate-900 divide-y sm:divide-y-0 sm:divide-x-2 pdf-desktop:divide-y-0 pdf-desktop:divide-x-2 print:divide-y-0 print:divide-x-2 divide-slate-900">
+          <div className="sm:col-span-7 pdf-desktop:col-span-7 print:col-span-7 flex flex-col p-2">
             <div className="text-[11px] font-bold text-slate-700 text-center pb-1 uppercase tracking-wide shrink-0">
               Vertical Elevation (0–129 m · {VERTICAL_MAST_DESIGN_SPECS.drawingNo})
             </div>
-            <div className="h-[340px] sm:h-[420px] print:h-[360px] flex items-stretch justify-stretch">
+            <div className="h-[340px] sm:h-[420px] pdf-desktop:h-[420px] print:h-[360px] flex items-stretch justify-stretch">
               <VerticalMastElevation2D
                 verticalMast={vm}
                 onSelectTarget={onSelectTarget}
@@ -68,11 +68,11 @@ export function OverallVerticalMastStatusSheet({
             </div>
           </div>
 
-          <div className="sm:col-span-5 print:col-span-5 flex flex-col p-2">
+          <div className="sm:col-span-5 pdf-desktop:col-span-5 print:col-span-5 flex flex-col p-2">
             <div className="text-[11px] font-bold text-slate-700 text-center pb-1 uppercase tracking-wide shrink-0">
               Site Guy Anchor Plan (13 Pads)
             </div>
-            <div className="h-[310px] sm:h-[420px] print:h-[360px] flex items-stretch justify-stretch">
+            <div className="h-[310px] sm:h-[420px] pdf-desktop:h-[420px] print:h-[360px] flex items-stretch justify-stretch">
               <GroundAnchorPlan2D
                 foundations={mappedFoundations}
                 anchorGuyStates={anchorGuyStates}
@@ -86,9 +86,9 @@ export function OverallVerticalMastStatusSheet({
         </div>
 
         {/* Second Full-Width Band: Executive Summary & Stage / Anchor Ring Breakdowns */}
-        <div className="grid grid-cols-1 md:grid-cols-12 print:grid-cols-12 border-b-2 border-slate-900 divide-y md:divide-y-0 md:divide-x-2 print:divide-y-0 print:divide-x-2 divide-slate-900">
+        <div className="grid grid-cols-1 md:grid-cols-12 pdf-desktop:grid-cols-12 print:grid-cols-12 border-b-2 border-slate-900 divide-y md:divide-y-0 md:divide-x-2 pdf-desktop:divide-y-0 pdf-desktop:divide-x-2 print:divide-y-0 print:divide-x-2 divide-slate-900">
           {/* Left: Executive KPIs */}
-          <div className="md:col-span-5 print:col-span-5 flex flex-col">
+          <div className="md:col-span-5 pdf-desktop:col-span-5 print:col-span-5 flex flex-col">
             <div className="border-b border-slate-900 px-3 py-1.5 font-bold text-xs bg-slate-100 uppercase tracking-wide">
               Executive Erection Summary
             </div>
@@ -154,7 +154,7 @@ export function OverallVerticalMastStatusSheet({
           </div>
 
           {/* Middle: Tower Sections by Stage */}
-          <div className="md:col-span-3 print:col-span-3 flex flex-col">
+          <div className="md:col-span-3 pdf-desktop:col-span-3 print:col-span-3 flex flex-col">
             <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-900 text-xs font-bold uppercase text-slate-800">
               Tower Stages (41 × 3m)
             </div>
@@ -183,7 +183,7 @@ export function OverallVerticalMastStatusSheet({
           </div>
 
           {/* Right: Guy Layer Breakdown by Anchor Ring */}
-          <div className="md:col-span-4 print:col-span-4 flex flex-col">
+          <div className="md:col-span-4 pdf-desktop:col-span-4 print:col-span-4 flex flex-col">
             <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-900 text-xs font-bold uppercase text-slate-800">
               Anchor Rings ({guyStageCounts.find((g) => g.status === 'tensioned_verified')?.count ?? 0}/16 Tensioned)
             </div>
@@ -305,7 +305,7 @@ export function OverallVerticalMastStatusSheet({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 divide-y md:divide-y-0 md:divide-x print:divide-y-0 print:divide-x divide-slate-900">
+          <div className="grid grid-cols-1 md:grid-cols-2 pdf-desktop:grid-cols-2 print:grid-cols-2 divide-y md:divide-y-0 md:divide-x pdf-desktop:divide-y-0 pdf-desktop:divide-x print:divide-y-0 print:divide-x divide-slate-900">
             {[vm.sections.slice(0, 21), vm.sections.slice(21)].map((chunk, colIdx) => (
               <table key={colIdx} className="w-full text-left border-collapse">
                 <thead>
