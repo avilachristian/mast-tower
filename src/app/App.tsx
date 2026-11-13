@@ -8,12 +8,15 @@ import {
   FileText,
   FolderKanban,
   Layers,
+  RefreshCw,
   RotateCcw,
   Upload,
 } from 'lucide-react';
 import { computeVerticalMastMetrics } from '@/entities/project/verticalMastCalculations';
+import { usePwaStore } from '@/shared/pwa/pwaManager';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
+import { PwaStatusBanner } from '@/widgets/pwa/PwaStatusBanner';
 import { DailyLogPrintModal } from '@/widgets/daily-logs/DailyLogPrintModal';
 import { DailyLogsView } from '@/widgets/daily-logs/DailyLogsView';
 import { FoundationInspectionView } from '@/widgets/inspection/FoundationInspectionView';
@@ -63,6 +66,9 @@ export function App() {
   } = useUiStore();
 
   const isVerticalMast = project.projectType === 'vertical_mast';
+  const updateAvailable = usePwaStore((s) => s.updateAvailable);
+  const isUpdating = usePwaStore((s) => s.isUpdating);
+  const applyUpdate = usePwaStore((s) => s.applyUpdate);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -187,6 +193,19 @@ export function App() {
           {/* Utility Actions */}
           {!projectBrowserOpen && (
             <div className="flex items-center gap-1.5 shrink-0">
+            {updateAvailable && (
+              <button
+                type="button"
+                onClick={() => void applyUpdate()}
+                disabled={isUpdating}
+                title="Update to newest app version"
+                aria-label="Update to newest app version"
+                className="inline-flex items-center justify-center gap-1 min-h-10 sm:min-h-0 px-2.5 py-2 sm:py-1.5 rounded-lg sm:rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs disabled:opacity-70"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isUpdating ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{isUpdating ? 'Updating...' : 'Update'}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -483,11 +502,14 @@ export function App() {
       {/* Vertical Mast Bottom-Up Erection Check Modal */}
       <VerticalMastOrderModal />
 
+      {/* PWA Offline / Update Notification Banner */}
+      <PwaStatusBanner hasBottomNav={!projectBrowserOpen} />
+
       {/* Dedicated Mobile Bottom Icon-Only Navigation Bar */}
       {!projectBrowserOpen && (
         <nav
           aria-label="Mobile Bottom Navigation"
-          className="md:hidden print:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 shadow-[0_-4px_16px_rgba(15,23,42,0.08)]"
+          className="md:hidden print:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 shadow-[0_-4px_16px_rgba(15,23,42,0.08)] safe-area-pb"
         >
           <div className="grid grid-cols-5 h-16">
             <button

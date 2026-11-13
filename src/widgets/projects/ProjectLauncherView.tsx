@@ -21,6 +21,7 @@ import {
   type VerticalMastMetrics,
 } from '@/entities/project/verticalMastCalculations';
 import { useProjectStore } from '@/shared/state/projectStore';
+import { PwaAppStatusBar } from '@/widgets/pwa/PwaStatusBanner';
 
 function slugifyFilename(name: string): string {
   return (
@@ -681,6 +682,8 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
             </div>
           </button>
         </div>
+
+        <PwaAppStatusBar />
       </div>
     </div>
   );

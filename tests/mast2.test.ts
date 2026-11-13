@@ -57,7 +57,13 @@ import { shouldOpenLauncherOnStartup, useUiStore } from '@/shared/state/uiStore'
 import { DEFAULT_REPORT_LOGOS, resolveReportLogos } from '@/shared/assets/defaultLogos';
 import { getMastElevationGeometry } from '@/widgets/mast-tower/VerticalMastElevation2D';
 import { applyPrintPageStyle } from '@/widgets/report/ReportLetterhead';
-import { useProjectStore } from '@/shared/state/projectStore';
+import {
+  parseLegacyWorkspacePayload,
+  parseWorkspacePayload,
+  useProjectStore,
+} from '@/shared/state/projectStore';
+import { idbGet, idbSet, isIndexedDbAvailable } from '@/shared/storage/indexedDb';
+import { usePwaStore } from '@/shared/pwa/pwaManager';
 import {
   computeCalloutBoxWidth,
   getSelectionLeaderLayout,
@@ -1503,6 +1509,59 @@ describe('Workspace UI & Foundation Activity Report', () => {
     expect(computeProjectMetrics(useProjectStore.getState().project).totalConcreteCuM).toBe(51.96);
 
     useProjectStore.getState().deleteProject(testId);
+  });
+
+  it('parses workspace & legacy payloads for IndexedDB migration and handles Node fallback cleanly', async () => {
+    const sample = createSampleMast2Project();
+    sample.foundations[0].notes = 'Excavation completed by previous contractor.';
+
+    const workspaceJson = JSON.stringify({
+      activeProjectId: 'p-2',
+      projects: [
+        { id: 'p-1', createdAt: '2026-01-01', updatedAt: '2026-01-01', state: sample },
+        { id: 'p-2', createdAt: '2026-01-02', updatedAt: '2026-01-02', state: createCleanBaselineProject() },
+      ],
+    });
+
+    const parsedWorkspace = parseWorkspacePayload(workspaceJson);
+    expect(parsedWorkspace).not.toBeNull();
+    expect(parsedWorkspace!.activeProjectId).toBe('p-2');
+    expect(parsedWorkspace!.projects).toHaveLength(2);
+    expect(parsedWorkspace!.projects[0].state.foundations[0].notes).toBe('');
+
+    const parsedLegacy = parseLegacyWorkspacePayload(JSON.stringify(sample));
+    expect(parsedLegacy).not.toBeNull();
+    expect(parsedLegacy!.activeProjectId).toBe('proj-1');
+    expect(parsedLegacy!.projects).toHaveLength(1);
+    expect(parsedLegacy!.projects[0].state.foundations[0].notes).toBe('');
+
+    expect(parseWorkspacePayload(null)).toBeNull();
+    expect(parseLegacyWorkspacePayload(JSON.stringify({ invalid: true }))).toBeNull();
+
+    expect(isIndexedDbAvailable()).toBe(false);
+    await expect(idbGet('test-key')).resolves.toBeUndefined();
+    await expect(idbSet('test-key', { ok: true })).resolves.toBeUndefined();
+    await expect(useProjectStore.getState().hydrateFromStorage()).resolves.toBeUndefined();
+  });
+
+  it('tracks PWA update and offline notification banner dismissals cleanly', () => {
+    usePwaStore.setState({
+      updateAvailable: true,
+      updateDismissed: false,
+      offlineReady: true,
+      offlineReadyDismissed: false,
+      justUpdated: true,
+    });
+
+    expect(usePwaStore.getState().updateAvailable).toBe(true);
+    usePwaStore.getState().dismissUpdateBanner();
+    expect(usePwaStore.getState().updateDismissed).toBe(true);
+
+    usePwaStore.getState().dismissOfflineReady();
+    expect(usePwaStore.getState().offlineReadyDismissed).toBe(true);
+
+    usePwaStore.getState().dismissJustUpdated();
+    expect(usePwaStore.getState().justUpdated).toBe(false);
   });
 });
 

@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import type { FoundationChecklistViolation } from '@/entities/project/foundationValidation';
 import type { VerticalMastOrderViolation } from '@/entities/project/verticalMastValidation';
+import {
+  createCoalescedIdbWriter,
+  FIRST_LAUNCH_COMPLETED_KEY,
+  idbGet,
+  isIndexedDbAvailable,
+  LEGACY_STORAGE_KEY,
+  WORKSPACE_STORAGE_KEY,
+} from '@/shared/storage/indexedDb';
 
 export type ActiveAppTab =
   | 'project_status'
@@ -18,9 +26,8 @@ export type PrintPaperSize = 'A4' | 'A3' | 'letter' | 'legal';
 export type PrintOrientation = 'portrait' | 'landscape';
 export type MastVerticalScale = 1 | 1.5 | 2 | 3;
 
-const WORKSPACE_STORAGE_KEY = 'mast2-tower-projects-workspace-v1';
-const LEGACY_STORAGE_KEY = 'mast2-tower-report-generator-v1';
-const FIRST_LAUNCH_COMPLETED_KEY = 'mast2-launcher-completed-v1';
+const firstLaunchIdbWriter = createCoalescedIdbWriter<string>(FIRST_LAUNCH_COMPLETED_KEY);
+let uiHydrationPromise: Promise<void> | null = null;
 
 /**
  * Returns true only on the user's very first launch (no saved projects or prior
@@ -60,6 +67,7 @@ interface UiState {
   foundationOrderViolation: FoundationChecklistViolation | null;
 
   setActiveAppTab: (tab: ActiveAppTab) => void;
+  hydrateUiStorage: () => Promise<void>;
   setProjectBrowserOpen: (open: boolean) => void;
   setDailyLogPrintId: (id: string | null) => void;
   setReportOpen: (open: boolean) => void;
@@ -92,12 +100,57 @@ export const useUiStore = create<UiState>((set) => ({
   foundationOrderViolation: null,
 
   setActiveAppTab: (tab) => set({ activeAppTab: tab }),
-  setProjectBrowserOpen: (open) => {
-    if (!open && typeof window !== 'undefined') {
+  hydrateUiStorage: () => {
+    if (uiHydrationPromise) return uiHydrationPromise;
+    uiHydrationPromise = (async () => {
+      if (typeof window === 'undefined') return;
       try {
-        window.localStorage.setItem(FIRST_LAUNCH_COMPLETED_KEY, '1');
+        let hasPriorEntry = false;
+
+        if (isIndexedDbAvailable()) {
+          const [completed, workspace] = await Promise.all([
+            idbGet<string>(FIRST_LAUNCH_COMPLETED_KEY),
+            idbGet<unknown>(WORKSPACE_STORAGE_KEY),
+          ]);
+          if (completed || workspace) {
+            hasPriorEntry = true;
+          }
+        }
+
+        const lsCompleted = window.localStorage.getItem(FIRST_LAUNCH_COMPLETED_KEY);
+        const lsWorkspace = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+        const lsLegacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+
+        if (lsCompleted || lsWorkspace || lsLegacy) {
+          hasPriorEntry = true;
+          if (lsCompleted && isIndexedDbAvailable()) {
+            firstLaunchIdbWriter.enqueue(lsCompleted);
+            await firstLaunchIdbWriter.flush();
+            try {
+              window.localStorage.removeItem(FIRST_LAUNCH_COMPLETED_KEY);
+            } catch {
+              // Ignore cleanup errors
+            }
+          }
+        }
+
+        set({ projectBrowserOpen: !hasPriorEntry });
       } catch {
         // Ignore storage errors
+      }
+    })();
+    return uiHydrationPromise;
+  },
+  setProjectBrowserOpen: (open) => {
+    if (!open && typeof window !== 'undefined') {
+      if (isIndexedDbAvailable()) {
+        firstLaunchIdbWriter.enqueue('1');
+      } else {
+        try {
+          window.localStorage.setItem(FIRST_LAUNCH_COMPLETED_KEY, '1');
+        } catch {
+          // Ignore storage errors
+        }
       }
     }
     set({ projectBrowserOpen: open });

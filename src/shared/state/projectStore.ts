@@ -30,6 +30,14 @@ import {
   type VerticalMastOrderViolation,
 } from '@/entities/project/verticalMastValidation';
 import { useUiStore } from '@/shared/state/uiStore';
+import {
+  createCoalescedIdbWriter,
+  idbGet,
+  idbSet,
+  isIndexedDbAvailable,
+  LEGACY_STORAGE_KEY,
+  WORKSPACE_STORAGE_KEY,
+} from '@/shared/storage/indexedDb';
 import type {
   CustomFoundationInspectionItem,
   DailyActivityLogEntry,
@@ -60,9 +68,6 @@ import type {
   VerticalMastState,
 } from '@/entities/project/types';
 
-const LEGACY_STORAGE_KEY = 'mast2-tower-report-generator-v1';
-const WORKSPACE_STORAGE_KEY = 'mast2-tower-projects-workspace-v1';
-
 const LEGACY_BOILERPLATE_NOTES = new Set([
   'Excavation completed by previous contractor.',
   'Excavation completed by previous contractor. Principal base with M27 embedded bolt frame & locating plate.',
@@ -92,7 +97,7 @@ export interface CreateProjectOptions {
   copyLogosFromCurrent?: boolean;
 }
 
-interface WorkspacePayload {
+export interface WorkspacePayload {
   activeProjectId: string;
   projects: SavedProjectRecord[];
 }
@@ -127,62 +132,55 @@ function isValidProjectState(value: unknown): value is MastProjectState {
   );
 }
 
-function loadInitialWorkspace(): WorkspacePayload {
-  const fallback = buildSavedRecord(createSampleMast2Project(), 'proj-default');
-  if (typeof window === 'undefined') {
-    return { activeProjectId: fallback.id, projects: [fallback] };
-  }
-  try {
-    const workspaceRaw = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
-    if (workspaceRaw) {
-      const parsed = JSON.parse(workspaceRaw) as Partial<WorkspacePayload>;
-      const validProjects = Array.isArray(parsed.projects)
-        ? parsed.projects
-            .filter((p) => p && p.id && isValidProjectState(p.state))
-            .map((p) => {
-              const cleaned = stripLegacyBoilerplateNotes(p.state);
-              return cleaned.verticalMast
-                ? {
-                    ...p,
-                    state: {
-                      ...cleaned,
-                      verticalMast: normalizeVerticalMastState(cleaned.verticalMast),
-                    },
-                  }
-                : { ...p, state: cleaned };
-            })
-        : [];
-      if (validProjects.length > 0) {
-        const active =
-          validProjects.find((p) => p.id === parsed.activeProjectId) ?? validProjects[0];
-        return { activeProjectId: active.id, projects: validProjects };
+function normalizeProjectRecord(record: SavedProjectRecord): SavedProjectRecord {
+  const cleaned = stripLegacyBoilerplateNotes(record.state);
+  return cleaned.verticalMast
+    ? {
+        ...record,
+        state: {
+          ...cleaned,
+          verticalMast: normalizeVerticalMastState(cleaned.verticalMast),
+        },
       }
-    }
+    : { ...record, state: cleaned };
+}
 
-    const legacyRaw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (legacyRaw) {
-      const legacyParsed = JSON.parse(legacyRaw);
-      if (isValidProjectState(legacyParsed)) {
-        const migrated = buildSavedRecord(legacyParsed, 'proj-1');
-        return { activeProjectId: migrated.id, projects: [migrated] };
-      }
-    }
-  } catch {
-    // Ignore read/parse errors
-  }
+export function parseWorkspacePayload(raw: unknown): WorkspacePayload | null {
+  if (!raw) return null;
+  const parsed =
+    typeof raw === 'string'
+      ? (JSON.parse(raw) as Partial<WorkspacePayload>)
+      : (raw as Partial<WorkspacePayload>);
+  const validProjects = Array.isArray(parsed.projects)
+    ? parsed.projects
+        .filter((p) => p && p.id && isValidProjectState(p.state))
+        .map(normalizeProjectRecord)
+    : [];
+  if (validProjects.length === 0) return null;
+  const active =
+    validProjects.find((p) => p.id === parsed.activeProjectId) ?? validProjects[0];
+  return { activeProjectId: active.id, projects: validProjects };
+}
+
+export function parseLegacyWorkspacePayload(raw: unknown): WorkspacePayload | null {
+  if (!raw) return null;
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (!isValidProjectState(parsed)) return null;
+  const normalized = normalizeProjectRecord(buildSavedRecord(parsed, 'proj-1'));
+  return { activeProjectId: normalized.id, projects: [normalized] };
+}
+
+function createFallbackWorkspace(): WorkspacePayload {
+  const fallback = buildSavedRecord(createSampleMast2Project(), 'proj-default');
   return { activeProjectId: fallback.id, projects: [fallback] };
 }
 
+const workspaceIdbWriter = createCoalescedIdbWriter<WorkspacePayload>(WORKSPACE_STORAGE_KEY);
+let hydrationPromise: Promise<void> | null = null;
+
 function persistWorkspace(activeProjectId: string, projects: SavedProjectRecord[]) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(
-      WORKSPACE_STORAGE_KEY,
-      JSON.stringify({ activeProjectId, projects })
-    );
-  } catch {
-    // Ignore quota errors
-  }
+  if (!isIndexedDbAvailable()) return;
+  workspaceIdbWriter.enqueue({ activeProjectId, projects });
 }
 
 function commitActiveProject(
@@ -357,6 +355,8 @@ interface ProjectStore {
   activeProjectId: string;
   project: MastProjectState;
   selectedFoundationId: string;
+  storageHydrated: boolean;
+  hydrateFromStorage: () => Promise<void>;
   createProject: (options?: CreateProjectOptions) => string;
   switchProject: (projectId: string) => void;
   duplicateProject: (projectId: string, newName?: string) => string | null;
@@ -521,16 +521,75 @@ interface ProjectStore {
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => {
-  const initialWorkspace = loadInitialWorkspace();
-  const initialActive =
-    initialWorkspace.projects.find((p) => p.id === initialWorkspace.activeProjectId) ??
-    initialWorkspace.projects[0];
+  const initialWorkspace = createFallbackWorkspace();
+  const initialActive = initialWorkspace.projects[0];
 
   return {
     projects: initialWorkspace.projects,
     activeProjectId: initialActive.id,
     project: initialActive.state,
     selectedFoundationId: initialActive.state.foundations[0]?.id ?? 'PF-0',
+    storageHydrated: !isIndexedDbAvailable(),
+
+    hydrateFromStorage: () => {
+      if (hydrationPromise) return hydrationPromise;
+      hydrationPromise = (async () => {
+        if (typeof window === 'undefined') {
+          set({ storageHydrated: true });
+          return;
+        }
+        try {
+          if (navigator.storage?.persist) {
+            void navigator.storage.persist().catch(() => {});
+          }
+
+          let loaded: WorkspacePayload | null = null;
+          if (isIndexedDbAvailable()) {
+            const idbRaw = await idbGet<WorkspacePayload>(WORKSPACE_STORAGE_KEY);
+            loaded = parseWorkspacePayload(idbRaw);
+          }
+
+          if (!loaded) {
+            const workspaceRaw = window.localStorage.getItem(WORKSPACE_STORAGE_KEY);
+            const legacyRaw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+            try {
+              loaded =
+                parseWorkspacePayload(workspaceRaw) ??
+                parseLegacyWorkspacePayload(legacyRaw);
+            } catch {
+              loaded = null;
+            }
+
+            if (loaded && isIndexedDbAvailable()) {
+              await idbSet(WORKSPACE_STORAGE_KEY, loaded);
+              try {
+                window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+                window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+              } catch {
+                // Ignore localStorage cleanup errors
+              }
+            }
+          }
+
+          if (loaded && loaded.projects.length > 0) {
+            const active =
+              loaded.projects.find((p) => p.id === loaded.activeProjectId) ??
+              loaded.projects[0];
+            set({
+              projects: loaded.projects,
+              activeProjectId: active.id,
+              project: active.state,
+              selectedFoundationId: active.state.foundations[0]?.id ?? 'PF-0',
+            });
+          }
+        } catch {
+          // Ignore storage read/migration errors and continue with fallback workspace
+        } finally {
+          set({ storageHydrated: true });
+        }
+      })();
+      return hydrationPromise;
+    },
 
     createProject: (options = {}) => {
       const s = get();

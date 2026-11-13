@@ -18,6 +18,11 @@
     font-family: var(--font-sans);
     background-color: #f8fafc;
     color: #0f172a;
+    overscroll-behavior-y: contain;
+  }
+
+  .safe-area-pb {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   * {
