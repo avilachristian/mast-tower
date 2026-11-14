@@ -1,5 +1,13 @@
 import { create } from 'zustand';
-import { recalculateDailyLogCarryOver } from '@/entities/project/calculations';
+import {
+  computeDailyLogMaterialRemaining,
+  recalculateDailyLogCarryOver,
+} from '@/entities/project/calculations';
+import {
+  createDefaultCentralMaterials,
+  resolveCentralMaterials,
+  syncDailyLogMaterialsWithHauling,
+} from '@/entities/project/haulingInventory';
 import {
   BAGS_PER_CUBIC_METER,
   checklistFromStatus,
@@ -39,6 +47,7 @@ import {
   WORKSPACE_STORAGE_KEY,
 } from '@/shared/storage/indexedDb';
 import type {
+  CentralMaterialItem,
   CustomFoundationInspectionItem,
   DailyActivityLogEntry,
   FoundationCustomSpecs,
@@ -54,7 +63,9 @@ import type {
   GuyLayerRecord,
   GuyLayerStatus,
   GuySectorProgress,
+  HaulerPayoutRecord,
   HaulingLogEntry,
+  HaulingMaterialCategory,
   MastProjectState,
   ProjectType,
   ReportDetailsSpec,
@@ -127,8 +138,8 @@ function isValidProjectState(value: unknown): value is MastProjectState {
   const candidate = value as Partial<MastProjectState> | null | undefined;
   return Boolean(
     candidate &&
-      Array.isArray(candidate.foundations) &&
-      candidate.foundations.length > 0
+    Array.isArray(candidate.foundations) &&
+    candidate.foundations.length > 0
   );
 }
 
@@ -136,12 +147,12 @@ function normalizeProjectRecord(record: SavedProjectRecord): SavedProjectRecord 
   const cleaned = stripLegacyBoilerplateNotes(record.state);
   return cleaned.verticalMast
     ? {
-        ...record,
-        state: {
-          ...cleaned,
-          verticalMast: normalizeVerticalMastState(cleaned.verticalMast),
-        },
-      }
+      ...record,
+      state: {
+        ...cleaned,
+        verticalMast: normalizeVerticalMastState(cleaned.verticalMast),
+      },
+    }
     : { ...record, state: cleaned };
 }
 
@@ -153,8 +164,8 @@ export function parseWorkspacePayload(raw: unknown): WorkspacePayload | null {
       : (raw as Partial<WorkspacePayload>);
   const validProjects = Array.isArray(parsed.projects)
     ? parsed.projects
-        .filter((p) => p && p.id && isValidProjectState(p.state))
-        .map(normalizeProjectRecord)
+      .filter((p) => p && p.id && isValidProjectState(p.state))
+      .map(normalizeProjectRecord)
     : [];
   if (validProjects.length === 0) return null;
   const active =
@@ -191,12 +202,12 @@ function commitActiveProject(
   const hasActive = s.projects.some((p) => p.id === s.activeProjectId);
   const projects = hasActive
     ? s.projects.map((p) =>
-        p.id === s.activeProjectId ? { ...p, updatedAt: now, state: nextProject } : p
-      )
+      p.id === s.activeProjectId ? { ...p, updatedAt: now, state: nextProject } : p
+    )
     : [
-        { id: s.activeProjectId, createdAt: now, updatedAt: now, state: nextProject },
-        ...s.projects,
-      ];
+      { id: s.activeProjectId, createdAt: now, updatedAt: now, state: nextProject },
+      ...s.projects,
+    ];
   persistWorkspace(s.activeProjectId, projects);
   return { project: nextProject, projects };
 }
@@ -223,12 +234,12 @@ function patchInspectionItemInHolder<T extends InspectionHolder>(
   const customInspectionItems = holder.customInspectionItems?.map((ci) =>
     ci.key === key
       ? {
-          ...ci,
-          ...(patch.description !== undefined ? { description: patch.description } : {}),
-          ...(patch.planMeasurement !== undefined
-            ? { planMeasurement: patch.planMeasurement }
-            : {}),
-        }
+        ...ci,
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.planMeasurement !== undefined
+          ? { planMeasurement: patch.planMeasurement }
+          : {}),
+      }
       : ci
   );
   return {
@@ -334,6 +345,78 @@ function syncVerticalMastFlags(vm: VerticalMastState): VerticalMastState {
   };
 }
 
+export interface HaulingTripInputItem {
+  materialId?: string;
+  itemLabel: string;
+  material: HaulingMaterialCategory;
+  unitLabel: string;
+  quantity: number;
+  totalKg: number;
+}
+
+export interface HaulingTripInput {
+  date: string;
+  haulerName: string;
+  tripNumber: 1 | 2;
+  items: HaulingTripInputItem[];
+  weather?: string;
+  remarks?: string;
+}
+
+function buildHaulingTripEntries(
+  trip: HaulingTripInput,
+  tripGroupId = `trip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+): HaulingLogEntry[] {
+  const haulerName = trip.haulerName.trim() || 'Unnamed Hauler';
+  const weather = trip.weather?.trim() || 'Field Log';
+  const remarks = trip.remarks?.trim() || '';
+
+  return trip.items
+    .filter((item) => item.quantity > 0 || item.totalKg > 0)
+    .map((item, idx) => {
+      const quantity = Math.max(0, Number(item.quantity) || 0);
+      const totalKg = Number(Math.max(0, Number(item.totalKg) || 0).toFixed(2));
+      const kgPerUnit = quantity > 0 ? Number((totalKg / quantity).toFixed(2)) : totalKg;
+      const equivalentCuM =
+        item.material === 'sand' || item.material === 'gravel'
+          ? Number((quantity / BAGS_PER_CUBIC_METER).toFixed(2))
+          : 0;
+      return {
+        id: `hl-${Date.now().toString(36)}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+        date: trip.date,
+        haulerName,
+        tripNumber: trip.tripNumber,
+        tripGroupId,
+        materialId: item.materialId,
+        itemLabel: item.itemLabel.trim() || 'Material',
+        horsesUsed: 1,
+        tripsCount: idx === 0 ? 1 : 0,
+        material: item.material,
+        unitLabel: item.unitLabel.trim() || 'pcs',
+        quantity,
+        kgPerUnit,
+        totalKg,
+        equivalentCuM,
+        destinationFoundationId: 'STOCKPILE',
+        weather,
+        remarks,
+      };
+    });
+}
+
+function appendHaulerToRoster(
+  roster: string[] | undefined,
+  haulerName: string
+): string[] {
+  const trimmed = haulerName.trim();
+  const existing = roster ?? [];
+  if (!trimmed) return existing;
+  if (existing.some((n) => n.trim().toLowerCase() === trimmed.toLowerCase())) {
+    return existing;
+  }
+  return [...existing, trimmed];
+}
+
 function buildHaulingRecord(
   entry: Omit<HaulingLogEntry, 'id' | 'totalKg' | 'equivalentCuM'>
 ): HaulingLogEntry {
@@ -423,6 +506,18 @@ interface ProjectStore {
   ) => void;
   deleteHaulingLog: (id: string) => void;
   deleteHaulingLogs: (ids: string[]) => void;
+  addHaulingTrip: (trip: HaulingTripInput) => void;
+  replaceHaulingTrip: (oldItemIds: string[], trip: HaulingTripInput) => void;
+  updateCentralMaterial: (
+    id: string,
+    patch: Partial<Omit<CentralMaterialItem, 'id'>>
+  ) => void;
+  addCentralMaterial: (item: Omit<CentralMaterialItem, 'id'>) => string;
+  deleteCentralMaterial: (id: string) => void;
+  addHaulerRosterMember: (name: string) => void;
+  addHaulerPayout: (payout: Omit<HaulerPayoutRecord, 'id'>) => void;
+  deleteHaulerPayout: (id: string) => void;
+  syncDailyLogDeliveriesFromHauling: (logId: string) => void;
   addDailyLog: (entry: Omit<DailyActivityLogEntry, 'id' | 'totalWorkers' | 'totalManHours'>) => void;
   updateDailyLog: (id: string, patch: Partial<Omit<DailyActivityLogEntry, 'id'>>) => void;
   deleteDailyLog: (id: string) => void;
@@ -540,7 +635,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         }
         try {
           if (navigator.storage?.persist) {
-            void navigator.storage.persist().catch(() => {});
+            void navigator.storage.persist().catch(() => { });
           }
 
           let loaded: WorkspacePayload | null = null;
@@ -602,17 +697,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           : options.template === 'sample'
             ? createSampleMast2Project()
             : (() => {
-                const clean = createCleanBaselineProject();
-                return {
-                  ...clean,
-                  foundations: clean.foundations.map((f) => ({
-                    ...f,
-                    status: 'not_started' as const,
-                    checklist: emptyChecklist(),
-                    notes: '',
-                  })),
-                };
-              })();
+              const clean = createCleanBaselineProject();
+              return {
+                ...clean,
+                foundations: clean.foundations.map((f) => ({
+                  ...f,
+                  status: 'not_started' as const,
+                  checklist: emptyChecklist(),
+                  notes: '',
+                })),
+              };
+            })();
       const projectName = options.projectName?.trim() || `Project ${s.projects.length + 1}`;
       const location = options.location?.trim() || base.location;
       const contractor = options.contractor?.trim() || base.contractor;
@@ -753,542 +848,676 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     selectFoundation: (id) => set({ selectedFoundationId: id }),
 
-  updateFoundationStatus: (id, status) =>
-    set((s) => {
+    updateFoundationStatus: (id, status) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          const spec = resolveFoundationSpec(f.type, f.customSpecs);
+          const checklist = checklistFromStatus(status);
+          const isPoured = status === 'concreted' || status === 'curing' || status === 'completed';
+          return {
+            ...f,
+            status,
+            checklist,
+            pourDate: isPoured ? f.pourDate || today : f.pourDate,
+            completedDate: status === 'completed' ? f.completedDate || today : undefined,
+            actualCementBagsUsed:
+              isPoured && f.actualCementBagsUsed === 0 ? spec.cementBags : f.actualCementBagsUsed,
+            actualSandBagsUsed:
+              isPoured && f.actualSandBagsUsed === 0 ? spec.sandBags : f.actualSandBagsUsed,
+            actualGravelBagsUsed:
+              isPoured && f.actualGravelBagsUsed === 0 ? spec.gravelBags : f.actualGravelBagsUsed,
+          };
+        });
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
+
+    toggleFoundationChecklistItem: (id, key) => {
+      const curr = get();
+      const targetFoundation = curr.project.foundations.find((f) => f.id === id);
+      if (!targetFoundation) return null;
+
+      const violation = validateFoundationChecklistToggle(targetFoundation, key);
+      if (violation) {
+        useUiStore.getState().setFoundationOrderViolation(violation);
+        return violation;
+      }
+
       const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) => {
-        if (f.id !== id) return f;
-        const spec = resolveFoundationSpec(f.type, f.customSpecs);
-        const checklist = checklistFromStatus(status);
-        const isPoured = status === 'concreted' || status === 'curing' || status === 'completed';
-        return {
-          ...f,
-          status,
-          checklist,
-          pourDate: isPoured ? f.pourDate || today : f.pourDate,
-          completedDate: status === 'completed' ? f.completedDate || today : undefined,
-          actualCementBagsUsed:
-            isPoured && f.actualCementBagsUsed === 0 ? spec.cementBags : f.actualCementBagsUsed,
-          actualSandBagsUsed:
-            isPoured && f.actualSandBagsUsed === 0 ? spec.sandBags : f.actualSandBagsUsed,
-          actualGravelBagsUsed:
-            isPoured && f.actualGravelBagsUsed === 0 ? spec.gravelBags : f.actualGravelBagsUsed,
-        };
+      set((s) => {
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          const nextVal = !Boolean(f.checklist[key]);
+          const checklist = {
+            ...f.checklist,
+            [key]: nextVal,
+            ...(key === 'formworkBraced' ? { anchorHardwareAligned: nextVal } : {}),
+          };
+          const status = deriveStatusFromChecklist(checklist);
+          const spec = resolveFoundationSpec(f.type, f.customSpecs);
+          const isPoured = checklist.concretePoured;
+          return {
+            ...f,
+            checklist,
+            status,
+            pourDate: isPoured ? f.pourDate || today : f.pourDate,
+            completedDate: status === 'completed' ? f.completedDate || today : undefined,
+            actualCementBagsUsed:
+              isPoured && f.actualCementBagsUsed === 0 ? spec.cementBags : f.actualCementBagsUsed,
+            actualSandBagsUsed:
+              isPoured && f.actualSandBagsUsed === 0 ? spec.sandBags : f.actualSandBagsUsed,
+            actualGravelBagsUsed:
+              isPoured && f.actualGravelBagsUsed === 0 ? spec.gravelBags : f.actualGravelBagsUsed,
+          };
+        });
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
       });
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
+      return null;
+    },
 
-  toggleFoundationChecklistItem: (id, key) => {
-    const curr = get();
-    const targetFoundation = curr.project.foundations.find((f) => f.id === id);
-    if (!targetFoundation) return null;
+    updateFoundationDetails: (id, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) =>
+          f.id === id ? { ...f, ...patch } : f
+        );
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
 
-    const violation = validateFoundationChecklistToggle(targetFoundation, key);
-    if (violation) {
-      useUiStore.getState().setFoundationOrderViolation(violation);
-      return violation;
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    set((s) => {
-      const foundations = s.project.foundations.map((f) => {
-        if (f.id !== id) return f;
-        const nextVal = !Boolean(f.checklist[key]);
-        const checklist = {
-          ...f.checklist,
-          [key]: nextVal,
-          ...(key === 'formworkBraced' ? { anchorHardwareAligned: nextVal } : {}),
-        };
-        const status = deriveStatusFromChecklist(checklist);
-        const spec = resolveFoundationSpec(f.type, f.customSpecs);
-        const isPoured = checklist.concretePoured;
-        return {
-          ...f,
-          checklist,
-          status,
-          pourDate: isPoured ? f.pourDate || today : f.pourDate,
-          completedDate: status === 'completed' ? f.completedDate || today : undefined,
-          actualCementBagsUsed:
-            isPoured && f.actualCementBagsUsed === 0 ? spec.cementBags : f.actualCementBagsUsed,
-          actualSandBagsUsed:
-            isPoured && f.actualSandBagsUsed === 0 ? spec.sandBags : f.actualSandBagsUsed,
-          actualGravelBagsUsed:
-            isPoured && f.actualGravelBagsUsed === 0 ? spec.gravelBags : f.actualGravelBagsUsed,
-        };
-      });
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    });
-    return null;
-  },
-
-  updateFoundationDetails: (id, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) =>
-        f.id === id ? { ...f, ...patch } : f
-      );
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
-
-  updateFoundationInspectionItem: (id, key, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) => {
-        if (f.id !== id) return f;
-        const currentMap = f.inspectionChecklist ?? {};
-        const prevEntry: FoundationInspectionEntry = currentMap[key] ?? {
-          status: 'Pending',
-          remarks: '',
-        };
-        const customInspectionItems = f.customInspectionItems?.map((ci) =>
-          ci.key === key
-            ? {
+    updateFoundationInspectionItem: (id, key, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          const currentMap = f.inspectionChecklist ?? {};
+          const prevEntry: FoundationInspectionEntry = currentMap[key] ?? {
+            status: 'Pending',
+            remarks: '',
+          };
+          const customInspectionItems = f.customInspectionItems?.map((ci) =>
+            ci.key === key
+              ? {
                 ...ci,
                 ...(patch.description !== undefined ? { description: patch.description } : {}),
                 ...(patch.planMeasurement !== undefined
                   ? { planMeasurement: patch.planMeasurement }
                   : {}),
               }
-            : ci
-        );
-        return {
-          ...f,
-          ...(customInspectionItems ? { customInspectionItems } : {}),
-          inspectionChecklist: {
-            ...currentMap,
-            [key]: {
-              ...prevEntry,
-              ...patch,
-            },
-          },
-        };
-      });
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
-
-  addFoundationInspectionItem: (id, item) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const description = item.description.trim();
-      if (!description) return s;
-      const newKey = `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      const planMeasurement = item.planMeasurement;
-      const foundations = s.project.foundations.map((f) => {
-        if (f.id !== id) return f;
-        const customInspectionItems = [
-          ...(f.customInspectionItems ?? []),
-          { key: newKey, description, planMeasurement },
-        ];
-        const currentMap = f.inspectionChecklist ?? {};
-        return {
-          ...f,
-          customInspectionItems,
-          inspectionChecklist: {
-            ...currentMap,
-            [newKey]: {
-              status: item.status ?? 'Pending',
-              description,
-              planMeasurement,
-              actualMeasurement: item.actualMeasurement ?? '',
-              remarks: item.remarks ?? '',
-            },
-          },
-        };
-      });
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
-
-  removeFoundationInspectionItem: (id, key) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) => {
-        if (f.id !== id) return f;
-        const isCustom = (f.customInspectionItems ?? []).some((ci) => ci.key === key);
-        const nextMap = { ...(f.inspectionChecklist ?? {}) };
-        delete nextMap[key];
-        const hasEntries = Object.keys(nextMap).length > 0;
-        if (isCustom) {
-          const remainingCustom = (f.customInspectionItems ?? []).filter((ci) => ci.key !== key);
+              : ci
+          );
           return {
             ...f,
-            customInspectionItems: remainingCustom.length > 0 ? remainingCustom : undefined,
+            ...(customInspectionItems ? { customInspectionItems } : {}),
+            inspectionChecklist: {
+              ...currentMap,
+              [key]: {
+                ...prevEntry,
+                ...patch,
+              },
+            },
+          };
+        });
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
+
+    addFoundationInspectionItem: (id, item) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const description = item.description.trim();
+        if (!description) return s;
+        const newKey = `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+        const planMeasurement = item.planMeasurement;
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          const customInspectionItems = [
+            ...(f.customInspectionItems ?? []),
+            { key: newKey, description, planMeasurement },
+          ];
+          const currentMap = f.inspectionChecklist ?? {};
+          return {
+            ...f,
+            customInspectionItems,
+            inspectionChecklist: {
+              ...currentMap,
+              [newKey]: {
+                status: item.status ?? 'Pending',
+                description,
+                planMeasurement,
+                actualMeasurement: item.actualMeasurement ?? '',
+                remarks: item.remarks ?? '',
+              },
+            },
+          };
+        });
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
+
+    removeFoundationInspectionItem: (id, key) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          const isCustom = (f.customInspectionItems ?? []).some((ci) => ci.key === key);
+          const nextMap = { ...(f.inspectionChecklist ?? {}) };
+          delete nextMap[key];
+          const hasEntries = Object.keys(nextMap).length > 0;
+          if (isCustom) {
+            const remainingCustom = (f.customInspectionItems ?? []).filter((ci) => ci.key !== key);
+            return {
+              ...f,
+              customInspectionItems: remainingCustom.length > 0 ? remainingCustom : undefined,
+              inspectionChecklist: hasEntries ? nextMap : undefined,
+            };
+          }
+          const removedSet = new Set(f.removedInspectionKeys ?? []);
+          removedSet.add(key);
+          return {
+            ...f,
+            removedInspectionKeys: Array.from(removedSet),
             inspectionChecklist: hasEntries ? nextMap : undefined,
           };
-        }
-        const removedSet = new Set(f.removedInspectionKeys ?? []);
-        removedSet.add(key);
-        return {
-          ...f,
-          removedInspectionKeys: Array.from(removedSet),
-          inspectionChecklist: hasEntries ? nextMap : undefined,
-        };
-      });
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
+        });
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
 
-  resetFoundationInspectionChecklist: (id) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) =>
-        f.id === id
-          ? {
+    resetFoundationInspectionChecklist: (id) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) =>
+          f.id === id
+            ? {
               ...f,
               inspectionChecklist: undefined,
               customInspectionItems: undefined,
               removedInspectionKeys: undefined,
             }
-          : f
-      );
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
+            : f
+        );
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
 
-  updateFoundationInspectionMeta: (id, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) => {
-        if (f.id !== id) return f;
-        return {
-          ...f,
-          inspectionMeta: {
-            ...(f.inspectionMeta ?? {}),
-            ...patch,
-          },
-        };
-      });
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
-
-  updateFoundationMaterial: (id, key, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) => {
-        if (f.id !== id) return f;
-        const currentMap = f.manualMaterials ?? {};
-        const defaultRemarks =
-          key === 'main_rebar' || key === 'chair_bar' ? `For ${f.id}` : '';
-        const prevEntry: FoundationManualMaterialEntry = currentMap[key] ?? {
-          onSite: 0,
-          remarks: defaultRemarks,
-        };
-        return {
-          ...f,
-          manualMaterials: {
-            ...currentMap,
-            [key]: {
-              ...prevEntry,
+    updateFoundationInspectionMeta: (id, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          return {
+            ...f,
+            inspectionMeta: {
+              ...(f.inspectionMeta ?? {}),
               ...patch,
             },
-          },
-        };
-      });
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
+          };
+        });
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
 
-  resetFoundationMaterials: (id) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) =>
-        f.id === id ? { ...f, manualMaterials: undefined } : f
-      );
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
+    updateFoundationMaterial: (id, key, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          const currentMap = f.manualMaterials ?? {};
+          const defaultRemarks =
+            key === 'main_rebar' || key === 'chair_bar' ? `For ${f.id}` : '';
+          const prevEntry: FoundationManualMaterialEntry = currentMap[key] ?? {
+            onSite: 0,
+            remarks: defaultRemarks,
+          };
+          return {
+            ...f,
+            manualMaterials: {
+              ...currentMap,
+              [key]: {
+                ...prevEntry,
+                ...patch,
+              },
+            },
+          };
+        });
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
 
-  updateFoundationCustomSpecs: (id, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) => {
-        if (f.id !== id) return f;
-        const merged: FoundationCustomSpecs = {
-          ...(f.customSpecs ?? {}),
-          ...patch,
-        };
-        const cleaned = Object.fromEntries(
-          Object.entries(merged).filter(([, value]) => value !== undefined)
-        ) as FoundationCustomSpecs;
-        return {
-          ...f,
-          customSpecs: Object.keys(cleaned).length > 0 ? cleaned : undefined,
-        };
-      });
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
-
-  resetFoundationCustomSpecs: (id) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const foundations = s.project.foundations.map((f) =>
-        f.id === id ? { ...f, customSpecs: undefined } : f
-      );
-      const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
-      return commitActiveProject(s, next);
-    }),
-
-  addHaulingLog: (entry) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const newLog = buildHaulingRecord(entry);
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        haulingLogs: [newLog, ...s.project.haulingLogs],
-      };
-      return commitActiveProject(s, next);
-    }),
-
-  addHaulingBatch: (entries) =>
-    set((s) => {
-      if (entries.length === 0) return s;
-      const today = new Date().toISOString().slice(0, 10);
-      const created = entries.map(buildHaulingRecord);
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        haulingLogs: [...created, ...s.project.haulingLogs],
-      };
-      return commitActiveProject(s, next);
-    }),
-
-  deleteHaulingLog: (id) =>
-    set((s) => {
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: new Date().toISOString().slice(0, 10),
-        haulingLogs: s.project.haulingLogs.filter((l) => l.id !== id),
-      };
-      return commitActiveProject(s, next);
-    }),
-
-  deleteHaulingLogs: (ids) =>
-    set((s) => {
-      const idSet = new Set(ids);
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: new Date().toISOString().slice(0, 10),
-        haulingLogs: s.project.haulingLogs.filter((l) => !idSet.has(l.id)),
-      };
-      return commitActiveProject(s, next);
-    }),
-
-  addDailyLog: (entry) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const totalWorkers = entry.workers.reduce((sum, w) => sum + Math.max(0, w.count), 0);
-      const totalManHours = entry.workers.reduce(
-        (sum, w) => sum + Math.max(0, w.count) * Math.max(0, w.hours),
-        0
-      );
-      const findUsed = (keyword: string, fallback: number) => {
-        const match = entry.materialsOnSite?.find((m) =>
-          m.name.toLowerCase().includes(keyword)
+    resetFoundationMaterials: (id) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) =>
+          f.id === id ? { ...f, manualMaterials: undefined } : f
         );
-        return match ? Math.max(0, match.usedTodayQty) : fallback;
-      };
-      const newLog: DailyActivityLogEntry = {
-        ...entry,
-        id: `dl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        totalWorkers,
-        totalManHours,
-        cementUsedBags: entry.materialsOnSite ? findUsed('cement', entry.cementUsedBags) : entry.cementUsedBags,
-        sandUsedBags: entry.materialsOnSite ? findUsed('sand', entry.sandUsedBags) : entry.sandUsedBags,
-        gravelUsedBags: entry.materialsOnSite ? findUsed('gravel', entry.gravelUsedBags) : entry.gravelUsedBags,
-      };
-      const combinedLogs = [newLog, ...s.project.dailyLogs];
-      const dailyLogs =
-        newLog.materialsOnSite && newLog.materialsOnSite.length > 0
-          ? recalculateDailyLogCarryOver(combinedLogs, newLog.id)
-          : combinedLogs;
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        dailyLogs,
-      };
-      return commitActiveProject(s, next);
-    }),
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
 
-  updateDailyLog: (id, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const updatedLogs = s.project.dailyLogs.map((log) => {
-        if (log.id !== id) return log;
-        const mergedWorkers = patch.workers ?? log.workers;
-        const totalWorkers = mergedWorkers.reduce((sum, w) => sum + Math.max(0, w.count), 0);
-        const totalManHours = mergedWorkers.reduce(
+    updateFoundationCustomSpecs: (id, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          const merged: FoundationCustomSpecs = {
+            ...(f.customSpecs ?? {}),
+            ...patch,
+          };
+          const cleaned = Object.fromEntries(
+            Object.entries(merged).filter(([, value]) => value !== undefined)
+          ) as FoundationCustomSpecs;
+          return {
+            ...f,
+            customSpecs: Object.keys(cleaned).length > 0 ? cleaned : undefined,
+          };
+        });
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
+
+    resetFoundationCustomSpecs: (id) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) =>
+          f.id === id ? { ...f, customSpecs: undefined } : f
+        );
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
+
+    addHaulingLog: (entry) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const newLog = buildHaulingRecord(entry);
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          haulingLogs: [newLog, ...s.project.haulingLogs],
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    addHaulingBatch: (entries) =>
+      set((s) => {
+        if (entries.length === 0) return s;
+        const today = new Date().toISOString().slice(0, 10);
+        const created = entries.map(buildHaulingRecord);
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          haulingLogs: [...created, ...s.project.haulingLogs],
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    deleteHaulingLog: (id) =>
+      set((s) => {
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulingLogs: s.project.haulingLogs.filter((l) => l.id !== id),
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    deleteHaulingLogs: (ids) =>
+      set((s) => {
+        const idSet = new Set(ids);
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulingLogs: s.project.haulingLogs.filter((l) => !idSet.has(l.id)),
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    addHaulingTrip: (trip) =>
+      set((s) => {
+        const created = buildHaulingTripEntries(trip);
+        if (created.length === 0) return s;
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulerRoster: appendHaulerToRoster(s.project.haulerRoster, trip.haulerName),
+          haulingLogs: [...created, ...s.project.haulingLogs],
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    replaceHaulingTrip: (oldItemIds, trip) =>
+      set((s) => {
+        const removeSet = new Set(oldItemIds);
+        const remaining = s.project.haulingLogs.filter((l) => !removeSet.has(l.id));
+        const existingGroupId = s.project.haulingLogs.find(
+          (l) => removeSet.has(l.id) && l.tripGroupId
+        )?.tripGroupId;
+        const created = buildHaulingTripEntries(trip, existingGroupId);
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulerRoster: appendHaulerToRoster(s.project.haulerRoster, trip.haulerName),
+          haulingLogs: [...created, ...remaining],
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    updateCentralMaterial: (id, patch) =>
+      set((s) => {
+        const base = resolveCentralMaterials(s.project);
+        const centralMaterials = base.map((item) =>
+          item.id === id ? { ...item, ...patch } : item
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          centralMaterials,
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    addCentralMaterial: (item) => {
+      const id = `cmat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      set((s) => {
+        const base = resolveCentralMaterials(s.project);
+        const centralMaterials: CentralMaterialItem[] = [...base, { ...item, id }];
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          centralMaterials,
+        };
+        return commitActiveProject(s, next);
+      });
+      return id;
+    },
+
+    deleteCentralMaterial: (id) =>
+      set((s) => {
+        const base = resolveCentralMaterials(s.project);
+        const centralMaterials = base.filter((item) => item.id !== id);
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          centralMaterials:
+            centralMaterials.length > 0 ? centralMaterials : createDefaultCentralMaterials(),
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    addHaulerRosterMember: (name) =>
+      set((s) => {
+        const nextRoster = appendHaulerToRoster(s.project.haulerRoster, name);
+        if (nextRoster === (s.project.haulerRoster ?? [])) return s;
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulerRoster: nextRoster,
+        });
+      }),
+
+    addHaulerPayout: (payout) =>
+      set((s) => {
+        const amountPhp = Math.max(0, Number(payout.amountPhp) || 0);
+        const haulerName = payout.haulerName.trim();
+        if (!haulerName || amountPhp <= 0) return s;
+        const record: HaulerPayoutRecord = {
+          id: `pay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          date: payout.date,
+          haulerName,
+          amountPhp,
+          notes: payout.notes?.trim() || undefined,
+        };
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulerRoster: appendHaulerToRoster(s.project.haulerRoster, haulerName),
+          haulerPayouts: [record, ...(s.project.haulerPayouts ?? [])],
+        });
+      }),
+
+    deleteHaulerPayout: (id) =>
+      set((s) => ({
+        ...commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulerPayouts: (s.project.haulerPayouts ?? []).filter((p) => p.id !== id),
+        }),
+      })),
+
+    syncDailyLogDeliveriesFromHauling: (logId) =>
+      set((s) => {
+        const target = s.project.dailyLogs.find((l) => l.id === logId);
+        if (!target) return s;
+        const currentRows = target.materialsOnSite ?? [];
+        const syncedRows = syncDailyLogMaterialsWithHauling(
+          s.project,
+          target.date,
+          currentRows,
+          computeDailyLogMaterialRemaining
+        );
+        const updatedLogs = s.project.dailyLogs.map((l) =>
+          l.id === logId ? { ...l, materialsOnSite: syncedRows } : l
+        );
+        const dailyLogs = recalculateDailyLogCarryOver(updatedLogs, logId);
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          dailyLogs,
+        });
+      }),
+
+    addDailyLog: (entry) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const totalWorkers = entry.workers.reduce((sum, w) => sum + Math.max(0, w.count), 0);
+        const totalManHours = entry.workers.reduce(
           (sum, w) => sum + Math.max(0, w.count) * Math.max(0, w.hours),
           0
         );
-        const mats = patch.materialsOnSite ?? log.materialsOnSite;
         const findUsed = (keyword: string, fallback: number) => {
-          const match = mats?.find((m) => m.name.toLowerCase().includes(keyword));
+          const match = entry.materialsOnSite?.find((m) =>
+            m.name.toLowerCase().includes(keyword)
+          );
           return match ? Math.max(0, match.usedTodayQty) : fallback;
         };
-        return {
-          ...log,
-          ...patch,
-          workers: mergedWorkers,
+        const newLog: DailyActivityLogEntry = {
+          ...entry,
+          id: `dl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           totalWorkers,
           totalManHours,
-          cementUsedBags: mats ? findUsed('cement', patch.cementUsedBags ?? log.cementUsedBags) : (patch.cementUsedBags ?? log.cementUsedBags),
-          sandUsedBags: mats ? findUsed('sand', patch.sandUsedBags ?? log.sandUsedBags) : (patch.sandUsedBags ?? log.sandUsedBags),
-          gravelUsedBags: mats ? findUsed('gravel', patch.gravelUsedBags ?? log.gravelUsedBags) : (patch.gravelUsedBags ?? log.gravelUsedBags),
+          cementUsedBags: entry.materialsOnSite ? findUsed('cement', entry.cementUsedBags) : entry.cementUsedBags,
+          sandUsedBags: entry.materialsOnSite ? findUsed('sand', entry.sandUsedBags) : entry.sandUsedBags,
+          gravelUsedBags: entry.materialsOnSite ? findUsed('gravel', entry.gravelUsedBags) : entry.gravelUsedBags,
         };
-      });
-      const dailyLogs = patch.materialsOnSite
-        ? recalculateDailyLogCarryOver(updatedLogs, id)
-        : updatedLogs;
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        dailyLogs,
-      };
-      return commitActiveProject(s, next);
-    }),
+        const combinedLogs = [newLog, ...s.project.dailyLogs];
+        const dailyLogs =
+          newLog.materialsOnSite && newLog.materialsOnSite.length > 0
+            ? recalculateDailyLogCarryOver(combinedLogs, newLog.id)
+            : combinedLogs;
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          dailyLogs,
+        };
+        return commitActiveProject(s, next);
+      }),
 
-  deleteDailyLog: (id) =>
-    set((s) => {
-      const remainingLogs = s.project.dailyLogs.filter((l) => l.id !== id);
-      const dailyLogs = recalculateDailyLogCarryOver(remainingLogs);
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: new Date().toISOString().slice(0, 10),
-        dailyLogs,
-      };
-      return commitActiveProject(s, next);
-    }),
+    updateDailyLog: (id, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const updatedLogs = s.project.dailyLogs.map((log) => {
+          if (log.id !== id) return log;
+          const mergedWorkers = patch.workers ?? log.workers;
+          const totalWorkers = mergedWorkers.reduce((sum, w) => sum + Math.max(0, w.count), 0);
+          const totalManHours = mergedWorkers.reduce(
+            (sum, w) => sum + Math.max(0, w.count) * Math.max(0, w.hours),
+            0
+          );
+          const mats = patch.materialsOnSite ?? log.materialsOnSite;
+          const findUsed = (keyword: string, fallback: number) => {
+            const match = mats?.find((m) => m.name.toLowerCase().includes(keyword));
+            return match ? Math.max(0, match.usedTodayQty) : fallback;
+          };
+          return {
+            ...log,
+            ...patch,
+            workers: mergedWorkers,
+            totalWorkers,
+            totalManHours,
+            cementUsedBags: mats ? findUsed('cement', patch.cementUsedBags ?? log.cementUsedBags) : (patch.cementUsedBags ?? log.cementUsedBags),
+            sandUsedBags: mats ? findUsed('sand', patch.sandUsedBags ?? log.sandUsedBags) : (patch.sandUsedBags ?? log.sandUsedBags),
+            gravelUsedBags: mats ? findUsed('gravel', patch.gravelUsedBags ?? log.gravelUsedBags) : (patch.gravelUsedBags ?? log.gravelUsedBags),
+          };
+        });
+        const dailyLogs = patch.materialsOnSite
+          ? recalculateDailyLogCarryOver(updatedLogs, id)
+          : updatedLogs;
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          dailyLogs,
+        };
+        return commitActiveProject(s, next);
+      }),
 
-  updateProjectMeta: (patch) =>
-    set((s) => {
-      const nextDetails: ReportDetailsSpec = {
-        ...s.project.reportDetails,
-        ...(patch.projectName !== undefined ? { projectName: patch.projectName } : {}),
-        ...(patch.location !== undefined ? { projectLocation: patch.location } : {}),
-        ...(patch.preparedBy !== undefined ? { preparedBy: patch.preparedBy } : {}),
-        ...(patch.contractor !== undefined ? { contractor: patch.contractor } : {}),
-      };
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: new Date().toISOString().slice(0, 10),
-        ...patch,
-        reportDetails: nextDetails,
-      };
-      return commitActiveProject(s, next);
-    }),
+    deleteDailyLog: (id) =>
+      set((s) => {
+        const remainingLogs = s.project.dailyLogs.filter((l) => l.id !== id);
+        const dailyLogs = recalculateDailyLogCarryOver(remainingLogs);
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          dailyLogs,
+        };
+        return commitActiveProject(s, next);
+      }),
 
-  updateReportDetails: (patch) =>
-    set((s) => {
-      const merged: ReportDetailsSpec = {
-        ...s.project.reportDetails,
-        ...patch,
-      };
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: new Date().toISOString().slice(0, 10),
-        ...(patch.projectName?.trim() ? { projectName: patch.projectName.trim() } : {}),
-        ...(patch.projectLocation?.trim() ? { location: patch.projectLocation.trim() } : {}),
-        ...(patch.preparedBy?.trim() ? { preparedBy: patch.preparedBy.trim() } : {}),
-        ...(patch.contractor?.trim() ? { contractor: patch.contractor.trim() } : {}),
-        reportDetails: merged,
-      };
-      return commitActiveProject(s, next);
-    }),
+    updateProjectMeta: (patch) =>
+      set((s) => {
+        const nextDetails: ReportDetailsSpec = {
+          ...s.project.reportDetails,
+          ...(patch.projectName !== undefined ? { projectName: patch.projectName } : {}),
+          ...(patch.location !== undefined ? { projectLocation: patch.location } : {}),
+          ...(patch.preparedBy !== undefined ? { preparedBy: patch.preparedBy } : {}),
+          ...(patch.contractor !== undefined ? { contractor: patch.contractor } : {}),
+        };
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          ...patch,
+          reportDetails: nextDetails,
+        };
+        return commitActiveProject(s, next);
+      }),
 
-  updateScheduleItem: (id, patch) =>
-    set((s) => {
-      const schedule = s.project.schedule.map((item) =>
-        item.id === id ? { ...item, ...patch } : item
-      );
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: new Date().toISOString().slice(0, 10),
-        schedule,
-      };
-      return commitActiveProject(s, next);
-    }),
+    updateReportDetails: (patch) =>
+      set((s) => {
+        const merged: ReportDetailsSpec = {
+          ...s.project.reportDetails,
+          ...patch,
+        };
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          ...(patch.projectName?.trim() ? { projectName: patch.projectName.trim() } : {}),
+          ...(patch.projectLocation?.trim() ? { location: patch.projectLocation.trim() } : {}),
+          ...(patch.preparedBy?.trim() ? { preparedBy: patch.preparedBy.trim() } : {}),
+          ...(patch.contractor?.trim() ? { contractor: patch.contractor.trim() } : {}),
+          reportDetails: merged,
+        };
+        return commitActiveProject(s, next);
+      }),
 
-  updateInventoryItem: (id, patch) =>
-    set((s) => {
-      const inventory = s.project.inventory.map((item) =>
-        item.id === id ? { ...item, ...patch } : item
-      );
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: new Date().toISOString().slice(0, 10),
-        inventory,
-      };
-      return commitActiveProject(s, next);
-    }),
+    updateScheduleItem: (id, patch) =>
+      set((s) => {
+        const schedule = s.project.schedule.map((item) =>
+          item.id === id ? { ...item, ...patch } : item
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          schedule,
+        };
+        return commitActiveProject(s, next);
+      }),
 
-  setProjectPhase: (phase) =>
-    set((s) =>
-      commitActiveProject(s, {
-        ...s.project,
-        projectType: phase,
-        verticalMast: s.project.verticalMast
-          ? normalizeVerticalMastState(s.project.verticalMast)
-          : createInitialVerticalMastState(),
-      })
-    ),
+    updateInventoryItem: (id, patch) =>
+      set((s) => {
+        const inventory = s.project.inventory.map((item) =>
+          item.id === id ? { ...item, ...patch } : item
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          inventory,
+        };
+        return commitActiveProject(s, next);
+      }),
 
-  loadSampleData: () =>
-    set((s) =>
-      commitActiveProject(
-        s,
-        s.project.projectType === 'vertical_mast'
-          ? createSampleVerticalMastProject()
-          : createSampleMast2Project()
-      )
-    ),
+    setProjectPhase: (phase) =>
+      set((s) =>
+        commitActiveProject(s, {
+          ...s.project,
+          projectType: phase,
+          verticalMast: s.project.verticalMast
+            ? normalizeVerticalMastState(s.project.verticalMast)
+            : createInitialVerticalMastState(),
+        })
+      ),
 
-  resetCleanBaseline: () =>
-    set((s) =>
-      commitActiveProject(
-        s,
-        s.project.projectType === 'vertical_mast'
-          ? createCleanVerticalMastProject()
-          : createCleanBaselineProject()
-      )
-    ),
+    loadSampleData: () =>
+      set((s) =>
+        commitActiveProject(
+          s,
+          s.project.projectType === 'vertical_mast'
+            ? createSampleVerticalMastProject()
+            : createSampleMast2Project()
+        )
+      ),
 
-  importProjectJson: (jsonText) => {
-    const parsed = JSON.parse(jsonText) as MastProjectState;
-    if (!parsed || !Array.isArray(parsed.foundations) || parsed.foundations.length !== 13) {
-      throw new Error('Invalid Mast 2 project JSON file (expected 13 foundations).');
-    }
-    set((s) => ({
-      ...commitActiveProject(s, parsed),
-      selectedFoundationId: parsed.foundations[0].id,
-    }));
-  },
+    resetCleanBaseline: () =>
+      set((s) =>
+        commitActiveProject(
+          s,
+          s.project.projectType === 'vertical_mast'
+            ? createCleanVerticalMastProject()
+            : createCleanBaselineProject()
+        )
+      ),
 
-  exportProjectJson: () => JSON.stringify(get().project, null, 2),
+    importProjectJson: (jsonText) => {
+      const parsed = JSON.parse(jsonText) as MastProjectState;
+      if (!parsed || !Array.isArray(parsed.foundations) || parsed.foundations.length !== 13) {
+        throw new Error('Invalid Mast 2 project JSON file (expected 13 foundations).');
+      }
+      set((s) => ({
+        ...commitActiveProject(s, parsed),
+        selectedFoundationId: parsed.foundations[0].id,
+      }));
+    },
 
-  updateTowerSectionStatus: (id, status) => {
-    const curr = get();
-    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
-    const violation = validateTowerSectionUpdate(vm, id, status);
-    if (violation) {
-      useUiStore.getState().setMastOrderViolation(violation);
-      return violation;
-    }
+    exportProjectJson: () => JSON.stringify(get().project, null, 2),
 
-    const today = new Date().toISOString().slice(0, 10);
-    const isInstalled =
-      status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
-    set((s) => {
-      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const sections = activeVm.sections.map((sec) =>
-        sec.id === id
-          ? {
+    updateTowerSectionStatus: (id, status) => {
+      const curr = get();
+      const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+      const violation = validateTowerSectionUpdate(vm, id, status);
+      if (violation) {
+        useUiStore.getState().setMastOrderViolation(violation);
+        return violation;
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const isInstalled =
+        status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
+      set((s) => {
+        const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const sections = activeVm.sections.map((sec) =>
+          sec.id === id
+            ? {
               ...sec,
               status,
               checklist: sectionChecklistFromStatus(status),
@@ -1296,105 +1525,105 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               verifiedDate:
                 status === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
             }
-          : sec
-      );
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
-      };
-      return commitActiveProject(s, next);
-    });
-    return null;
-  },
+            : sec
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
+        };
+        return commitActiveProject(s, next);
+      });
+      return null;
+    },
 
-  toggleTowerSectionChecklistItem: (id, key) => {
-    const curr = get();
-    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
-    const targetSec = vm.sections.find((sec) => sec.id === id);
-    if (!targetSec) return null;
+    toggleTowerSectionChecklistItem: (id, key) => {
+      const curr = get();
+      const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+      const targetSec = vm.sections.find((sec) => sec.id === id);
+      if (!targetSec) return null;
 
-    const nextVal = !targetSec.checklist[key];
-    const nextChecklist =
-      key === 'plumbedAndInspected'
-        ? sectionChecklistFromStatus(nextVal ? 'plumbed_verified' : 'not_started')
-        : {
+      const nextVal = !targetSec.checklist[key];
+      const nextChecklist =
+        key === 'plumbedAndInspected'
+          ? sectionChecklistFromStatus(nextVal ? 'plumbed_verified' : 'not_started')
+          : {
             ...targetSec.checklist,
             [key]: nextVal,
           };
-    const nextStatus = deriveSectionStatusFromChecklist(nextChecklist);
-    const violation = validateTowerSectionUpdate(vm, id, nextStatus);
-    if (violation) {
-      useUiStore.getState().setMastOrderViolation(violation);
-      return violation;
-    }
+      const nextStatus = deriveSectionStatusFromChecklist(nextChecklist);
+      const violation = validateTowerSectionUpdate(vm, id, nextStatus);
+      if (violation) {
+        useUiStore.getState().setMastOrderViolation(violation);
+        return violation;
+      }
 
-    const today = new Date().toISOString().slice(0, 10);
-    set((s) => {
-      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const sections = activeVm.sections.map((sec) => {
-        if (sec.id !== id) return sec;
-        return {
-          ...sec,
-          checklist: nextChecklist,
-          status: nextStatus,
-          installedDate:
-            nextChecklist.hoistedInPosition || nextChecklist.plumbedAndInspected
-              ? sec.installedDate || today
-              : undefined,
-          verifiedDate:
-            nextStatus === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
-        };
-      });
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
-      };
-      return commitActiveProject(s, next);
-    });
-    return null;
-  },
-
-  updateTowerSectionDetails: (id, patch) =>
-    set((s) => {
       const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const sections = vm.sections.map((sec) =>
-        sec.id === id ? { ...sec, ...patch } : sec
+      set((s) => {
+        const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const sections = activeVm.sections.map((sec) => {
+          if (sec.id !== id) return sec;
+          return {
+            ...sec,
+            checklist: nextChecklist,
+            status: nextStatus,
+            installedDate:
+              nextChecklist.hoistedInPosition || nextChecklist.plumbedAndInspected
+                ? sec.installedDate || today
+                : undefined,
+            verifiedDate:
+              nextStatus === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
+          };
+        });
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
+        };
+        return commitActiveProject(s, next);
+      });
+      return null;
+    },
+
+    updateTowerSectionDetails: (id, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const sections = vm.sections.map((sec) =>
+          sec.id === id ? { ...sec, ...patch } : sec
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: { ...vm, sections },
+        };
+        return commitActiveProject(s, next);
+      }),
+
+    batchUpdateTowerSectionRange: (fromSectionNo, toSectionNo, status) => {
+      const curr = get();
+      const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+      const violation = validateTowerSectionRangeUpdate(
+        vm,
+        fromSectionNo,
+        toSectionNo,
+        status
       );
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: { ...vm, sections },
-      };
-      return commitActiveProject(s, next);
-    }),
+      if (violation) {
+        useUiStore.getState().setMastOrderViolation(violation);
+        return violation;
+      }
 
-  batchUpdateTowerSectionRange: (fromSectionNo, toSectionNo, status) => {
-    const curr = get();
-    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
-    const violation = validateTowerSectionRangeUpdate(
-      vm,
-      fromSectionNo,
-      toSectionNo,
-      status
-    );
-    if (violation) {
-      useUiStore.getState().setMastOrderViolation(violation);
-      return violation;
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const lo = Math.min(fromSectionNo, toSectionNo);
-    const hi = Math.max(fromSectionNo, toSectionNo);
-    const isInstalled =
-      status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
-    set((s) => {
-      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const sections = activeVm.sections.map((sec) =>
-        sec.sectionNo >= lo && sec.sectionNo <= hi
-          ? {
+      const today = new Date().toISOString().slice(0, 10);
+      const lo = Math.min(fromSectionNo, toSectionNo);
+      const hi = Math.max(fromSectionNo, toSectionNo);
+      const isInstalled =
+        status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
+      set((s) => {
+        const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const sections = activeVm.sections.map((sec) =>
+          sec.sectionNo >= lo && sec.sectionNo <= hi
+            ? {
               ...sec,
               status,
               checklist: sectionChecklistFromStatus(status),
@@ -1402,34 +1631,34 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               verifiedDate:
                 status === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
             }
-          : sec
-      );
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
-      };
-      return commitActiveProject(s, next);
-    });
-    return null;
-  },
+            : sec
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: syncVerticalMastFlags({ ...activeVm, sections }),
+        };
+        return commitActiveProject(s, next);
+      });
+      return null;
+    },
 
-  updateGuyLayerStatus: (id, status) => {
-    const curr = get();
-    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
-    const violation = validateGuyLayerUpdate(vm, id, status);
-    if (violation) {
-      useUiStore.getState().setMastOrderViolation(violation);
-      return violation;
-    }
+    updateGuyLayerStatus: (id, status) => {
+      const curr = get();
+      const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+      const violation = validateGuyLayerUpdate(vm, id, status);
+      if (violation) {
+        useUiStore.getState().setMastOrderViolation(violation);
+        return violation;
+      }
 
-    const today = new Date().toISOString().slice(0, 10);
-    const template = guySectorsFromStatus(status);
-    set((s) => {
-      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const guyLayers = activeVm.guyLayers.map((g) =>
-        g.id === id
-          ? {
+      const today = new Date().toISOString().slice(0, 10);
+      const template = guySectorsFromStatus(status);
+      set((s) => {
+        const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const guyLayers = activeVm.guyLayers.map((g) =>
+          g.id === id
+            ? {
               ...g,
               status,
               sectors: {
@@ -1441,149 +1670,149 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               verifiedDate:
                 status === 'tensioned_verified' ? g.verifiedDate || today : undefined,
             }
-          : g
-      );
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: { ...activeVm, guyLayers },
-      };
-      return commitActiveProject(s, next);
-    });
-    return null;
-  },
-
-  updateGuyLayerSector: (id, sector, patch) => {
-    const curr = get();
-    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
-    const targetGuy = vm.guyLayers.find((g) => g.id === id);
-    if (!targetGuy) return null;
-
-    const prevSector = targetGuy.sectors[sector];
-    const nextSector: GuySectorProgress = {
-      ...prevSector,
-      ...patch,
-    };
-    if (patch.tensioned) {
-      nextSector.pulled = true;
-      nextSector.terminated = true;
-    } else if (patch.terminated) {
-      nextSector.pulled = true;
-    }
-    const nextSectors = {
-      ...targetGuy.sectors,
-      [sector]: nextSector,
-    };
-    const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
-    const violation = validateGuyLayerUpdate(vm, id, nextStatus);
-    if (violation) {
-      useUiStore.getState().setMastOrderViolation(violation);
-      return violation;
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    set((s) => {
-      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const guyLayers = activeVm.guyLayers.map((g) =>
-        g.id === id
-          ? {
-              ...g,
-              sectors: nextSectors,
-              status: nextStatus,
-              installedDate:
-                nextStatus !== 'not_started' ? g.installedDate || today : undefined,
-              verifiedDate:
-                nextStatus === 'tensioned_verified' ? g.verifiedDate || today : undefined,
-            }
-          : g
-      );
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: { ...activeVm, guyLayers },
-      };
-      return commitActiveProject(s, next);
-    });
-    return null;
-  },
-
-  toggleGuyLayerSectorInstalled: (id, sector) => {
-    const curr = get();
-    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
-    const targetGuy = vm.guyLayers.find((g) => g.id === id);
-    if (!targetGuy) return null;
-
-    const prev = targetGuy.sectors[sector];
-    const currentlyInstalled = Boolean(prev.terminated || prev.tensioned);
-    const nextSector: GuySectorProgress = currentlyInstalled
-      ? { ...prev, pulled: false, terminated: false, tensioned: false }
-      : { ...prev, pulled: true, terminated: true };
-    const nextSectors = { ...targetGuy.sectors, [sector]: nextSector };
-    const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
-    const violation = validateGuyLayerUpdate(vm, id, nextStatus);
-    if (violation) {
-      useUiStore.getState().setMastOrderViolation(violation);
-      return violation;
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    set((s) => {
-      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const guyLayers = activeVm.guyLayers.map((g) =>
-        g.id === id
-          ? {
-              ...g,
-              sectors: nextSectors,
-              status: nextStatus,
-              installedDate:
-                nextStatus !== 'not_started' ? g.installedDate || today : undefined,
-              verifiedDate:
-                nextStatus === 'tensioned_verified' ? g.verifiedDate || today : undefined,
-            }
-          : g
-      );
-      return commitActiveProject(s, {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: { ...activeVm, guyLayers },
+            : g
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: { ...activeVm, guyLayers },
+        };
+        return commitActiveProject(s, next);
       });
-    });
-    return null;
-  },
+      return null;
+    },
 
-  toggleGuyLayerAllTensioned: (id) => {
-    const curr = get();
-    const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
-    const targetGuy = vm.guyLayers.find((g) => g.id === id);
-    if (!targetGuy) return null;
+    updateGuyLayerSector: (id, sector, patch) => {
+      const curr = get();
+      const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+      const targetGuy = vm.guyLayers.find((g) => g.id === id);
+      if (!targetGuy) return null;
 
-    const allTensioned = (['I', 'II', 'III'] as const).every(
-      (k) => targetGuy.sectors[k].tensioned
-    );
-    const nextSectors = allTensioned
-      ? {
+      const prevSector = targetGuy.sectors[sector];
+      const nextSector: GuySectorProgress = {
+        ...prevSector,
+        ...patch,
+      };
+      if (patch.tensioned) {
+        nextSector.pulled = true;
+        nextSector.terminated = true;
+      } else if (patch.terminated) {
+        nextSector.pulled = true;
+      }
+      const nextSectors = {
+        ...targetGuy.sectors,
+        [sector]: nextSector,
+      };
+      const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
+      const violation = validateGuyLayerUpdate(vm, id, nextStatus);
+      if (violation) {
+        useUiStore.getState().setMastOrderViolation(violation);
+        return violation;
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      set((s) => {
+        const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const guyLayers = activeVm.guyLayers.map((g) =>
+          g.id === id
+            ? {
+              ...g,
+              sectors: nextSectors,
+              status: nextStatus,
+              installedDate:
+                nextStatus !== 'not_started' ? g.installedDate || today : undefined,
+              verifiedDate:
+                nextStatus === 'tensioned_verified' ? g.verifiedDate || today : undefined,
+            }
+            : g
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: { ...activeVm, guyLayers },
+        };
+        return commitActiveProject(s, next);
+      });
+      return null;
+    },
+
+    toggleGuyLayerSectorInstalled: (id, sector) => {
+      const curr = get();
+      const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+      const targetGuy = vm.guyLayers.find((g) => g.id === id);
+      if (!targetGuy) return null;
+
+      const prev = targetGuy.sectors[sector];
+      const currentlyInstalled = Boolean(prev.terminated || prev.tensioned);
+      const nextSector: GuySectorProgress = currentlyInstalled
+        ? { ...prev, pulled: false, terminated: false, tensioned: false }
+        : { ...prev, pulled: true, terminated: true };
+      const nextSectors = { ...targetGuy.sectors, [sector]: nextSector };
+      const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
+      const violation = validateGuyLayerUpdate(vm, id, nextStatus);
+      if (violation) {
+        useUiStore.getState().setMastOrderViolation(violation);
+        return violation;
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      set((s) => {
+        const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const guyLayers = activeVm.guyLayers.map((g) =>
+          g.id === id
+            ? {
+              ...g,
+              sectors: nextSectors,
+              status: nextStatus,
+              installedDate:
+                nextStatus !== 'not_started' ? g.installedDate || today : undefined,
+              verifiedDate:
+                nextStatus === 'tensioned_verified' ? g.verifiedDate || today : undefined,
+            }
+            : g
+        );
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: { ...activeVm, guyLayers },
+        });
+      });
+      return null;
+    },
+
+    toggleGuyLayerAllTensioned: (id) => {
+      const curr = get();
+      const vm = curr.project.verticalMast ?? createInitialVerticalMastState();
+      const targetGuy = vm.guyLayers.find((g) => g.id === id);
+      if (!targetGuy) return null;
+
+      const allTensioned = (['I', 'II', 'III'] as const).every(
+        (k) => targetGuy.sectors[k].tensioned
+      );
+      const nextSectors = allTensioned
+        ? {
           I: { ...targetGuy.sectors.I, pulled: true, terminated: true, tensioned: false },
           II: { ...targetGuy.sectors.II, pulled: true, terminated: true, tensioned: false },
           III: { ...targetGuy.sectors.III, pulled: true, terminated: true, tensioned: false },
         }
-      : {
+        : {
           I: { ...targetGuy.sectors.I, pulled: true, terminated: true, tensioned: true },
           II: { ...targetGuy.sectors.II, pulled: true, terminated: true, tensioned: true },
           III: { ...targetGuy.sectors.III, pulled: true, terminated: true, tensioned: true },
         };
-    const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
-    const violation = validateGuyLayerUpdate(vm, id, nextStatus);
-    if (violation) {
-      useUiStore.getState().setMastOrderViolation(violation);
-      return violation;
-    }
+      const nextStatus = deriveGuyLayerStatusFromSectors(nextSectors);
+      const violation = validateGuyLayerUpdate(vm, id, nextStatus);
+      if (violation) {
+        useUiStore.getState().setMastOrderViolation(violation);
+        return violation;
+      }
 
-    const today = new Date().toISOString().slice(0, 10);
-    set((s) => {
-      const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const guyLayers = activeVm.guyLayers.map((g) =>
-        g.id === id
-          ? {
+      const today = new Date().toISOString().slice(0, 10);
+      set((s) => {
+        const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const guyLayers = activeVm.guyLayers.map((g) =>
+          g.id === id
+            ? {
               ...g,
               sectors: nextSectors,
               status: nextStatus,
@@ -1592,123 +1821,123 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               verifiedDate:
                 nextStatus === 'tensioned_verified' ? g.verifiedDate || today : undefined,
             }
-          : g
-      );
-      return commitActiveProject(s, {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: { ...activeVm, guyLayers },
+            : g
+        );
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: { ...activeVm, guyLayers },
+        });
       });
-    });
-    return null;
-  },
+      return null;
+    },
 
-  updateGuyLayerDetails: (id, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const guyLayers = vm.guyLayers.map((g) =>
-        g.id === id ? { ...g, ...patch } : g
-      );
-      const next: MastProjectState = {
-        ...s.project,
-        lastUpdated: today,
-        verticalMast: { ...vm, guyLayers },
-      };
-      return commitActiveProject(s, next);
-    }),
+    updateGuyLayerDetails: (id, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const guyLayers = vm.guyLayers.map((g) =>
+          g.id === id ? { ...g, ...patch } : g
+        );
+        const next: MastProjectState = {
+          ...s.project,
+          lastUpdated: today,
+          verticalMast: { ...vm, guyLayers },
+        };
+        return commitActiveProject(s, next);
+      }),
 
-  updateMastInspectionItem: (targetKind, id, key, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const nextVm: VerticalMastState =
-        targetKind === 'section'
-          ? {
+    updateMastInspectionItem: (targetKind, id, key, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const nextVm: VerticalMastState =
+          targetKind === 'section'
+            ? {
               ...vm,
               sections: vm.sections.map((sec) =>
                 sec.id === id ? patchInspectionItemInHolder(sec, key, patch) : sec
               ),
             }
-          : {
+            : {
               ...vm,
               guyLayers: vm.guyLayers.map((g) =>
                 g.id === id ? patchInspectionItemInHolder(g, key, patch) : g
               ),
             };
-      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
-    }),
+        return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+      }),
 
-  addMastInspectionItem: (targetKind, id, item) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const nextVm: VerticalMastState =
-        targetKind === 'section'
-          ? {
+    addMastInspectionItem: (targetKind, id, item) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const nextVm: VerticalMastState =
+          targetKind === 'section'
+            ? {
               ...vm,
               sections: vm.sections.map((sec) =>
                 sec.id === id ? addInspectionItemInHolder(sec, item) : sec
               ),
             }
-          : {
+            : {
               ...vm,
               guyLayers: vm.guyLayers.map((g) =>
                 g.id === id ? addInspectionItemInHolder(g, item) : g
               ),
             };
-      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
-    }),
+        return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+      }),
 
-  removeMastInspectionItem: (targetKind, id, key) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const nextVm: VerticalMastState =
-        targetKind === 'section'
-          ? {
+    removeMastInspectionItem: (targetKind, id, key) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const nextVm: VerticalMastState =
+          targetKind === 'section'
+            ? {
               ...vm,
               sections: vm.sections.map((sec) =>
                 sec.id === id ? removeInspectionItemInHolder(sec, key) : sec
               ),
             }
-          : {
+            : {
               ...vm,
               guyLayers: vm.guyLayers.map((g) =>
                 g.id === id ? removeInspectionItemInHolder(g, key) : g
               ),
             };
-      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
-    }),
+        return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+      }),
 
-  resetMastInspectionChecklist: (targetKind, id) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const nextVm: VerticalMastState =
-        targetKind === 'section'
-          ? {
+    resetMastInspectionChecklist: (targetKind, id) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const nextVm: VerticalMastState =
+          targetKind === 'section'
+            ? {
               ...vm,
               sections: vm.sections.map((sec) =>
                 sec.id === id ? resetInspectionChecklistInHolder(sec) : sec
               ),
             }
-          : {
+            : {
               ...vm,
               guyLayers: vm.guyLayers.map((g) =>
                 g.id === id ? resetInspectionChecklistInHolder(g) : g
               ),
             };
-      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
-    }),
+        return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+      }),
 
-  updateMastInspectionMeta: (targetKind, id, patch) =>
-    set((s) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const vm = s.project.verticalMast ?? createInitialVerticalMastState();
-      const nextVm: VerticalMastState =
-        targetKind === 'section'
-          ? {
+    updateMastInspectionMeta: (targetKind, id, patch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const vm = s.project.verticalMast ?? createInitialVerticalMastState();
+        const nextVm: VerticalMastState =
+          targetKind === 'section'
+            ? {
               ...vm,
               sections: vm.sections.map((sec) =>
                 sec.id === id
@@ -1716,7 +1945,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
                   : sec
               ),
             }
-          : {
+            : {
               ...vm,
               guyLayers: vm.guyLayers.map((g) =>
                 g.id === id
@@ -1724,8 +1953,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
                   : g
               ),
             };
-      return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
-    }),
+        return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+      }),
   };
 });
 

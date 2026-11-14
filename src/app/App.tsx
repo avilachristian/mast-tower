@@ -10,6 +10,7 @@ import {
   Layers,
   RefreshCw,
   RotateCcw,
+  Truck,
   Upload,
 } from 'lucide-react';
 import { computeVerticalMastMetrics } from '@/entities/project/verticalMastCalculations';
@@ -19,6 +20,7 @@ import { useUiStore } from '@/shared/state/uiStore';
 import { PwaStatusBanner } from '@/widgets/pwa/PwaStatusBanner';
 import { DailyLogPrintModal } from '@/widgets/daily-logs/DailyLogPrintModal';
 import { DailyLogsView } from '@/widgets/daily-logs/DailyLogsView';
+import { HaulingInventoryView } from '@/widgets/hauling/HaulingInventoryView';
 import { FoundationInspectionView } from '@/widgets/inspection/FoundationInspectionView';
 import { InspectionPrintModal } from '@/widgets/inspection/InspectionPrintModal';
 import { OverallVerticalMastStatusPrintModal } from '@/widgets/mast-tower/OverallVerticalMastStatusPrintModal';
@@ -363,6 +365,30 @@ export function App() {
 
           <button
             type="button"
+            onClick={() => setActiveAppTab('hauling_inventory')}
+            className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              activeAppTab === 'hauling_inventory'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Truck className="w-3.5 h-3.5" />
+            <span>Hauling &amp; Inventory</span>
+            {project.haulingLogs.length > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  activeAppTab === 'hauling_inventory'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {project.haulingLogs.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveAppTab('daily_logs')}
             className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
               activeAppTab === 'daily_logs'
@@ -416,6 +442,8 @@ export function App() {
             onChange={(patch) => updateReportDetails(patch)}
             onOpenReport={() => setReportOpen(true)}
           />
+        ) : activeAppTab === 'hauling_inventory' ? (
+          <HaulingInventoryView />
         ) : activeAppTab === 'daily_logs' ? (
           <DailyLogsView project={project} foundations={project.foundations} />
         ) : activeAppTab === 'inspection' ? (
@@ -511,7 +539,7 @@ export function App() {
           aria-label="Mobile Bottom Navigation"
           className="md:hidden print:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 shadow-[0_-4px_16px_rgba(15,23,42,0.08)] safe-area-pb"
         >
-          <div className="grid grid-cols-5 h-16">
+          <div className="grid grid-cols-6 h-16">
             <button
               type="button"
               onClick={() => setActiveAppTab('project_status')}
@@ -564,6 +592,31 @@ export function App() {
                 <span className="absolute top-0 inset-x-3 h-0.5 rounded-b-full bg-sky-600" />
               )}
               <ClipboardCheck className="w-6 h-6" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveAppTab('hauling_inventory')}
+              title={`Hauling & Inventory (${project.haulingLogs.length})`}
+              aria-label={`Hauling & Inventory (${project.haulingLogs.length})`}
+              aria-current={activeAppTab === 'hauling_inventory' ? 'page' : undefined}
+              className={`relative flex items-center justify-center transition cursor-pointer ${
+                activeAppTab === 'hauling_inventory'
+                  ? 'text-sky-600 bg-sky-50/70'
+                  : 'text-slate-500 hover:bg-slate-50 active:bg-slate-100'
+              }`}
+            >
+              {activeAppTab === 'hauling_inventory' && (
+                <span className="absolute top-0 inset-x-3 h-0.5 rounded-b-full bg-sky-600" />
+              )}
+              <div className="relative">
+                <Truck className="w-6 h-6" />
+                {project.haulingLogs.length > 0 && (
+                  <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-amber-600 text-white text-[10px] font-bold leading-none ring-2 ring-white">
+                    {project.haulingLogs.length}
+                  </span>
+                )}
+              </div>
             </button>
 
             <button

@@ -35,6 +35,7 @@ interface PwaState {
   swRegistered: boolean;
   offlineReady: boolean;
   offlineReadyDismissed: boolean;
+  offlineNoticeDismissed: boolean;
   updateAvailable: boolean;
   updateDismissed: boolean;
   isUpdating: boolean;
@@ -50,6 +51,7 @@ interface PwaState {
   applyUpdate: () => Promise<void>;
   dismissUpdateBanner: () => void;
   dismissOfflineReady: () => void;
+  dismissOfflineNotice: () => void;
   dismissJustUpdated: () => void;
   promptInstall: () => Promise<'accepted' | 'dismissed' | 'unavailable'>;
 }
@@ -157,6 +159,7 @@ export const usePwaStore = create<PwaState>((set, get) => ({
   swRegistered: false,
   offlineReady: false,
   offlineReadyDismissed: false,
+  offlineNoticeDismissed: false,
   updateAvailable: false,
   updateDismissed: false,
   isUpdating: false,
@@ -275,6 +278,7 @@ export const usePwaStore = create<PwaState>((set, get) => ({
 
   dismissUpdateBanner: () => set({ updateDismissed: true }),
   dismissOfflineReady: () => set({ offlineReadyDismissed: true }),
+  dismissOfflineNotice: () => set({ offlineNoticeDismissed: true }),
   dismissJustUpdated: () => set({ justUpdated: false }),
 
   promptInstall: async () => {
@@ -302,12 +306,12 @@ export function registerPwaServiceWorker(): void {
   initialized = true;
 
   window.addEventListener('online', () => {
-    usePwaStore.setState({ isOnline: true });
+    usePwaStore.setState({ isOnline: true, offlineNoticeDismissed: false });
     void usePwaStore.getState().checkForUpdates(false);
   });
 
   window.addEventListener('offline', () => {
-    usePwaStore.setState({ isOnline: false });
+    usePwaStore.setState({ isOnline: false, offlineNoticeDismissed: false });
   });
 
   window.addEventListener('beforeinstallprompt', (event) => {

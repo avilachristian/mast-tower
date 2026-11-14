@@ -14,6 +14,7 @@ export type ActiveAppTab =
   | 'project_status'
   | 'activity'
   | 'inspection'
+  | 'hauling_inventory'
   | 'daily_logs'
   | 'project_details';
 

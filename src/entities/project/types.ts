@@ -170,25 +170,52 @@ export type HaulingMaterialCategory =
   | 'rebar_20mm'
   | 'anchor_rod'
   | 'phenolic_board'
+  | 'tower_section'
+  | 'tower_accessory'
   | 'other';
 
 export interface HaulingLogEntry {
   id: string;
   date: string; // YYYY-MM-DD
   haulerName: string;
-  tripNumber?: number; // e.g., 1 for Trip 1, 2 for Trip 2
+  tripNumber?: number; // 1 for Trip 1, 2 for Trip 2
+  tripGroupId?: string; // Groups multiple material items hauled together in one trip
+  materialId?: string; // Links to CentralMaterialItem.id
   itemLabel?: string; // Display name e.g. 'Cement', 'Chair Bar A', 'Main Bar A'
   horsesUsed: number;
   tripsCount: number;
   material: HaulingMaterialCategory;
-  unitLabel: string; // 'bags', 'sacks', 'pcs', 'sets'
-  quantity: number; // number of bags/sacks (40kg = 1 bag) or pcs
+  unitLabel: string; // 'bags', 'sacks', 'pcs', 'sets', 'sec'
+  quantity: number; // number of bags/sacks/pcs/sets/sec
   kgPerUnit: number; // e.g. 40 kg/bag for cement/sand/gravel sacks
   totalKg: number;
   equivalentCuM: number; // 0 for non-bulk items; quantity / 36 for sand/gravel
   destinationFoundationId: string; // 'STOCKPILE' or FoundationRecord.id
   weather: string;
   remarks: string;
+}
+
+export interface CentralMaterialItem {
+  id: string;
+  name: string;
+  category: 'foundation' | 'vertical_mast' | 'shared';
+  unit: string; // 'bags', 'pcs', 'sec', 'sets', 'kg'
+  haulingMaterialKey: HaulingMaterialCategory;
+  purchaseUnit?: string; // e.g. 'cu.m' for sand & gravel
+  unitsPerPurchaseUnit?: number; // e.g. 36 bags per cu.m
+  defaultKgPerUnit?: number; // optional default weight hint per unit (editable per trip)
+  targetQty: number; // total quantity needed on site
+  stockYardTotalQty: number; // editable purchased/received quantity at stock yard
+  onSiteOpeningQty?: number; // optional manual on-site opening/direct adjustment
+  remarks?: string;
+}
+
+export interface HaulerPayoutRecord {
+  id: string;
+  date: string; // YYYY-MM-DD
+  haulerName: string;
+  amountPhp: number;
+  notes?: string;
 }
 
 export type WorkerRole =
@@ -488,6 +515,9 @@ export interface MastProjectState {
   foundations: FoundationRecord[];
   verticalMast?: VerticalMastState;
   haulingLogs: HaulingLogEntry[];
+  centralMaterials?: CentralMaterialItem[];
+  haulerRoster?: string[];
+  haulerPayouts?: HaulerPayoutRecord[];
   dailyLogs: DailyActivityLogEntry[];
   schedule: ScheduleActivityItem[];
   inventory: SiteEquipmentItem[];

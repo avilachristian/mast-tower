@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   CheckCircle2,
   Download,
@@ -18,6 +18,7 @@ export function PwaStatusBanner({ hasBottomNav = true }: PwaStatusBannerProps) {
   const isOnline = usePwaStore((s) => s.isOnline);
   const offlineReady = usePwaStore((s) => s.offlineReady);
   const offlineReadyDismissed = usePwaStore((s) => s.offlineReadyDismissed);
+  const offlineNoticeDismissed = usePwaStore((s) => s.offlineNoticeDismissed);
   const updateAvailable = usePwaStore((s) => s.updateAvailable);
   const updateDismissed = usePwaStore((s) => s.updateDismissed);
   const isUpdating = usePwaStore((s) => s.isUpdating);
@@ -27,7 +28,23 @@ export function PwaStatusBanner({ hasBottomNav = true }: PwaStatusBannerProps) {
   const applyUpdate = usePwaStore((s) => s.applyUpdate);
   const dismissUpdateBanner = usePwaStore((s) => s.dismissUpdateBanner);
   const dismissOfflineReady = usePwaStore((s) => s.dismissOfflineReady);
+  const dismissOfflineNotice = usePwaStore((s) => s.dismissOfflineNotice);
   const dismissJustUpdated = usePwaStore((s) => s.dismissJustUpdated);
+
+  const [offlineFading, setOfflineFading] = useState(false);
+
+  useEffect(() => {
+    if (isOnline || offlineNoticeDismissed) {
+      setOfflineFading(false);
+      return;
+    }
+    const fadeTimer = window.setTimeout(() => setOfflineFading(true), 4000);
+    const hideTimer = window.setTimeout(() => dismissOfflineNotice(), 4500);
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [isOnline, offlineNoticeDismissed, dismissOfflineNotice]);
 
   useEffect(() => {
     if (!justUpdated) return;
@@ -41,11 +58,12 @@ export function PwaStatusBanner({ hasBottomNav = true }: PwaStatusBannerProps) {
     return () => window.clearTimeout(timer);
   }, [offlineReady, offlineReadyDismissed, dismissOfflineReady]);
 
+  const showOfflineNotice = !isOnline && !offlineNoticeDismissed;
   const showUpdateToast = updateAvailable && !updateDismissed;
   const showOfflineReadyToast = offlineReady && !offlineReadyDismissed && !showUpdateToast;
   const showJustUpdatedToast = justUpdated && !showUpdateToast;
 
-  if (!showUpdateToast && !showOfflineReadyToast && !showJustUpdatedToast && isOnline) {
+  if (!showUpdateToast && !showOfflineReadyToast && !showJustUpdatedToast && !showOfflineNotice) {
     return null;
   }
 
@@ -56,12 +74,28 @@ export function PwaStatusBanner({ hasBottomNav = true }: PwaStatusBannerProps) {
       aria-live="polite"
       className={`print:hidden fixed ${bottomOffsetClass} right-3 left-3 sm:left-auto sm:max-w-sm z-40 flex flex-col gap-2 pointer-events-none`}
     >
-      {!isOnline && (
-        <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50/95 backdrop-blur px-3 py-2 text-xs font-medium text-amber-900 shadow-lg">
-          <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
-          <span className="leading-snug">
-            Offline mode — changes are saved locally on this device.
-          </span>
+      {showOfflineNotice && (
+        <div
+          className={`flex items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50/95 backdrop-blur px-3 py-2 text-xs font-medium text-amber-900 shadow-lg transition-all duration-500 ${
+            offlineFading
+              ? 'opacity-0 translate-y-2 pointer-events-none'
+              : 'opacity-100 translate-y-0 pointer-events-auto'
+          }`}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
+            <span className="leading-snug">
+              Offline mode — changes are saved locally on this device.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={dismissOfflineNotice}
+            aria-label="Dismiss offline mode notice"
+            className="p-1 rounded-md text-amber-700 hover:bg-amber-100 cursor-pointer shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 

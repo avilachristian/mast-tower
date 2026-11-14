@@ -21,12 +21,12 @@ import {
   ShieldCheck,
   Sun,
   Trash2,
+  Truck,
   UserCheck,
   Users,
   Wrench,
 } from 'lucide-react';
 import {
-  buildNextDayMaterialsFromLog,
   computeDailyLogMaterialRemaining,
   createDefaultDailyLogMaterials,
   findPreviousDailyLogForDraft,
@@ -41,6 +41,10 @@ import {
   getWeekdayName,
   sortDailyLogsNewestFirst,
 } from '@/entities/project/calculations';
+import {
+  buildCentralizedDailyLogMaterials,
+  syncDailyLogMaterialsWithHauling,
+} from '@/entities/project/haulingInventory';
 import type {
   DailyActivityLogEntry,
   DailyLogActivityItem,
@@ -231,7 +235,13 @@ export function DailyLogsView({
     () => createDefaultWorkers(isVerticalMast)
   );
   const [materialsOnSite, setMaterialsOnSite] = useState<DailyLogMaterialItem[]>(
-    () => buildNextDayMaterialsFromLog(latestLog, project.projectType ?? 'foundation')
+    () =>
+      buildCentralizedDailyLogMaterials(
+        project,
+        latestLog,
+        new Date().toISOString().slice(0, 10),
+        computeDailyLogMaterialRemaining
+      )
   );
   const [activities, setActivities] = useState<DailyLogActivityItem[]>([
     createEmptyActivity(),
@@ -261,6 +271,11 @@ export function DailyLogsView({
     [project.dailyLogs, date, dayNumber]
   );
 
+  const hauledItemsOnDate = useMemo(
+    () => project.haulingLogs.filter((h) => h.date === date && (Number(h.quantity) || 0) > 0),
+    [project.haulingLogs, date]
+  );
+
   useEffect(() => {
     if (editingLogId || dayNumberTouched) return;
     setDayNumber(nextDayNum);
@@ -269,9 +284,14 @@ export function DailyLogsView({
   useEffect(() => {
     if (editingLogId || materialsTouched) return;
     setMaterialsOnSite(
-      buildNextDayMaterialsFromLog(prevLogForDraft, project.projectType ?? 'foundation')
+      buildCentralizedDailyLogMaterials(
+        project,
+        prevLogForDraft,
+        date,
+        computeDailyLogMaterialRemaining
+      )
     );
-  }, [editingLogId, materialsTouched, prevLogForDraft, project.projectType]);
+  }, [editingLogId, materialsTouched, prevLogForDraft, project, date]);
 
   useEffect(() => {
     if (editingLogId || workersTouched) return;
@@ -293,13 +313,14 @@ export function DailyLogsView({
     carryOverSource?: DailyActivityLogEntry | null
   ) => {
     const sourceLog = carryOverSource !== undefined ? carryOverSource : latestLog;
+    const todayIso = new Date().toISOString().slice(0, 10);
     setEditingLogId(null);
     setDayNumberTouched(false);
     setMaterialsTouched(false);
     setProjectName(project.projectName);
     setLocation(project.location);
     setPreparedBy(project.preparedBy);
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(todayIso);
     setDayNumber(overrideDayNumber ?? nextDayNum);
     setWeather('Sunny');
     setWeatherNotes('');
@@ -307,7 +328,12 @@ export function DailyLogsView({
     setWorkersTouched(false);
     setWorkers(createDefaultWorkers(isVerticalMast));
     setMaterialsOnSite(
-      buildNextDayMaterialsFromLog(sourceLog, project.projectType ?? 'foundation')
+      buildCentralizedDailyLogMaterials(
+        project,
+        sourceLog,
+        todayIso,
+        computeDailyLogMaterialRemaining
+      )
     );
     setActivities([createEmptyActivity()]);
     setEquipmentItems([createEmptyEquipment()]);
@@ -393,7 +419,12 @@ export function DailyLogsView({
     }
     setMaterialsTouched(false);
     setMaterialsOnSite(
-      buildNextDayMaterialsFromLog(latest, project.projectType ?? 'foundation')
+      buildCentralizedDailyLogMaterials(
+        project,
+        latest,
+        date,
+        computeDailyLogMaterialRemaining
+      )
     );
     const prevEq = getDailyLogEquipmentRows(latest);
     if (prevEq.length > 0) {
@@ -1296,19 +1327,42 @@ export function DailyLogsView({
                   {isVerticalMast ? '4. Tower Parts on Site' : '4. Materials on Site'}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {hauledItemsOnDate.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMaterialsTouched(true);
+                        setMaterialsOnSite((prev) =>
+                          syncDailyLogMaterialsWithHauling(
+                            project,
+                            date,
+                            prev,
+                            computeDailyLogMaterialRemaining
+                          )
+                        );
+                      }}
+                      title={`Pull delivered quantities from ${hauledItemsOnDate.length} hauled item(s) on ${date} (you can still override manually)`}
+                      className="inline-flex items-center gap-1 min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-1 sm:py-0.5 rounded-lg sm:rounded-full bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 text-[11px] sm:text-[10px] font-semibold cursor-pointer"
+                    >
+                      <Truck className="w-3 h-3" />
+                      Sync Hauling ({hauledItemsOnDate.length})
+                    </button>
+                  )}
                   {prevLogForDraft && !editingLogId && (
                     <button
                       type="button"
                       onClick={() => {
                         setMaterialsTouched(false);
                         setMaterialsOnSite(
-                          buildNextDayMaterialsFromLog(
+                          buildCentralizedDailyLogMaterials(
+                            project,
                             prevLogForDraft,
-                            project.projectType ?? 'foundation'
+                            date,
+                            computeDailyLogMaterialRemaining
                           )
                         );
                       }}
-                      title="Fill On Site from previous day's Remaining quantities"
+                      title="Fill On Site from previous day's Remaining quantities and Hauling deliveries"
                       className="min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-1 sm:py-0.5 rounded-lg sm:rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 text-[11px] sm:text-[10px] font-semibold cursor-pointer"
                     >
                       Auto-fill from Day {prevLogForDraft.dayNumber}

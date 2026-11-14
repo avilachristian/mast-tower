@@ -63,6 +63,15 @@ import {
   useProjectStore,
 } from '@/shared/state/projectStore';
 import { idbGet, idbSet, isIndexedDbAvailable } from '@/shared/storage/indexedDb';
+import {
+  HAULING_CREDIT_BLOCK_KG,
+  HAULING_RATE_PER_BLOCK_PHP,
+  buildCentralizedDailyLogMaterials,
+  computeCentralMaterialStatuses,
+  computeHaulerCreditLedgers,
+  createDefaultCentralMaterials,
+  syncDailyLogMaterialsWithHauling,
+} from '@/entities/project/haulingInventory';
 import { usePwaStore } from '@/shared/pwa/pwaManager';
 import {
   computeCalloutBoxWidth,
@@ -1550,6 +1559,7 @@ describe('Workspace UI & Foundation Activity Report', () => {
       updateDismissed: false,
       offlineReady: true,
       offlineReadyDismissed: false,
+      offlineNoticeDismissed: false,
       justUpdated: true,
     });
 
@@ -1560,8 +1570,338 @@ describe('Workspace UI & Foundation Activity Report', () => {
     usePwaStore.getState().dismissOfflineReady();
     expect(usePwaStore.getState().offlineReadyDismissed).toBe(true);
 
+    usePwaStore.getState().dismissOfflineNotice();
+    expect(usePwaStore.getState().offlineNoticeDismissed).toBe(true);
+
     usePwaStore.getState().dismissJustUpdated();
     expect(usePwaStore.getState().justUpdated).toBe(false);
+  });
+});
+
+describe('Hauling & Centralized Inventory System', () => {
+  const makeHaulingLog = (
+    overrides: Partial<import('@/entities/project/types').HaulingLogEntry> &
+      Pick<
+        import('@/entities/project/types').HaulingLogEntry,
+        'id' | 'date' | 'haulerName' | 'material' | 'unitLabel' | 'quantity' | 'totalKg'
+      >
+  ): import('@/entities/project/types').HaulingLogEntry => ({
+    tripGroupId: undefined,
+    tripNumber: 1,
+    horsesUsed: 1,
+    tripsCount: 1,
+    kgPerUnit: overrides.quantity > 0 ? overrides.totalKg / overrides.quantity : 0,
+    equivalentCuM: 0,
+    destinationFoundationId: 'STOCKPILE',
+    weather: 'Sunny',
+    remarks: '',
+    ...overrides,
+  });
+
+  it('calculates 120kg = P1100 credits with continuous excess carry-over across trips and mixed materials', () => {
+    const project = createCleanBaselineProject();
+
+    // Day 1 Trip 1 (mixed material load: 80 kg Cement + 55 kg Rebar = 135 kg -> 1 credit, 15 kg excess)
+    // Day 1 Trip 2 (105 kg -> 105 + 15 = 120 kg -> 1 credit, 0 kg excess)
+    // Day 2 Trip 1 (95 kg -> 0 credits, 95 kg excess - NO partial payment)
+    // Day 3 Trip 1 (60 kg -> 60 + 95 = 155 kg -> 1 credit, 35 kg excess)
+    project.haulingLogs = [
+      makeHaulingLog({
+        id: 'h-4',
+        tripGroupId: 'grp-4',
+        date: '2026-04-03',
+        material: 'cement',
+        materialId: 'mat-cement',
+        itemLabel: 'Cement',
+        unitLabel: 'bags',
+        quantity: 1.5,
+        kgPerUnit: 40,
+        totalKg: 60,
+        haulerName: 'Juan Dela Cruz',
+        tripNumber: 1,
+      }),
+      makeHaulingLog({
+        id: 'h-3',
+        tripGroupId: 'grp-3',
+        date: '2026-04-02',
+        material: 'rebar_20mm',
+        materialId: 'mat-rebar-20mm',
+        itemLabel: '20mmØ Commercial Rebar (6m)',
+        unitLabel: 'pcs',
+        quantity: 2,
+        kgPerUnit: 47.5,
+        totalKg: 95,
+        haulerName: 'Juan Dela Cruz',
+        tripNumber: 1,
+      }),
+      makeHaulingLog({
+        id: 'h-2',
+        tripGroupId: 'grp-2',
+        date: '2026-04-01',
+        material: 'sand',
+        materialId: 'mat-sand',
+        itemLabel: 'Sand',
+        unitLabel: 'bags',
+        quantity: 3,
+        kgPerUnit: 35,
+        totalKg: 105,
+        haulerName: 'Juan Dela Cruz',
+        tripNumber: 2,
+      }),
+      makeHaulingLog({
+        id: 'h-1b',
+        tripGroupId: 'grp-1',
+        date: '2026-04-01',
+        material: 'rebar_20mm',
+        materialId: 'mat-rebar-20mm',
+        itemLabel: '20mmØ Commercial Rebar (6m)',
+        unitLabel: 'pcs',
+        quantity: 1,
+        kgPerUnit: 55,
+        totalKg: 55,
+        haulerName: 'Juan Dela Cruz',
+        tripNumber: 1,
+        remarks: 'Mixed load',
+      }),
+      makeHaulingLog({
+        id: 'h-1a',
+        tripGroupId: 'grp-1',
+        date: '2026-04-01',
+        material: 'cement',
+        materialId: 'mat-cement',
+        itemLabel: 'Cement',
+        unitLabel: 'bags',
+        quantity: 2,
+        kgPerUnit: 40,
+        totalKg: 80,
+        haulerName: 'Juan Dela Cruz',
+        tripNumber: 1,
+        remarks: 'Mixed load',
+      }),
+    ];
+    project.haulerPayouts = [
+      {
+        id: 'pay-1',
+        date: '2026-04-02',
+        haulerName: 'Juan Dela Cruz',
+        amountPhp: 1100,
+        notes: 'Partial settlement',
+      },
+    ];
+
+    const summary = computeHaulerCreditLedgers(
+      project.haulingLogs,
+      project.haulerPayouts
+    );
+
+    expect(HAULING_CREDIT_BLOCK_KG).toBe(120);
+    expect(HAULING_RATE_PER_BLOCK_PHP).toBe(1100);
+    expect(summary.totalHauledKg).toBe(395);
+    expect(summary.totalCredits).toBe(3);
+    expect(summary.totalEarnedPhp).toBe(3300);
+    expect(summary.totalPaidPhp).toBe(1100);
+    expect(summary.totalBalanceDuePhp).toBe(2200);
+    expect(summary.totalActiveExcessKg).toBe(35);
+
+    expect(summary.ledgers).toHaveLength(1);
+    const juan = summary.ledgers[0];
+    expect(juan.tripsCompleted).toBe(4);
+    expect(juan.totalCredits).toBe(3);
+    expect(juan.currentExcessKg).toBe(35);
+    expect(juan.balanceDuePhp).toBe(2200);
+
+    // Chronological ledger verification (summary.tripsChronological is oldest -> newest)
+    expect(summary.tripsChronological).toHaveLength(4);
+    expect(summary.tripsChronological[0].totalKg).toBe(135);
+    expect(summary.tripsChronological[0].creditsEarned).toBe(1);
+    expect(summary.tripsChronological[0].excessAfterKg).toBe(15);
+
+    expect(summary.tripsChronological[1].priorExcessKg).toBe(15);
+    expect(summary.tripsChronological[1].effectiveKg).toBe(120);
+    expect(summary.tripsChronological[1].creditsEarned).toBe(1);
+    expect(summary.tripsChronological[1].excessAfterKg).toBe(0);
+
+    expect(summary.tripsChronological[2].totalKg).toBe(95);
+    expect(summary.tripsChronological[2].creditsEarned).toBe(0);
+    expect(summary.tripsChronological[2].payoutEarnedPhp).toBe(0);
+    expect(summary.tripsChronological[2].excessAfterKg).toBe(95);
+
+    expect(summary.tripsChronological[3].priorExcessKg).toBe(95);
+    expect(summary.tripsChronological[3].effectiveKg).toBe(155);
+    expect(summary.tripsChronological[3].creditsEarned).toBe(1);
+    expect(summary.tripsChronological[3].excessAfterKg).toBe(35);
+  });
+
+  it('tracks Stock Yard cu.m (36 bags/cu.m), On-Site balances, and links hauling deliveries to Daily Logs', () => {
+    const project = createCleanBaselineProject();
+    const central = createDefaultCentralMaterials().map((m) => {
+      if (m.id === 'mat-sand') {
+        return { ...m, stockYardTotalQty: 2 * BAGS_PER_CUBIC_METER, targetQty: 100 }; // 2 cu.m = 72 bags
+      }
+      if (m.id === 'mat-rebar-20mm') {
+        return { ...m, stockYardTotalQty: 40, targetQty: 40 };
+      }
+      return m;
+    });
+    project.centralMaterials = central;
+
+    project.haulingLogs = [
+      makeHaulingLog({
+        id: 'hl-day1-1',
+        tripGroupId: 'grp-d1-1',
+        date: '2026-04-05',
+        material: 'sand',
+        materialId: 'mat-sand',
+        itemLabel: 'Sand',
+        unitLabel: 'bags',
+        quantity: 6,
+        kgPerUnit: 35,
+        totalKg: 210,
+        haulerName: 'Pedro',
+        tripNumber: 1,
+      }),
+      makeHaulingLog({
+        id: 'hl-day1-2',
+        tripGroupId: 'grp-d1-1',
+        date: '2026-04-05',
+        material: 'rebar_20mm',
+        materialId: 'mat-rebar-20mm',
+        itemLabel: '20mmØ Commercial Rebar (6m)',
+        unitLabel: 'pcs',
+        quantity: 4,
+        kgPerUnit: 46.2,
+        totalKg: 184.8,
+        haulerName: 'Pedro',
+        tripNumber: 1,
+      }),
+    ];
+
+    // Daily log on 2026-04-05 auto-populates deliveredQty from hauling
+    const draftRows = buildCentralizedDailyLogMaterials(
+      project,
+      null,
+      '2026-04-05',
+      computeDailyLogMaterialRemaining
+    );
+    const sandDraft = draftRows.find((r) => r.id === 'mat-sand');
+    const rebarDraft = draftRows.find((r) => r.id === 'mat-rebar-20mm');
+    expect(sandDraft?.deliveredQty).toBe(6);
+    expect(rebarDraft?.deliveredQty).toBe(4);
+
+    // Simulate logging Daily Log usage of 2 bags sand and 3 pcs 20mm rebar
+    project.dailyLogs = [
+      {
+        id: 'dl-1',
+        date: '2026-04-05',
+        dayNumber: 1,
+        weather: 'Sunny',
+        schedulePhaseId: 'ph-2',
+        activitiesSummary: 'Foundation pouring prep',
+        foundationsWorked: [],
+        workers: [],
+        totalWorkers: 0,
+        totalManHours: 0,
+        cementUsedBags: 0,
+        sandUsedBags: 2,
+        gravelUsedBags: 0,
+        issuesOrDelays: '',
+        materialsOnSite: draftRows.map((r) => {
+          if (r.id === 'mat-sand') {
+            return { ...r, usedTodayQty: 2, remainingQty: computeDailyLogMaterialRemaining({ ...r, usedTodayQty: 2 }) };
+          }
+          if (r.id === 'mat-rebar-20mm') {
+            return { ...r, usedTodayQty: 3, remainingQty: computeDailyLogMaterialRemaining({ ...r, usedTodayQty: 3 }) };
+          }
+          return r;
+        }),
+      },
+    ];
+
+    const statuses = computeCentralMaterialStatuses(project);
+    const sandStatus = statuses.find((s) => s.item.id === 'mat-sand')!;
+    const rebarStatus = statuses.find((s) => s.item.id === 'mat-rebar-20mm')!;
+
+    expect(sandStatus.stockYardRemainingQty).toBe(66); // 72 - 6
+    expect(sandStatus.stockYardRemainingCuM).toBeCloseTo(66 / 36, 1);
+    expect(sandStatus.hauledQty).toBe(6);
+    expect(sandStatus.usedOnSiteQty).toBe(2);
+    expect(sandStatus.onSiteRemainingQty).toBe(4);
+    expect(sandStatus.stillNeededOnSiteQty).toBe(94); // target 100 - (delivered/hauled 6)
+
+    expect(rebarStatus.stockYardRemainingQty).toBe(36); // 40 - 4
+    expect(rebarStatus.hauledQty).toBe(4);
+    expect(rebarStatus.usedOnSiteQty).toBe(3);
+    expect(rebarStatus.onSiteRemainingQty).toBe(1);
+    expect(rebarStatus.stillNeededOnSiteQty).toBe(36); // 40 - 4
+
+    // Test manual Sync from Hauling override preserves usedTodayQty
+    const updatedProject = {
+      ...project,
+      haulingLogs: [
+        ...project.haulingLogs,
+        makeHaulingLog({
+          id: 'hl-day1-3',
+          tripGroupId: 'grp-d1-2',
+          date: '2026-04-05',
+          material: 'sand',
+          materialId: 'mat-sand',
+          itemLabel: 'Sand',
+          unitLabel: 'bags',
+          quantity: 3,
+          kgPerUnit: 35,
+          totalKg: 105,
+          haulerName: 'Pedro',
+          tripNumber: 2,
+        }),
+      ],
+    };
+    const synced = syncDailyLogMaterialsWithHauling(
+      updatedProject,
+      '2026-04-05',
+      project.dailyLogs[0].materialsOnSite ?? [],
+      computeDailyLogMaterialRemaining
+    );
+    const syncedSand = synced.find((r) => r.id === 'mat-sand')!;
+    expect(syncedSand.deliveredQty).toBe(9);
+    expect(syncedSand.usedTodayQty).toBe(2);
+    expect(syncedSand.remainingQty).toBe(7);
+  });
+
+  it('adds multi-material hauling trip via store and syncs saved daily log deliveries', () => {
+    const clean = createCleanBaselineProject();
+    useProjectStore.setState({ project: clean });
+
+    useProjectStore.getState().addHaulingTrip({
+      date: '2026-04-10',
+      haulerName: 'Mario',
+      tripNumber: 1,
+      remarks: 'Morning horse load',
+      items: [
+        {
+          materialId: 'mat-cement',
+          material: 'cement',
+          itemLabel: 'Cement',
+          unitLabel: 'bags',
+          quantity: 2,
+          totalKg: 80,
+        },
+        {
+          materialId: 'mat-rebar-20mm',
+          material: 'rebar_20mm',
+          itemLabel: '20mmØ Commercial Rebar (6m)',
+          unitLabel: 'pcs',
+          quantity: 5,
+          totalKg: 45,
+        },
+      ],
+    });
+
+    const stateAfterAdd = useProjectStore.getState().project;
+    expect(stateAfterAdd.haulingLogs).toHaveLength(2);
+    expect(stateAfterAdd.haulerRoster).toContain('Mario');
+    expect(stateAfterAdd.haulingLogs[0].tripGroupId).toBe(
+      stateAfterAdd.haulingLogs[1].tripGroupId
+    );
   });
 });
 
