@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -31,6 +31,11 @@ import type { MastSelectionTarget } from '@/shared/state/uiStore';
 import { idbGet, idbSet } from '@/shared/storage/indexedDb';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
 import { VerticalMastElevation2D } from '@/widgets/mast-tower/VerticalMastElevation2D';
+import type { Tower3DSelectionTarget } from './tower3dGeometry';
+
+const LazyMastTower3DShowcase = lazy(() =>
+  import('./MastTower3DShowcase').then((m) => ({ default: m.MastTower3DShowcase })),
+);
 
 const CLIENT_SHOWCASE_CACHE_KEY = 'mast2-client-showcase-cache-v1';
 
@@ -103,13 +108,19 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
   );
 
   // Diagram selection state (read-only)
-  const [diagramMode, setDiagramMode] = useState<'foundation' | 'vertical_mast'>('foundation');
+  const [diagramMode, setDiagramMode] = useState<'foundation' | 'vertical_mast' | '3d_model'>(
+    'foundation',
+  );
   const [selectedFoundationId, setSelectedFoundationId] = useState<string>('PF-0');
   const [selectedMastTarget, setSelectedMastTarget] = useState<MastSelectionTarget>({
     kind: 'section',
     id: 'S01',
   });
   const [selectedGuyAnchorId, setSelectedGuyAnchorId] = useState<string | undefined>(undefined);
+  const [selected3DTarget, setSelected3DTarget] = useState<Tower3DSelectionTarget | null>({
+    kind: 'foundation',
+    foundationId: 'PF-0',
+  });
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   useEffect(() => {
@@ -194,6 +205,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     setSelectedFoundationId(firstFoundation);
     setSelectedMastTarget({ kind: 'section', id: 'S01' });
     setSelectedGuyAnchorId(undefined);
+    setSelected3DTarget({ kind: 'foundation', foundationId: firstFoundation });
     setLightboxIndex(null);
   }, [activeDto?.id]);
 
@@ -292,6 +304,30 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     if (!selectedGuyLayer) return [];
     return Object.values(selectedGuyLayer.anchorIds);
   }, [selectedGuyLayer]);
+
+  const handleSelect3D = useCallback(
+    (target: Tower3DSelectionTarget | null) => {
+      setSelected3DTarget(target);
+      if (!target) return;
+      if (target.kind === 'foundation') {
+        setSelectedFoundationId(target.foundationId);
+        setSelectedGuyAnchorId(target.foundationId);
+      } else if (target.kind === 'section') {
+        setSelectedMastTarget({ kind: 'section', id: target.sectionId });
+      } else if (target.kind === 'guy_layer') {
+        setSelectedMastTarget({ kind: 'guy_layer', id: target.guyLayerId });
+        const matchedLayer = vmOverview?.vm.guyLayers.find(
+          (l) => l.id === target.guyLayerId,
+        );
+        if (matchedLayer) {
+          setSelectedGuyAnchorId(
+            target.sector ? matchedLayer.anchorIds[target.sector] : matchedLayer.anchorIds.I,
+          );
+        }
+      }
+    },
+    [vmOverview],
+  );
 
   // Combined friendly completion percentage for header badge
   const headlineProgressPct = useMemo(() => {
@@ -665,15 +701,16 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-900 pb-2">
                 <div>
                   <h2 className="text-sm font-mono uppercase tracking-widest font-bold text-neutral-950">
-                    02 · Interactive 2D Engineering Drawings
+                    02 · Interactive Engineering Drawings &amp; 3D Model
                   </h2>
                   <p className="text-xs text-neutral-600 mt-0.5">
                     Select any foundation pad, mast section, or guy cable level below to inspect live telemetry.
                   </p>
                 </div>
 
-                {activeDto.settings.phaseMode === 'both' && (
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {(activeDto.settings.phaseMode === 'foundation' ||
+                    activeDto.settings.phaseMode === 'both') && (
                     <button
                       type="button"
                       onClick={() => setDiagramMode('foundation')}
@@ -685,6 +722,9 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                     >
                       Foundation &amp; Anchors
                     </button>
+                  )}
+                  {(activeDto.settings.phaseMode === 'vertical_mast' ||
+                    activeDto.settings.phaseMode === 'both') && (
                     <button
                       type="button"
                       onClick={() => setDiagramMode('vertical_mast')}
@@ -696,18 +736,173 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                     >
                       Mast &amp; Guying
                     </button>
-                  </div>
-                )}
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDiagramMode('3d_model')}
+                    className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider cursor-pointer transition-colors ${
+                      diagramMode === '3d_model'
+                        ? 'bg-neutral-950 text-white'
+                        : 'border border-stone-300 text-neutral-700 hover:text-neutral-950 hover:border-neutral-950'
+                    }`}
+                  >
+                    3D Model
+                  </button>
+                </div>
               </div>
 
-              {diagramMode === 'foundation' ? (
+              {diagramMode === '3d_model' ? (
+                <div className="space-y-6">
+                  <Suspense
+                    fallback={
+                      <div className="border border-stone-300 bg-[#F7F6F2] h-[520px] sm:h-[580px] flex items-center justify-center text-xs font-mono uppercase tracking-widest text-neutral-500">
+                        Initializing 3D Viewport...
+                      </div>
+                    }
+                  >
+                    <LazyMastTower3DShowcase
+                      foundations={activeDto.foundations}
+                      verticalMast={vmOverview.vm}
+                      phaseMode={activeDto.settings.phaseMode}
+                      selection={selected3DTarget}
+                      onSelect={handleSelect3D}
+                    />
+                  </Suspense>
+
+                  {/* 3D Selection Telemetry Ledger */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                    {selectedFoundation && (
+                      <div className="border-t border-stone-900 pt-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                              Foundation · Sector {selectedFoundation.sector}
+                            </div>
+                            <div className="text-sm font-bold text-neutral-950 mt-0.5">
+                              {selectedFoundation.code} — {selectedFoundation.name}
+                            </div>
+                            <div className="text-xs text-neutral-600">
+                              Radius {selectedFoundation.radiusM}m ·{' '}
+                              {selectedFoundation.resolvedDims
+                                ? `${selectedFoundation.resolvedDims.lengthM}×${selectedFoundation.resolvedDims.widthM}×${selectedFoundation.resolvedDims.thicknessM}m`
+                                : ''}
+                            </div>
+                          </div>
+                          <span
+                            className={`text-[10px] font-mono font-bold uppercase shrink-0 ${STATUS_META[selectedFoundation.status].textClass}`}
+                          >
+                            {STATUS_META[selectedFoundation.status].shortLabel}
+                          </span>
+                        </div>
+                        <div className="h-1 bg-stone-200">
+                          <div
+                            className="h-full"
+                            style={{
+                              width: `${STATUS_META[selectedFoundation.status].pct}%`,
+                              backgroundColor: STATUS_META[selectedFoundation.status].color,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedTowerSection ? (
+                      <div className="border-t border-stone-900 pt-3 space-y-1.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                              Mast Section Selected
+                            </div>
+                            <div className="text-sm font-bold text-neutral-950 mt-0.5">
+                              {selectedTowerSection.id} · {selectedTowerSection.elevationFromM}m –{' '}
+                              {selectedTowerSection.elevationToM}m
+                            </div>
+                          </div>
+                          <span
+                            className={`text-[10px] font-mono font-bold uppercase shrink-0 ${
+                              getClientSectionStatusLabel(selectedTowerSection.status).textClass
+                            }`}
+                          >
+                            {getClientSectionStatusLabel(selectedTowerSection.status).label}
+                          </span>
+                        </div>
+                        <div className="text-xs text-neutral-600">
+                          Installed:{' '}
+                          <strong className="text-neutral-900">
+                            {selectedTowerSection.installedDate
+                              ? formatDateWithWeekday(selectedTowerSection.installedDate)
+                              : 'Scheduled'}
+                          </strong>
+                        </div>
+                      </div>
+                    ) : selectedGuyLayer ? (
+                      <div className="border-t border-stone-900 pt-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                              Guy Cable Layer Selected
+                            </div>
+                            <div className="text-sm font-bold text-neutral-950 mt-0.5">
+                              {selectedGuyLayer.id} · Elev. {selectedGuyLayer.elevationM}m
+                            </div>
+                          </div>
+                          <span
+                            className={`text-[10px] font-mono font-bold uppercase shrink-0 ${GUY_LAYER_STATUS_META[selectedGuyLayer.status].textClass}`}
+                          >
+                            {GUY_LAYER_STATUS_META[selectedGuyLayer.status].shortLabel}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[11px] pt-1 border-t border-stone-200">
+                          {(['I', 'II', 'III'] as const).map((sec) => {
+                            const secProg = selectedGuyLayer.sectors[sec];
+                            return (
+                              <div key={sec}>
+                                <div className="font-mono font-bold text-neutral-900">
+                                  Sec {sec} ({selectedGuyLayer.anchorIds[sec]})
+                                </div>
+                                <div className="text-[10px] text-neutral-600">
+                                  {secProg.tensioned
+                                    ? 'Tensioned'
+                                    : secProg.terminated
+                                      ? 'Anchored'
+                                      : secProg.pulled
+                                        ? 'Pulled'
+                                        : 'Pending'}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="border-t border-stone-300 pt-3 text-xs text-neutral-500">
+                        Click any mast section (S01–S41) or guy cable strand in the 3D scene to inspect elevation details.
+                      </div>
+                    )}
+
+                    <div className="border-t border-stone-300 pt-3 space-y-2">
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                        3D Inspection Tip
+                      </div>
+                      <p className="text-xs text-neutral-600 leading-relaxed">
+                        The translucent survey plane marks Natural Ground Level (Y = 0.00m). Concrete
+                        footings and anchor blocks extend below grade with guy tie-rods emerging
+                        +0.30m to meet all 48 tension cables.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : diagramMode === 'foundation' ? (
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
                   <div className="xl:col-span-8">
                     <GroundAnchorPlan2D
                       frameless
                       foundations={renderProject.foundations}
                       selectedId={selectedFoundation?.id}
-                      onSelect={setSelectedFoundationId}
+                      onSelect={(id) => {
+                        setSelectedFoundationId(id);
+                        setSelected3DTarget({ kind: 'foundation', foundationId: id });
+                      }}
                       title="2D Foundation & Anchor Layout Plan"
                       subtitle="Tap any foundation pad to view completion stage and milestone dates"
                     />
@@ -806,25 +1001,30 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
-                  <div className="xl:col-span-5">
+                  <div className="xl:col-span-6">
                     <VerticalMastElevation2D
                       frameless
                       verticalMast={vmOverview.vm}
                       selectedTarget={selectedMastTarget}
                       onSelectTarget={(target) => {
                         setSelectedMastTarget(target);
-                        if (target.kind === 'guy_layer') {
+                        if (target.kind === 'section') {
+                          setSelected3DTarget({ kind: 'section', sectionId: target.id });
+                        } else if (target.kind === 'guy_layer') {
+                          setSelected3DTarget({ kind: 'guy_layer', guyLayerId: target.id });
                           const layer = vmOverview.vm.guyLayers.find((l) => l.id === target.id);
                           if (layer) setSelectedGuyAnchorId(layer.anchorIds.I);
                         }
                       }}
                       title="Vertical Mast & 16-Layer Guying Elevation"
                       subtitle="Click any tower section (S01–S41) or guy layer (L01–L16)"
-                      enableVerticalScale={false}
+                      enableVerticalScale
+                      defaultVerticalScale={1.5}
+                      scaleOptions={[1.5, 2]}
                     />
                   </div>
 
-                  <div className="xl:col-span-7 space-y-8">
+                  <div className="xl:col-span-6 space-y-8">
                     <GroundAnchorPlan2D
                       frameless
                       foundations={renderProject.foundations}

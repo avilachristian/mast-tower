@@ -85,6 +85,8 @@ export function VerticalMastElevation2D({
   hideHeader = false,
   frameless = false,
   enableVerticalScale,
+  defaultVerticalScale,
+  scaleOptions,
 }: {
   verticalMast: VerticalMastState;
   selectedTarget?: MastSelectionTarget | null;
@@ -96,13 +98,25 @@ export function VerticalMastElevation2D({
   hideHeader?: boolean;
   frameless?: boolean;
   enableVerticalScale?: boolean;
+  defaultVerticalScale?: MastVerticalScale;
+  scaleOptions?: readonly MastVerticalScale[];
 }) {
   const [focus, setFocus] = useState<ElevationFocus>('all');
+  const [localScale, setLocalScale] = useState<MastVerticalScale>(defaultVerticalScale ?? 1);
   const mastVerticalScale = useUiStore((s) => s.mastVerticalScale);
   const setMastVerticalScale = useUiStore((s) => s.setMastVerticalScale);
 
   const canScale = enableVerticalScale ?? (Boolean(onSelectTarget) && !hideHeader);
-  const activeVScale: MastVerticalScale = canScale ? mastVerticalScale : 1;
+  const isLocallyScaled = defaultVerticalScale !== undefined;
+  const activeVScale: MastVerticalScale = canScale
+    ? isLocallyScaled
+      ? localScale
+      : mastVerticalScale
+    : 1;
+  const handleSelectScale = isLocallyScaled ? setLocalScale : setMastVerticalScale;
+  const visibleScaleOptions = scaleOptions
+    ? MAST_VERTICAL_SCALE_OPTIONS.filter((opt) => scaleOptions.includes(opt.value))
+    : MAST_VERTICAL_SCALE_OPTIONS;
 
   const cx = 360;
   const xScale = 3.6; // ±72m -> ±259.2px (x = 100.8 .. 619.2)
@@ -252,11 +266,11 @@ export function VerticalMastElevation2D({
                 <span className="px-1.5 text-[10px] font-semibold text-slate-500 select-none">
                   V-Scale
                 </span>
-                {MAST_VERTICAL_SCALE_OPTIONS.map((opt) => (
+                {visibleScaleOptions.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
-                    onClick={() => setMastVerticalScale(opt.value)}
+                    onClick={() => handleSelectScale(opt.value)}
                     className={`px-2 py-0.5 font-semibold transition cursor-pointer ${
                       frameless ? '' : 'rounded-md'
                     } ${
@@ -351,12 +365,16 @@ export function VerticalMastElevation2D({
           activeVScale > 1
             ? fillParent
               ? 'p-2 flex-1 min-h-0 overflow-y-auto max-h-[560px] sm:max-h-[640px] bg-slate-50/40'
-              : compact
-                ? 'p-2 sm:p-3 overflow-y-auto max-h-[540px] bg-slate-50/40'
-                : 'p-2 sm:p-3 overflow-y-auto max-h-[640px] bg-slate-50/40'
+              : frameless
+                ? 'p-2 sm:p-3 overflow-y-auto max-h-[760px] bg-white'
+                : compact
+                  ? 'p-2 sm:p-3 overflow-y-auto max-h-[540px] bg-slate-50/40'
+                  : 'p-2 sm:p-3 overflow-y-auto max-h-[640px] bg-slate-50/40'
             : fillParent
               ? 'p-1 flex-1 min-h-0 flex items-center justify-center bg-slate-50/40'
-              : 'p-2 sm:p-3 bg-slate-50/40'
+              : frameless
+                ? 'p-2 sm:p-3 bg-white'
+                : 'p-2 sm:p-3 bg-slate-50/40'
         }
       >
         <svg
@@ -638,7 +656,7 @@ export function VerticalMastElevation2D({
                     y={yAttach - 8.5}
                     width={113}
                     height={17}
-                    rx={3.5}
+                    rx={frameless ? 0 : 3.5}
                     fill={isSelected ? '#0284c7' : '#ffffff'}
                     stroke={isSelected ? '#0369a1' : badgeColor}
                     strokeWidth={isSelected ? 1.5 : 1.05}

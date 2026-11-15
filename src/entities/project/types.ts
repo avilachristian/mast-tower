@@ -645,6 +645,14 @@ export interface ClientDailyHighlightDto {
   }>;
 }
 
+export interface FoundationResolvedDims {
+  lengthM: number;
+  widthM: number;
+  thicknessM: number;
+  overburdenDepthM: number;
+  leanThicknessM: number;
+}
+
 export type ClientFoundationSummary = Pick<
   FoundationRecord,
   | 'id'
@@ -659,7 +667,9 @@ export type ClientFoundationSummary = Pick<
   | 'status'
   | 'pourDate'
   | 'completedDate'
->;
+> & {
+  resolvedDims?: FoundationResolvedDims;
+};
 
 export interface ClientProjectShowcaseDto {
   id: string;

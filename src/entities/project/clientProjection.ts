@@ -5,10 +5,56 @@ import type {
   ClientShowcaseSettings,
   DailyActivityLogEntry,
   FoundationRecord,
+  FoundationResolvedDims,
+  FoundationType,
   MastProjectState,
   SavedProjectRecord,
   VerticalMastState,
 } from './types';
+
+// Worker-safe dimension defaults matching mast2Baseline.ts (avoids pulling PNG imports into worker bundle)
+const DEFAULT_FOUNDATION_DIMS: Record<FoundationType, FoundationResolvedDims> = {
+  principal: {
+    lengthM: 2.0,
+    widthM: 2.0,
+    thicknessM: 1.0,
+    overburdenDepthM: 0.0,
+    leanThicknessM: 0.05,
+  },
+  anchor_a: {
+    lengthM: 2.0,
+    widthM: 2.0,
+    thicknessM: 1.4,
+    overburdenDepthM: 0.6,
+    leanThicknessM: 0.05,
+  },
+  anchor_b: {
+    lengthM: 2.0,
+    widthM: 2.0,
+    thicknessM: 1.0,
+    overburdenDepthM: 1.0,
+    leanThicknessM: 0.05,
+  },
+  anchor_c: {
+    lengthM: 1.5,
+    widthM: 1.5,
+    thicknessM: 0.7,
+    overburdenDepthM: 1.3,
+    leanThicknessM: 0.05,
+  },
+};
+
+function resolveClientFoundationDims(f: FoundationRecord): FoundationResolvedDims {
+  const base = DEFAULT_FOUNDATION_DIMS[f.type];
+  const custom = f.customSpecs;
+  return {
+    lengthM: custom?.lengthM ?? base.lengthM,
+    widthM: custom?.widthM ?? base.widthM,
+    thicknessM: custom?.thicknessM ?? base.thicknessM,
+    overburdenDepthM: custom?.overburdenDepthM ?? base.overburdenDepthM,
+    leanThicknessM: custom?.leanThicknessM ?? base.leanThicknessM,
+  };
+}
 
 export const DEFAULT_CLIENT_SHOWCASE_SETTINGS: ClientShowcaseSettings = {
   enabled: false,
@@ -69,6 +115,7 @@ function sanitizeFoundationForClient(f: FoundationRecord): ClientFoundationSumma
     status: f.status,
     pourDate: f.pourDate,
     completedDate: f.completedDate,
+    resolvedDims: resolveClientFoundationDims(f),
   };
 }
 
