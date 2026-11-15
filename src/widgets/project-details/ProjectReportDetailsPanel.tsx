@@ -1,49 +1,11 @@
 import { ImagePlus, Printer, RotateCcw, Trash2 } from 'lucide-react';
 import type { MastProjectState, ReportDetailsSpec } from '@/entities/project/types';
 import { createDefaultReportLogos, resolveReportLogos } from '@/shared/assets/defaultLogos';
+import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
+import { useProjectStore } from '@/shared/state/projectStore';
 import { ReportLetterhead } from '@/widgets/report/ReportLetterhead';
 
 type LogoPosition = 'left' | 'center' | 'right';
-
-function readAndOptimizeLogoFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Failed to read image file.'));
-    reader.onload = () => {
-      const rawUrl = String(reader.result || '');
-      if (!rawUrl.startsWith('data:image/')) {
-        resolve(rawUrl);
-        return;
-      }
-      // Preserve SVGs directly without rasterization
-      if (file.type === 'image/svg+xml') {
-        resolve(rawUrl);
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        const maxDim = 420;
-        const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
-        const targetW = Math.max(1, Math.round((img.width || 1) * scale));
-        const targetH = Math.max(1, Math.round((img.height || 1) * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = targetW;
-        canvas.height = targetH;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(rawUrl);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, targetW, targetH);
-        const keepPng = file.type === 'image/png' || file.type === 'image/webp';
-        resolve(canvas.toDataURL(keepPng ? 'image/png' : 'image/jpeg', 0.88));
-      };
-      img.onerror = () => resolve(rawUrl);
-      img.src = rawUrl;
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 function getTodayIsoDate(): string {
   const now = new Date();
@@ -75,12 +37,17 @@ export function ProjectReportDetailsPanel({
 
   const handleUploadLogo = async (slot: LogoPosition, file?: File | null) => {
     if (!file) return;
-    const dataUrl = await readAndOptimizeLogoFile(file);
+    const uploaded = await uploadOrStageProjectImage({
+      file,
+      projectId: useProjectStore.getState().activeProjectId,
+      category: 'logo',
+    });
+    if (!uploaded) return;
     update({
       logos: {
         ...resolvedLogos,
         [slot]: {
-          dataUrl,
+          dataUrl: uploaded.url,
           caption: resolvedLogos[slot]?.caption ?? '',
         },
       },

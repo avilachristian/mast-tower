@@ -1,28 +1,63 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   BarChart3,
   Building2,
   ClipboardCheck,
   ClipboardList,
+  Cloud,
+  CloudOff,
   Download,
+  ExternalLink,
   FileText,
   FolderKanban,
+  Globe,
   Layers,
+  Loader2,
+  LogOut,
   RefreshCw,
   RotateCcw,
   Truck,
   Upload,
+  Users,
 } from 'lucide-react';
+import {
+  computeCivilWorksPayrollPreview,
+  computeHaulerPayrollPreview,
+  getPayrollPeriodBounds,
+  resolveManpowerRoster,
+} from '@/entities/project/manpowerPayroll';
 import { computeVerticalMastMetrics } from '@/entities/project/verticalMastCalculations';
+import { navigateTo, useAppRoute } from '@/shared/lib/router';
 import { usePwaStore } from '@/shared/pwa/pwaManager';
+import { useAuthStore } from '@/shared/state/authStore';
+import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
+import {
+  hydrateCloudWorkspace,
+  initializeCloudSync,
+  resolveConflictOverwriteCloud,
+  resolveConflictUseCloud,
+  useCloudSyncStore,
+} from '@/shared/storage/cloudSync';
+import { AdminLoginView } from '@/widgets/auth/AdminLoginView';
+import { ClientShowcaseView } from '@/widgets/client-showcase/ClientShowcaseView';
+import { AppDialogModal } from '@/widgets/common/AppDialogModal';
+import { ToastBanner } from '@/widgets/common/ToastBanner';
 import { PwaStatusBanner } from '@/widgets/pwa/PwaStatusBanner';
+import { ClientVisibilityModal } from '@/widgets/projects/ClientVisibilityModal';
+import {
+  R2StorageAlertBanner,
+  R2StorageHeaderPill,
+} from '@/widgets/storage/R2StorageStatusBadge';
 import { DailyLogPrintModal } from '@/widgets/daily-logs/DailyLogPrintModal';
 import { DailyLogsView } from '@/widgets/daily-logs/DailyLogsView';
 import { HaulingInventoryView } from '@/widgets/hauling/HaulingInventoryView';
 import { FoundationInspectionView } from '@/widgets/inspection/FoundationInspectionView';
 import { InspectionPrintModal } from '@/widgets/inspection/InspectionPrintModal';
+import { ManpowerView } from '@/widgets/manpower/ManpowerView';
+import { PayrollPrintModal, type PayrollSheetData } from '@/widgets/manpower/PayrollPrintModal';
 import { OverallVerticalMastStatusPrintModal } from '@/widgets/mast-tower/OverallVerticalMastStatusPrintModal';
 import { VerticalMastActivityPrintModal } from '@/widgets/mast-tower/VerticalMastActivityPrintModal';
 import { VerticalMastActivityView } from '@/widgets/mast-tower/VerticalMastActivityView';
@@ -37,7 +72,7 @@ import { ProjectStatusView } from '@/widgets/project-status/ProjectStatusView';
 import { FoundationActivityReportView } from '@/widgets/report/FoundationActivityReportView';
 import { PrintableReportModal } from '@/widgets/report/PrintableReportModal';
 
-export function App() {
+function AdminWorkspace() {
   const {
     projects,
     activeProjectId,
@@ -50,6 +85,17 @@ export function App() {
     exportProjectJson,
     importProjectJson,
   } = useProjectStore();
+
+  const authUser = useAuthStore((s) => s.user);
+  const offlineCached = useAuthStore((s) => s.offlineCached);
+  const logout = useAuthStore((s) => s.logout);
+  const isSyncing = useCloudSyncStore((s) => s.isSyncing);
+  const conflictProjectId = useCloudSyncStore((s) => s.conflictProjectId);
+  const [clientModalProjectId, setClientModalProjectId] = useState<string | null>(null);
+  const activeRecord = useMemo(
+    () => projects.find((p) => p.id === activeProjectId),
+    [projects, activeProjectId]
+  );
 
   const {
     activeAppTab,
@@ -65,7 +111,12 @@ export function App() {
     dailyLogPrintId,
     setDailyLogPrintId,
     selectedMastTarget,
+    manpowerPaymentMode,
+    payrollPrintTarget,
+    setPayrollPrintTarget,
   } = useUiStore();
+  const showAlert = useFeedbackStore((s) => s.showAlert);
+  const requestConfirm = useFeedbackStore((s) => s.requestConfirm);
 
   const isVerticalMast = project.projectType === 'vertical_mast';
   const updateAvailable = usePwaStore((s) => s.updateAvailable);
@@ -99,11 +150,90 @@ export function App() {
     [dailyLogPrintId, project.dailyLogs]
   );
 
+  const manpowerRoster = useMemo(() => resolveManpowerRoster(project), [project]);
+
+  const activePayrollPrintData = useMemo<PayrollSheetData | null>(() => {
+    if (!payrollPrintTarget) return null;
+    if (payrollPrintTarget.kind === 'civil') {
+      const saved = payrollPrintTarget.snapshotId
+        ? project.civilPayrollHistory?.find(
+            (s) => s.id === payrollPrintTarget.snapshotId
+          )
+        : undefined;
+      if (saved) return { kind: 'civil', snapshot: saved };
+
+      const dates = (project.civilAttendance ?? []).map((a) => a.date);
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const bounds = getPayrollPeriodBounds('overall', todayIso, dates);
+      const preview = computeCivilWorksPayrollPreview(
+        manpowerRoster,
+        project.civilAttendance ?? [],
+        bounds.startDate,
+        bounds.endDate
+      );
+      return {
+        kind: 'civil',
+        snapshot: {
+          id: 'live-overall',
+          periodType: 'overall',
+          startDate: bounds.startDate,
+          endDate: bounds.endDate,
+          title: bounds.label,
+          items: preview.rows.filter((r) => r.daysPresent > 0),
+          totalDaysWorked: preview.totalDaysWorked,
+          totalAmountPhp: preview.totalAmountPhp,
+          status: 'generated',
+          createdAt: new Date().toISOString(),
+        },
+      };
+    }
+
+    const saved = payrollPrintTarget.snapshotId
+      ? project.haulerPayrollHistory?.find(
+          (s) => s.id === payrollPrintTarget.snapshotId
+        )
+      : undefined;
+    if (saved) return { kind: 'hauler', snapshot: saved };
+
+    const dates = [
+      ...project.haulingLogs.map((l) => l.date),
+      ...(project.haulerPayouts ?? []).map((p) => p.date),
+    ];
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const bounds = getPayrollPeriodBounds('overall', todayIso, dates);
+    const preview = computeHaulerPayrollPreview(
+      project.haulingLogs,
+      project.haulerPayouts ?? [],
+      manpowerRoster,
+      bounds.startDate,
+      bounds.endDate,
+      'overall'
+    );
+    return {
+      kind: 'hauler',
+      snapshot: {
+        id: 'live-overall',
+        periodType: 'overall',
+        startDate: bounds.startDate,
+        endDate: bounds.endDate,
+        title: bounds.label,
+        items: preview.rows,
+        totalHauledKg: preview.totalHauledKg,
+        totalCredits: preview.totalCredits,
+        totalEarnedPhp: preview.totalEarnedPhp,
+        totalPayoutPhp: preview.totalSuggestedPayoutPhp,
+        status: 'generated',
+        createdAt: new Date().toISOString(),
+      },
+    };
+  }, [payrollPrintTarget, project, manpowerRoster]);
+
   const anyPrintModalOpen =
     reportOpen ||
     inspectionReportOpen ||
     overallReportOpen ||
-    Boolean(activePrintDailyLog);
+    Boolean(activePrintDailyLog) ||
+    Boolean(activePayrollPrintData);
 
   const handleExportJson = () => {
     const json = exportProjectJson();
@@ -130,7 +260,11 @@ export function App() {
       const text = await file.text();
       importProjectJson(text);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Failed to import JSON.');
+      await showAlert({
+        tone: 'danger',
+        title: 'Import Failed',
+        message: err instanceof Error ? err.message : 'Failed to import JSON.',
+      });
     } finally {
       e.target.value = '';
     }
@@ -217,6 +351,10 @@ export function App() {
                   setDailyLogPrintId(project.dailyLogs[0].id);
                 } else if (activeAppTab === 'inspection') {
                   setInspectionReportOpen(true);
+                } else if (activeAppTab === 'manpower') {
+                  setPayrollPrintTarget({
+                    kind: manpowerPaymentMode === 'hauler' ? 'hauler' : 'civil',
+                  });
                 } else {
                   setReportOpen(true);
                 }
@@ -260,8 +398,15 @@ export function App() {
 
             <button
               type="button"
-              onClick={() => {
-                if (window.confirm('Reset all foundation & vertical mast progress, photos, daily logs, and material inputs?')) {
+              onClick={async () => {
+                const confirmed = await requestConfirm({
+                  tone: 'danger',
+                  title: 'Reset All Project Data?',
+                  message:
+                    'Reset all foundation & vertical mast progress, photos, daily logs, and material inputs?',
+                  confirmLabel: 'Reset All',
+                });
+                if (confirmed) {
                   resetCleanBaseline();
                 }
               }}
@@ -273,6 +418,93 @@ export function App() {
             </button>
             </div>
           )}
+
+          {/* Cloud, R2 Quota, Showcase & Auth Controls */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <R2StorageHeaderPill />
+
+            {!projectBrowserOpen && (
+              <button
+                type="button"
+                onClick={() => setClientModalProjectId(activeProjectId)}
+                title="Configure Client Showcase visibility for active project"
+                aria-label="Client Showcase settings"
+                className={`inline-flex items-center justify-center gap-1 min-h-10 sm:min-h-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md border text-xs font-semibold transition cursor-pointer ${
+                  activeRecord?.clientSettings?.enabled
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Globe className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden xl:inline">
+                  {activeRecord?.clientSettings?.enabled ? 'Client: Live' : 'Client Share'}
+                </span>
+              </button>
+            )}
+
+            <span
+              title={
+                isSyncing
+                  ? 'Syncing changes to Cloudflare D1 & R2...'
+                  : offlineCached
+                    ? 'Offline cached admin session — changes queue locally'
+                    : activeRecord?.syncStatus === 'pending'
+                      ? 'Changes queued for cloud sync'
+                      : activeRecord?.syncStatus === 'conflict'
+                        ? 'Cloud sync conflict needs review'
+                        : 'Synced with Cloudflare D1'
+              }
+              className={`hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-semibold ${
+                isSyncing
+                  ? 'border-sky-200 bg-sky-50 text-sky-700'
+                  : offlineCached || activeRecord?.syncStatus === 'pending'
+                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                    : activeRecord?.syncStatus === 'conflict'
+                      ? 'border-rose-300 bg-rose-50 text-rose-700'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {isSyncing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : offlineCached ? (
+                <CloudOff className="w-3 h-3" />
+              ) : (
+                <Cloud className="w-3 h-3" />
+              )}
+              <span>
+                {isSyncing
+                  ? 'Syncing'
+                  : offlineCached
+                    ? 'Offline'
+                    : activeRecord?.syncStatus === 'pending'
+                      ? 'Queued'
+                      : activeRecord?.syncStatus === 'conflict'
+                        ? 'Conflict'
+                        : 'Cloud OK'}
+              </span>
+            </span>
+
+            <button
+              type="button"
+              onClick={() => navigateTo('/')}
+              title="Open Public Client Showcase Page"
+              className="inline-flex items-center justify-center gap-1 min-h-10 sm:min-h-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition cursor-pointer"
+            >
+              <ExternalLink className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-500" />
+              <span className="hidden lg:inline">Client View</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void logout()}
+              title={`Sign out${authUser ? ` (${authUser.username})` : ''}`}
+              aria-label="Sign out of Admin Workspace"
+              className="inline-flex items-center justify-center gap-1 min-h-10 sm:min-h-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md border border-slate-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-xs font-semibold text-slate-600 hover:text-rose-700 transition cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden xl:inline">Sign Out</span>
+            </button>
+          </div>
         </div>
 
         {/* Navigation Bar (Phase Toggle on all viewports; Text Tabs on Desktop >= md) */}
@@ -411,6 +643,30 @@ export function App() {
 
           <button
             type="button"
+            onClick={() => setActiveAppTab('manpower')}
+            className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+              activeAppTab === 'manpower'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Manpower</span>
+            {manpowerRoster.length > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                  activeAppTab === 'manpower'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                {manpowerRoster.filter((m) => m.active).length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveAppTab('project_details')}
             className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
               activeAppTab === 'project_details'
@@ -425,6 +681,38 @@ export function App() {
           </nav>
         )}
       </header>
+
+      {/* R2 Storage Free Tier Quota Warning (<= 1 GB) / Block (< 100 MB) Banner */}
+      <div className="print:hidden max-w-7xl w-full mx-auto px-3 sm:px-4 pt-2 space-y-2 empty:hidden">
+        <R2StorageAlertBanner />
+
+        {conflictProjectId && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-950 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                <strong>Cloud Sync Conflict:</strong> Another device saved a newer version of this project while you were editing.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void resolveConflictUseCloud()}
+                className="px-2.5 py-1 rounded-md border border-amber-300 bg-white hover:bg-amber-100 font-semibold cursor-pointer"
+              >
+                Use Cloud Copy
+              </button>
+              <button
+                type="button"
+                onClick={() => void resolveConflictOverwriteCloud()}
+                className="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-semibold cursor-pointer"
+              >
+                Keep My Local Copy
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Main Content (hidden while printing modal) */}
       <main className={`flex-1 ${!projectBrowserOpen ? 'pb-20 md:pb-0' : ''} ${anyPrintModalOpen ? 'print:hidden' : ''}`}>
@@ -446,6 +734,8 @@ export function App() {
           <HaulingInventoryView />
         ) : activeAppTab === 'daily_logs' ? (
           <DailyLogsView project={project} foundations={project.foundations} />
+        ) : activeAppTab === 'manpower' ? (
+          <ManpowerView />
         ) : activeAppTab === 'inspection' ? (
           isVerticalMast ? (
             <VerticalMastInspectionView />
@@ -527,8 +817,24 @@ export function App() {
         />
       )}
 
+      {/* Printable Payroll Sheet Modal (triggered from header Report button) */}
+      {activePayrollPrintData && (
+        <PayrollPrintModal
+          project={project}
+          data={activePayrollPrintData}
+          onClose={() => setPayrollPrintTarget(null)}
+        />
+      )}
+
       {/* Vertical Mast Bottom-Up Erection Check Modal */}
       <VerticalMastOrderModal />
+
+      {/* Client Showcase Visibility & Sharing Modal */}
+      <ClientVisibilityModal
+        projectId={clientModalProjectId}
+        open={clientModalProjectId !== null}
+        onClose={() => setClientModalProjectId(null)}
+      />
 
       {/* PWA Offline / Update Notification Banner */}
       <PwaStatusBanner hasBottomNav={!projectBrowserOpen} />
@@ -539,7 +845,7 @@ export function App() {
           aria-label="Mobile Bottom Navigation"
           className="md:hidden print:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 shadow-[0_-4px_16px_rgba(15,23,42,0.08)] safe-area-pb"
         >
-          <div className="grid grid-cols-6 h-16">
+          <div className="grid grid-cols-7 h-16">
             <button
               type="button"
               onClick={() => setActiveAppTab('project_status')}
@@ -646,6 +952,24 @@ export function App() {
 
             <button
               type="button"
+              onClick={() => setActiveAppTab('manpower')}
+              title="Manpower & Payroll"
+              aria-label="Manpower & Payroll"
+              aria-current={activeAppTab === 'manpower' ? 'page' : undefined}
+              className={`relative flex items-center justify-center transition cursor-pointer ${
+                activeAppTab === 'manpower'
+                  ? 'text-sky-600 bg-sky-50/70'
+                  : 'text-slate-500 hover:bg-slate-50 active:bg-slate-100'
+              }`}
+            >
+              {activeAppTab === 'manpower' && (
+                <span className="absolute top-0 inset-x-3 h-0.5 rounded-b-full bg-sky-600" />
+              )}
+              <Users className="w-6 h-6" />
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveAppTab('project_details')}
               title="Project Details"
               aria-label="Project Details"
@@ -665,6 +989,51 @@ export function App() {
         </nav>
       )}
     </div>
+  );
+}
+
+export function App() {
+  const route = useAppRoute();
+  const authStatus = useAuthStore((s) => s.status);
+  const checkSession = useAuthStore((s) => s.checkSession);
+  const projectBrowserOpen = useUiStore((s) => s.projectBrowserOpen);
+
+  useEffect(() => {
+    if (route.kind !== 'admin') return;
+    initializeCloudSync();
+    if (authStatus === 'unknown') {
+      void checkSession();
+    } else if (authStatus === 'authenticated') {
+      void hydrateCloudWorkspace();
+    }
+  }, [route.kind, authStatus, checkSession]);
+
+  const showAdminBottomNav =
+    route.kind === 'admin' && authStatus === 'authenticated' && !projectBrowserOpen;
+
+  return (
+    <>
+      {route.kind === 'client' ? (
+        <ClientShowcaseView slug={route.slug} />
+      ) : authStatus === 'unknown' ? (
+        <div className="min-h-dvh bg-slate-50 flex items-center justify-center p-6">
+          <div className="rounded-2xl border border-slate-200 bg-white px-8 py-6 text-center space-y-2.5 shadow-xs">
+            <div className="w-8 h-8 rounded-full border-2 border-sky-600 border-t-transparent animate-spin mx-auto" />
+            <div className="text-xs font-semibold text-slate-600">
+              Verifying administrator session...
+            </div>
+          </div>
+        </div>
+      ) : authStatus === 'unauthenticated' ? (
+        <AdminLoginView />
+      ) : (
+        <AdminWorkspace />
+      )}
+
+      {/* App-Wide Custom Alert / Confirm Modal & Status Toasts */}
+      <AppDialogModal />
+      <ToastBanner hasBottomNav={showAdminBottomNav} />
+    </>
   );
 }
 

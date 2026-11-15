@@ -1,0 +1,549 @@
+import { formatDateWithWeekday } from './calculations';
+import {
+  HAULING_CREDIT_BLOCK_KG,
+  HAULING_RATE_PER_BLOCK_PHP,
+  computeHaulerCreditLedgers,
+} from './haulingInventory';
+import type {
+  CivilWorksAttendanceRecord,
+  CivilWorksPayrollLineItem,
+  CivilWorksPayrollSnapshot,
+  HaulerPayoutRecord,
+  HaulerPayrollLineItem,
+  HaulerPayrollSnapshot,
+  HaulingLogEntry,
+  ManpowerMember,
+  MastProjectState,
+  PayrollPeriodType,
+  WorkerRole,
+} from './types';
+
+export const MANPOWER_POSITIONS: WorkerRole[] = [
+  'Site Engineer',
+  'Foreman',
+  'Safety Officer',
+  'First Aider',
+  'Skilled',
+  'Mason',
+  'Steelman',
+  'Carpenter',
+  'Laborer',
+  'Horse Hauler',
+  'Operator',
+];
+
+export const CIVIL_WORK_POSITIONS: WorkerRole[] = MANPOWER_POSITIONS.filter(
+  (role) => role !== 'Horse Hauler'
+);
+
+function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function normalizeNameKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+function parseIsoDateUtc(dateStr: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return d;
+}
+
+function formatUtcIsoDate(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function addDaysIso(dateStr: string, deltaDays: number): string {
+  const parsed = parseIsoDateUtc(dateStr);
+  if (!parsed) return dateStr;
+  parsed.setUTCDate(parsed.getUTCDate() + deltaDays);
+  return formatUtcIsoDate(parsed);
+}
+
+/**
+ * Computes inclusive [startDate, endDate] YYYY-MM-DD bounds for Daily, Weekly
+ * (Monday–Sunday), Monthly (1st–last day), or Overall payroll periods.
+ */
+export function getPayrollPeriodBounds(
+  periodType: PayrollPeriodType,
+  anchorDate: string,
+  availableDates: string[] = []
+): { startDate: string; endDate: string; label: string } {
+  const safeAnchor = parseIsoDateUtc(anchorDate)
+    ? anchorDate
+    : new Date().toISOString().slice(0, 10);
+
+  if (periodType === 'daily') {
+    return {
+      startDate: safeAnchor,
+      endDate: safeAnchor,
+      label: `Daily — ${formatDateWithWeekday(safeAnchor)}`,
+    };
+  }
+
+  if (periodType === 'weekly') {
+    const parsed = parseIsoDateUtc(safeAnchor)!;
+    const utcDay = parsed.getUTCDay(); // 0=Sun..6=Sat
+    const diffToMon = utcDay === 0 ? -6 : 1 - utcDay;
+    const startDate = addDaysIso(safeAnchor, diffToMon);
+    const endDate = addDaysIso(startDate, 6);
+    return {
+      startDate,
+      endDate,
+      label: `Weekly (${startDate} to ${endDate})`,
+    };
+  }
+
+  if (periodType === 'monthly') {
+    const parsed = parseIsoDateUtc(safeAnchor)!;
+    const year = parsed.getUTCFullYear();
+    const monthIdx = parsed.getUTCMonth();
+    const startDate = formatUtcIsoDate(new Date(Date.UTC(year, monthIdx, 1)));
+    const endDate = formatUtcIsoDate(new Date(Date.UTC(year, monthIdx + 1, 0)));
+    const monthName = new Date(Date.UTC(year, monthIdx, 1)).toLocaleDateString(
+      'en-US',
+      { month: 'long', year: 'numeric', timeZone: 'UTC' }
+    );
+    return {
+      startDate,
+      endDate,
+      label: `Monthly — ${monthName}`,
+    };
+  }
+
+  const validDates = availableDates
+    .filter((d) => Boolean(parseIsoDateUtc(d)))
+    .sort((a, b) => a.localeCompare(b));
+  const startDate = validDates[0] ?? safeAnchor;
+  const endDate = validDates[validDates.length - 1] ?? safeAnchor;
+  return {
+    startDate,
+    endDate,
+    label:
+      validDates.length > 0
+        ? `Overall (${startDate} to ${endDate})`
+        : `Overall (as of ${safeAnchor})`,
+  };
+}
+
+/**
+ * Resolves the full manpower roster for Civil Works workers and Individual
+ * Haulers. When `project.manpowerRoster` has not been initialized yet (legacy
+ * saved projects), it seeds individual hauler entries from `haulerRoster` and
+ * `haulingLogs`. Once `manpowerRoster` exists, edits and deletions stay exact.
+ */
+export function resolveManpowerRoster(
+  project: Pick<MastProjectState, 'manpowerRoster' | 'haulerRoster' | 'haulingLogs'>
+): ManpowerMember[] {
+  const hasExplicitRoster = Array.isArray(project.manpowerRoster);
+  const base = (project.manpowerRoster ?? []).map((m) => ({ ...m }));
+  if (hasExplicitRoster) {
+    return base;
+  }
+
+  const seenHaulers = new Set(
+    base
+      .filter((m) => m.category === 'hauler')
+      .map((m) => normalizeNameKey(m.name))
+  );
+
+  const legacyNames: string[] = [];
+  for (const name of project.haulerRoster ?? []) {
+    const t = name.trim();
+    if (t) legacyNames.push(t);
+  }
+  for (const log of project.haulingLogs ?? []) {
+    const t = log.haulerName.trim();
+    if (t) legacyNames.push(t);
+  }
+
+  for (const rawName of legacyNames) {
+    const key = normalizeNameKey(rawName);
+    if (!key || seenHaulers.has(key)) continue;
+    seenHaulers.add(key);
+    base.push({
+      id: `hauler-legacy:${key}`,
+      name: rawName,
+      category: 'hauler',
+      position: 'Horse Hauler',
+      dailyRatePhp: 0,
+      active: true,
+    });
+  }
+
+  return base;
+}
+
+export function resolveKnownHaulerNames(
+  project: Pick<MastProjectState, 'manpowerRoster' | 'haulerRoster' | 'haulingLogs'>
+): string[] {
+  const map = new Map<string, string>();
+  for (const member of resolveManpowerRoster(project)) {
+    if (member.category !== 'hauler' || !member.active) continue;
+    const t = member.name.trim();
+    if (t && !map.has(normalizeNameKey(t))) {
+      map.set(normalizeNameKey(t), t);
+    }
+  }
+  for (const name of project.haulerRoster ?? []) {
+    const t = name.trim();
+    if (t && !Array.isArray(project.manpowerRoster) && !map.has(normalizeNameKey(t))) {
+      map.set(normalizeNameKey(t), t);
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+}
+
+export interface CivilWorksPayrollPreview {
+  startDate: string;
+  endDate: string;
+  rows: CivilWorksPayrollLineItem[];
+  totalWorkersWithAttendance: number;
+  totalDaysWorked: number;
+  totalAmountPhp: number;
+}
+
+export function computeCivilWorksPayrollPreview(
+  roster: ManpowerMember[],
+  attendanceRecords: CivilWorksAttendanceRecord[] = [],
+  startDate: string,
+  endDate: string
+): CivilWorksPayrollPreview {
+  const civilMembers = roster.filter((m) => m.category === 'civil_works');
+  const recordsInRange = attendanceRecords
+    .filter((rec) => rec.date >= startDate && rec.date <= endDate)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const datesByMember = new Map<string, Set<string>>();
+  for (const rec of recordsInRange) {
+    for (const memberId of rec.presentMemberIds) {
+      if (!datesByMember.has(memberId)) {
+        datesByMember.set(memberId, new Set());
+      }
+      datesByMember.get(memberId)!.add(rec.date);
+    }
+  }
+
+  const rows: CivilWorksPayrollLineItem[] = civilMembers
+    .filter((m) => m.active || (datesByMember.get(m.id)?.size ?? 0) > 0)
+    .map((m) => {
+      const datesPresent = Array.from(datesByMember.get(m.id) ?? []).sort((a, b) =>
+        a.localeCompare(b)
+      );
+      const daysPresent = datesPresent.length;
+      const dailyRatePhp = Math.max(0, Number(m.dailyRatePhp) || 0);
+      return {
+        memberId: m.id,
+        name: m.name,
+        position: m.position,
+        dailyRatePhp,
+        daysPresent,
+        datesPresent,
+        grossPayPhp: round2(daysPresent * dailyRatePhp),
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const totalWorkersWithAttendance = rows.filter((r) => r.daysPresent > 0).length;
+  const totalDaysWorked = rows.reduce((sum, r) => sum + r.daysPresent, 0);
+  const totalAmountPhp = round2(rows.reduce((sum, r) => sum + r.grossPayPhp, 0));
+
+  return {
+    startDate,
+    endDate,
+    rows,
+    totalWorkersWithAttendance,
+    totalDaysWorked,
+    totalAmountPhp,
+  };
+}
+
+export interface HaulerPayrollPreviewRow extends HaulerPayrollLineItem {
+  overallEarnedPhp: number;
+  overallPaidPhp: number;
+  overallBalanceDuePhp: number;
+  currentOverallExcessKg: number;
+}
+
+export interface HaulerPayrollPreview {
+  startDate: string;
+  endDate: string;
+  rows: HaulerPayrollPreviewRow[];
+  totalHauledKg: number;
+  totalCredits: number;
+  totalEarnedPhp: number;
+  totalSuggestedPayoutPhp: number;
+  totalOverallBalanceDuePhp: number;
+}
+
+/**
+ * Computes Individual Hauler payroll for `[startDate, endDate]` while preserving
+ * strict chronological 120 kg carried-excess continuity from project start.
+ */
+export function computeHaulerPayrollPreview(
+  haulingLogs: HaulingLogEntry[],
+  payouts: HaulerPayoutRecord[] = [],
+  roster: ManpowerMember[] = [],
+  startDate: string,
+  endDate: string,
+  periodType: PayrollPeriodType = 'weekly'
+): HaulerPayrollPreview {
+  const overall = computeHaulerCreditLedgers(haulingLogs, payouts);
+  const overallLedgerByKey = new Map(
+    overall.ledgers.map((l) => [normalizeNameKey(l.haulerName), l])
+  );
+
+  const memberByKey = new Map<string, ManpowerMember>();
+  for (const m of roster) {
+    if (m.category === 'hauler') {
+      memberByKey.set(normalizeNameKey(m.name), m);
+    }
+  }
+
+  // Filter trips up to endDate for exact chronological prior excess entering [startDate, endDate]
+  const tripsUpToEnd = overall.tripsChronological.filter((t) => t.date <= endDate);
+
+  const periodStats = new Map<
+    string,
+    {
+      displayName: string;
+      dates: Set<string>;
+      tripsCompleted: number;
+      hauledKg: number;
+      priorExcessKg: number;
+      hasSetPriorExcess: boolean;
+      lastExcessBeforeRangeKg: number;
+      creditsEarned: number;
+      endingExcessKg: number;
+      grossEarnedPhp: number;
+    }
+  >();
+
+  for (const trip of tripsUpToEnd) {
+    const key = normalizeNameKey(trip.haulerName);
+    if (!periodStats.has(key)) {
+      periodStats.set(key, {
+        displayName: trip.haulerName,
+        dates: new Set(),
+        tripsCompleted: 0,
+        hauledKg: 0,
+        priorExcessKg: 0,
+        hasSetPriorExcess: false,
+        lastExcessBeforeRangeKg: 0,
+        creditsEarned: 0,
+        endingExcessKg: 0,
+        grossEarnedPhp: 0,
+      });
+    }
+    const st = periodStats.get(key)!;
+    if (trip.date < startDate) {
+      st.lastExcessBeforeRangeKg = trip.excessAfterKg;
+      st.endingExcessKg = trip.excessAfterKg;
+    } else {
+      if (!st.hasSetPriorExcess) {
+        st.priorExcessKg = trip.priorExcessKg;
+        st.hasSetPriorExcess = true;
+      }
+      st.dates.add(trip.date);
+      st.tripsCompleted += 1;
+      st.hauledKg = round2(st.hauledKg + trip.totalKg);
+      st.creditsEarned += trip.creditsEarned;
+      st.endingExcessKg = trip.excessAfterKg;
+      st.grossEarnedPhp += trip.payoutEarnedPhp;
+    }
+  }
+
+  const paidInRangeByKey = new Map<string, number>();
+  for (const p of payouts) {
+    if (p.date < startDate || p.date > endDate) continue;
+    const key = normalizeNameKey(p.haulerName);
+    if (!key) continue;
+    paidInRangeByKey.set(
+      key,
+      round2((paidInRangeByKey.get(key) ?? 0) + (Number(p.amountPhp) || 0))
+    );
+  }
+
+  const allHaulerKeys = new Set<string>([
+    ...periodStats.keys(),
+    ...overallLedgerByKey.keys(),
+    ...Array.from(memberByKey.entries())
+      .filter(([, m]) => m.active)
+      .map(([k]) => k),
+  ]);
+
+  const rows: HaulerPayrollPreviewRow[] = Array.from(allHaulerKeys)
+    .map((key) => {
+      const member = memberByKey.get(key);
+      const pStat = periodStats.get(key);
+      const overallRow = overallLedgerByKey.get(key);
+      const haulerName =
+        member?.name ?? pStat?.displayName ?? overallRow?.haulerName ?? key;
+      const tripsCompleted = pStat?.tripsCompleted ?? 0;
+      const priorExcessKg = pStat
+        ? pStat.hasSetPriorExcess
+          ? pStat.priorExcessKg
+          : pStat.lastExcessBeforeRangeKg
+        : 0;
+      const endingExcessKg = pStat?.endingExcessKg ?? 0;
+      const hauledKg = pStat?.hauledKg ?? 0;
+      const creditsEarned = pStat?.creditsEarned ?? 0;
+      const grossEarnedPhp = round2(
+        creditsEarned * HAULING_RATE_PER_BLOCK_PHP
+      );
+      const alreadyPaidInRangePhp = paidInRangeByKey.get(key) ?? 0;
+      const overallEarnedPhp = overallRow?.grossEarnedPhp ?? 0;
+      const overallPaidPhp = overallRow?.totalPaidPhp ?? 0;
+      const overallBalanceDuePhp = overallRow?.balanceDuePhp ?? 0;
+
+      const suggestedPayoutPhp =
+        periodType === 'overall'
+          ? Math.max(0, overallBalanceDuePhp)
+          : Math.max(
+              0,
+              Math.min(
+                round2(grossEarnedPhp - alreadyPaidInRangePhp),
+                overallBalanceDuePhp
+              )
+            );
+
+      return {
+        haulerName,
+        memberId: member?.id,
+        activeDays: pStat?.dates.size ?? 0,
+        tripsCompleted,
+        hauledKg,
+        priorExcessKg,
+        creditsEarned,
+        endingExcessKg,
+        grossEarnedPhp,
+        alreadyPaidInRangePhp,
+        payoutReleasedPhp: round2(suggestedPayoutPhp),
+        netBalanceAfterPhp: round2(
+          Math.max(0, overallBalanceDuePhp - suggestedPayoutPhp)
+        ),
+        overallEarnedPhp,
+        overallPaidPhp,
+        overallBalanceDuePhp,
+        currentOverallExcessKg: overallRow?.currentExcessKg ?? endingExcessKg,
+      };
+    })
+    .filter(
+      (r) =>
+        r.tripsCompleted > 0 ||
+        r.overallBalanceDuePhp > 0 ||
+        r.overallEarnedPhp > 0 ||
+        memberByKey.get(normalizeNameKey(r.haulerName))?.active
+    )
+    .sort((a, b) => a.haulerName.localeCompare(b.haulerName));
+
+  return {
+    startDate,
+    endDate,
+    rows,
+    totalHauledKg: round2(rows.reduce((s, r) => s + r.hauledKg, 0)),
+    totalCredits: rows.reduce((s, r) => s + r.creditsEarned, 0),
+    totalEarnedPhp: round2(rows.reduce((s, r) => s + r.grossEarnedPhp, 0)),
+    totalSuggestedPayoutPhp: round2(
+      rows.reduce((s, r) => s + r.payoutReleasedPhp, 0)
+    ),
+    totalOverallBalanceDuePhp: round2(
+      rows.reduce((s, r) => s + r.overallBalanceDuePhp, 0)
+    ),
+  };
+}
+
+export function formatCivilPayrollPlainText(
+  snapshot: Pick<
+    CivilWorksPayrollSnapshot,
+    'title' | 'periodType' | 'startDate' | 'endDate' | 'status' | 'paidDate' | 'items' | 'totalDaysWorked' | 'totalAmountPhp' | 'notes'
+  >,
+  project: Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy'>
+): string {
+  const lines: string[] = [
+    `CIVIL WORKS PAYROLL — ${snapshot.title}`,
+    `Project: ${project.projectName}`,
+    `Location: ${project.location}`,
+    `Period: ${snapshot.startDate}${snapshot.startDate !== snapshot.endDate ? ` to ${snapshot.endDate}` : ''} (${snapshot.periodType.toUpperCase()})`,
+    `Status: ${snapshot.status === 'paid' ? `PAID${snapshot.paidDate ? ` (${snapshot.paidDate})` : ''}` : 'FOR APPROVAL / PENDING'}`,
+    `Prepared By: ${project.preparedBy}`,
+    '',
+    'WORKERS & PAY:',
+  ];
+
+  if (snapshot.items.length === 0) {
+    lines.push('- No worker attendance recorded in this period.');
+  } else {
+    for (const item of snapshot.items) {
+      lines.push(
+        `- ${item.name} (${item.position}): ${item.daysPresent} day${item.daysPresent === 1 ? '' : 's'} × PHP ${item.dailyRatePhp.toLocaleString()} = PHP ${item.grossPayPhp.toLocaleString()}`
+      );
+    }
+  }
+
+  lines.push(
+    '',
+    `TOTAL MAN-DAYS: ${snapshot.totalDaysWorked}`,
+    `TOTAL PAYROLL: PHP ${snapshot.totalAmountPhp.toLocaleString()}`
+  );
+  if (snapshot.notes?.trim()) {
+    lines.push(`Notes: ${snapshot.notes.trim()}`);
+  }
+  return lines.join('\n');
+}
+
+export function formatHaulerPayrollPlainText(
+  snapshot: Pick<
+    HaulerPayrollSnapshot,
+    'title' | 'periodType' | 'startDate' | 'endDate' | 'status' | 'paidDate' | 'items' | 'totalHauledKg' | 'totalCredits' | 'totalEarnedPhp' | 'totalPayoutPhp' | 'notes'
+  >,
+  project: Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy'>
+): string {
+  const lines: string[] = [
+    `INDIVIDUAL HAULER PAYROLL — ${snapshot.title}`,
+    `Rate: PHP ${HAULING_RATE_PER_BLOCK_PHP.toLocaleString()} per ${HAULING_CREDIT_BLOCK_KG} kg credit (excess carried over)`,
+    `Project: ${project.projectName}`,
+    `Location: ${project.location}`,
+    `Period: ${snapshot.startDate}${snapshot.startDate !== snapshot.endDate ? ` to ${snapshot.endDate}` : ''} (${snapshot.periodType.toUpperCase()})`,
+    `Status: ${snapshot.status === 'paid' ? `PAID${snapshot.paidDate ? ` (${snapshot.paidDate})` : ''}` : 'FOR APPROVAL / PENDING'}`,
+    `Prepared By: ${project.preparedBy}`,
+    '',
+    'INDIVIDUAL HAULERS:',
+  ];
+
+  if (snapshot.items.length === 0) {
+    lines.push('- No hauler trips or payouts in this period.');
+  } else {
+    for (const item of snapshot.items) {
+      lines.push(
+        `- ${item.haulerName}: ${item.tripsCompleted} trip${item.tripsCompleted === 1 ? '' : 's'}, ${item.hauledKg} kg hauled (prior excess ${item.priorExcessKg} kg -> ${item.creditsEarned} credit${item.creditsEarned === 1 ? '' : 's'}, ending excess ${item.endingExcessKg} kg) | Earned: PHP ${item.grossEarnedPhp.toLocaleString()} | Payout: PHP ${item.payoutReleasedPhp.toLocaleString()}`
+      );
+    }
+  }
+
+  lines.push(
+    '',
+    `TOTAL HAULED: ${snapshot.totalHauledKg} kg (${snapshot.totalCredits} credits)`,
+    `TOTAL PERIOD EARNED: PHP ${snapshot.totalEarnedPhp.toLocaleString()}`,
+    `TOTAL PAYOUT AMOUNT: PHP ${snapshot.totalPayoutPhp.toLocaleString()}`
+  );
+  if (snapshot.notes?.trim()) {
+    lines.push(`Notes: ${snapshot.notes.trim()}`);
+  }
+  return lines.join('\n');
+}

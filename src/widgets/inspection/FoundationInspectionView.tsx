@@ -24,7 +24,7 @@ import type {
   FoundationRecord,
   MastProjectState,
 } from '@/entities/project/types';
-import { readAndResizeImageFile } from '@/shared/lib/imageUpload';
+import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
@@ -511,12 +511,18 @@ export function FoundationInspectionView({
                                   onChange={async (e) => {
                                     const file = e.target.files?.[0];
                                     if (!file) return;
-                                    const dataUrl = await readAndResizeImageFile(file);
-                                    handleUploadInspectionPhoto(
-                                      item.key,
-                                      dataUrl,
-                                      file.name
-                                    );
+                                    const uploaded = await uploadOrStageProjectImage({
+                                      file,
+                                      projectId: useProjectStore.getState().activeProjectId,
+                                      category: 'inspection',
+                                    });
+                                    if (uploaded) {
+                                      handleUploadInspectionPhoto(
+                                        item.key,
+                                        uploaded.url,
+                                        uploaded.name
+                                      );
+                                    }
                                     e.target.value = '';
                                   }}
                                 />
@@ -554,12 +560,18 @@ export function FoundationInspectionView({
                               onChange={async (e) => {
                                 const file = e.target.files?.[0];
                                 if (!file) return;
-                                const dataUrl = await readAndResizeImageFile(file);
-                                handleUploadInspectionPhoto(
-                                  item.key,
-                                  dataUrl,
-                                  file.name
-                                );
+                                const uploaded = await uploadOrStageProjectImage({
+                                  file,
+                                  projectId: useProjectStore.getState().activeProjectId,
+                                  category: 'inspection',
+                                });
+                                if (uploaded) {
+                                  handleUploadInspectionPhoto(
+                                    item.key,
+                                    uploaded.url,
+                                    uploaded.name
+                                  );
+                                }
                                 e.target.value = '';
                               }}
                             />

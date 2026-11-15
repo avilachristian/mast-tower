@@ -1,0 +1,35 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "mast-tower-report-generator",
+	"main": "worker/index.ts",
+	"tsconfig": "tsconfig.worker.json",
+	"compatibility_date": "2026-09-01",
+	"assets": {
+		"directory": "./dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/api/*"
+		]
+	},
+	"vars": {
+		"R2_QUOTA_BYTES": "10000000000",
+		"R2_WARN_REMAINING_BYTES": "1000000000",
+		"R2_BLOCK_REMAINING_BYTES": "100000000"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "mast-tower-db",
+			"database_id": "980abdf6-1c2a-4d38-89ba-56943636c911",
+			"migrations_dir": "migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "IMAGES_BUCKET",
+			"bucket_name": "mast-tower-images",
+			"remote": true
+		}
+	]
+}

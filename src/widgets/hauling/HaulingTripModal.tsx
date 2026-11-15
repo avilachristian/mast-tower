@@ -365,7 +365,7 @@ export function HaulingTripModal({
           {knownHaulers.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1">
-                Team:
+                Haulers:
               </span>
               {knownHaulers.map((name) => {
                 const active =

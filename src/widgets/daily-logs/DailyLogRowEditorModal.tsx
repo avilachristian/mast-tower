@@ -17,7 +17,8 @@ import type {
   WorkerAttendanceEntry,
   WorkerRole,
 } from '@/entities/project/types';
-import { readAndResizeImageFile } from '@/shared/lib/imageUpload';
+import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
+import { useProjectStore } from '@/shared/state/projectStore';
 
 export type DailyLogModalTarget =
   | { kind: 'worker'; index: number | null; item: WorkerAttendanceEntry }
@@ -807,19 +808,28 @@ export function DailyLogRowEditorModal({
                           onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (!file) return;
-                            const dataUrl = await readAndResizeImageFile(file, 1100, 0.8);
-                            setDraft((prev) =>
-                              prev && prev.kind === 'documentation'
-                                ? {
-                                    ...prev,
-                                    item: {
-                                      ...prev.item,
-                                      photoDataUrl: dataUrl,
-                                      photoName: file.name,
-                                    },
-                                  }
-                                : prev
-                            );
+                            const projectId = useProjectStore.getState().activeProjectId;
+                            const uploaded = await uploadOrStageProjectImage({
+                              file,
+                              projectId,
+                              category: 'daily_log',
+                              maxDimension: 1100,
+                              quality: 0.8,
+                            });
+                            if (uploaded) {
+                              setDraft((prev) =>
+                                prev && prev.kind === 'documentation'
+                                  ? {
+                                      ...prev,
+                                      item: {
+                                        ...prev.item,
+                                        photoDataUrl: uploaded.url,
+                                        photoName: uploaded.name,
+                                      },
+                                    }
+                                  : prev
+                              );
+                            }
                             e.target.value = '';
                           }}
                         />
@@ -855,19 +865,28 @@ export function DailyLogRowEditorModal({
                       onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
-                        const dataUrl = await readAndResizeImageFile(file, 1100, 0.8);
-                        setDraft((prev) =>
-                          prev && prev.kind === 'documentation'
-                            ? {
-                                ...prev,
-                                item: {
-                                  ...prev.item,
-                                  photoDataUrl: dataUrl,
-                                  photoName: file.name,
-                                },
-                              }
-                            : prev
-                        );
+                        const projectId = useProjectStore.getState().activeProjectId;
+                        const uploaded = await uploadOrStageProjectImage({
+                          file,
+                          projectId,
+                          category: 'daily_log',
+                          maxDimension: 1100,
+                          quality: 0.8,
+                        });
+                        if (uploaded) {
+                          setDraft((prev) =>
+                            prev && prev.kind === 'documentation'
+                              ? {
+                                  ...prev,
+                                  item: {
+                                    ...prev.item,
+                                    photoDataUrl: uploaded.url,
+                                    photoName: uploaded.name,
+                                  },
+                                }
+                              : prev
+                          );
+                        }
                         e.target.value = '';
                       }}
                     />

@@ -1,6 +1,11 @@
-import { useEffect, type ReactNode, type RefObject } from 'react';
-import { Printer, X } from 'lucide-react';
-import { applyPrintPageStyle, triggerReportPrint } from './ReportLetterhead';
+import { useEffect, useState, type ReactNode, type RefObject } from 'react';
+import { AlertCircle, CheckCircle2, Printer, X } from 'lucide-react';
+import { useFeedbackStore } from '@/shared/state/feedbackStore';
+import {
+  applyPrintPageStyle,
+  triggerReportPrint,
+  type ReportPrintResult,
+} from './ReportLetterhead';
 
 const DEFAULT_PREVIEW_WIDTH_PX = 900;
 
@@ -21,6 +26,40 @@ export function usePrintPageSetup(active = true) {
   };
 }
 
+function useReportPrintFeedback(documentTitle: string) {
+  const pushToast = useFeedbackStore((s) => s.pushToast);
+  const showAlert = useFeedbackStore((s) => s.showAlert);
+  const [statusResult, setStatusResult] = useState<ReportPrintResult | null>(null);
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const handlePrint = () => {
+    setIsPrinting(true);
+    setStatusResult(null);
+    triggerReportPrint(documentTitle, (result) => {
+      setIsPrinting(false);
+      setStatusResult(result);
+      if (result.status === 'completed') {
+        pushToast({
+          tone: 'success',
+          title: 'Print Dialog Completed',
+          message: result.message,
+          durationMs: 5500,
+        });
+      } else {
+        void showAlert({
+          tone: 'danger',
+          title: 'Print Failed',
+          message: result.message,
+          detail: result.detail,
+          confirmLabel: 'OK',
+        });
+      }
+    });
+  };
+
+  return { handlePrint, statusResult, isPrinting };
+}
+
 /**
  * Shared report modal action bar exposing native browser Print / Save as PDF.
  */
@@ -30,16 +69,40 @@ export function ReportToolbarActions({
   targetRef?: RefObject<HTMLElement | null>;
   documentTitle: string;
 }) {
+  const { handlePrint, statusResult, isPrinting } =
+    useReportPrintFeedback(documentTitle);
+
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {statusResult && (
+        <span
+          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
+            statusResult.status === 'completed'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          {statusResult.status === 'completed' ? (
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+          ) : (
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          )}
+          <span>
+            {statusResult.status === 'completed'
+              ? 'Print dialog closed'
+              : 'Print failed'}
+          </span>
+        </span>
+      )}
       <button
         type="button"
-        onClick={() => triggerReportPrint(documentTitle)}
-        className="inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-9 px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer shadow-2xs transition"
+        onClick={handlePrint}
+        disabled={isPrinting}
+        className="inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-9 px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-70 text-white text-xs font-semibold cursor-pointer shadow-2xs transition"
         title="Open browser Print / Save as PDF dialog"
       >
         <Printer className="w-3.5 h-3.5 shrink-0" />
-        <span>Print</span>
+        <span>{isPrinting ? 'Opening Print...' : 'Print'}</span>
       </button>
     </div>
   );
@@ -63,17 +126,44 @@ export function PrintModalHeader({
   documentTitle,
   onClose,
 }: PrintModalHeaderProps) {
+  const { handlePrint, statusResult, isPrinting } =
+    useReportPrintFeedback(documentTitle);
+
+  const statusPill = statusResult ? (
+    <span
+      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
+        statusResult.status === 'completed'
+          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          : 'bg-rose-50 border-rose-200 text-rose-800'
+      }`}
+      title={statusResult.message}
+    >
+      {statusResult.status === 'completed' ? (
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+      ) : (
+        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+      )}
+      <span>
+        {statusResult.status === 'completed'
+          ? 'Print dialog closed'
+          : 'Print failed'}
+      </span>
+    </span>
+  ) : null;
+
   const actionButtons = (
     <>
+      {statusPill}
       {extraActions}
       <button
         type="button"
-        onClick={() => triggerReportPrint(documentTitle)}
-        className="inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-9 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-900 text-white hover:bg-slate-800 shadow-2xs transition-colors cursor-pointer"
+        onClick={handlePrint}
+        disabled={isPrinting}
+        className="inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-9 px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-70 shadow-2xs transition-colors cursor-pointer"
         title="Open browser Print / Save as PDF dialog"
       >
         <Printer className="w-3.5 h-3.5 shrink-0" />
-        <span>Print</span>
+        <span>{isPrinting ? 'Opening Print...' : 'Print'}</span>
       </button>
     </>
   );

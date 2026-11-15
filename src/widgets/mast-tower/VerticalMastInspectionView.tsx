@@ -21,7 +21,7 @@ import {
   buildVerticalMastInspectionRows,
   buildVerticalMastOverviewData,
 } from '@/entities/project/verticalMastCalculations';
-import { readAndResizeImageFile } from '@/shared/lib/imageUpload';
+import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
 import { VerticalMastElevation2D } from './VerticalMastElevation2D';
@@ -576,16 +576,23 @@ export function VerticalMastInspectionView() {
                           onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (!file) return;
-                            const dataUrl = await readAndResizeImageFile(file);
-                            updateMastInspectionItem(
-                              selectedMastTarget.kind,
-                              activeId,
-                              item.key,
-                              {
-                                photoDataUrl: dataUrl,
-                                photoName: file.name,
-                              }
-                            );
+                            const uploaded = await uploadOrStageProjectImage({
+                              file,
+                              projectId: useProjectStore.getState().activeProjectId,
+                              category: 'inspection',
+                            });
+                            if (uploaded) {
+                              updateMastInspectionItem(
+                                selectedMastTarget.kind,
+                                activeId,
+                                item.key,
+                                {
+                                  photoDataUrl: uploaded.url,
+                                  photoName: uploaded.name,
+                                }
+                              );
+                            }
+                            e.target.value = '';
                           }}
                         />
                       </label>

@@ -1,12 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  AlertCircle,
-  Banknote,
+  ArrowRight,
   CheckCircle2,
   Package,
   Pencil,
   Plus,
-  Scale,
   Search,
   Trash2,
   Truck,
@@ -23,11 +21,14 @@ import {
   suggestHaulingMaterialCategory,
   type HaulingTripSummary,
 } from '@/entities/project/haulingInventory';
+import { resolveKnownHaulerNames } from '@/entities/project/manpowerPayroll';
 import type { CentralMaterialItem } from '@/entities/project/types';
+import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore, type HaulingTripInput } from '@/shared/state/projectStore';
+import { useUiStore } from '@/shared/state/uiStore';
 import { HaulingTripModal } from './HaulingTripModal';
 
-type SubTab = 'inventory' | 'hauling_log' | 'payouts';
+type SubTab = 'inventory' | 'hauling_log';
 type PhaseFilter = 'active' | 'all';
 
 function formatNum(n: number): string {
@@ -42,9 +43,10 @@ export function HaulingInventoryView() {
   const updateCentralMaterial = useProjectStore((s) => s.updateCentralMaterial);
   const addCentralMaterial = useProjectStore((s) => s.addCentralMaterial);
   const deleteCentralMaterial = useProjectStore((s) => s.deleteCentralMaterial);
-  const addHaulerRosterMember = useProjectStore((s) => s.addHaulerRosterMember);
-  const addHaulerPayout = useProjectStore((s) => s.addHaulerPayout);
-  const deleteHaulerPayout = useProjectStore((s) => s.deleteHaulerPayout);
+  const requestConfirm = useFeedbackStore((s) => s.requestConfirm);
+  const setActiveAppTab = useUiStore((s) => s.setActiveAppTab);
+  const setManpowerSubTab = useUiStore((s) => s.setManpowerSubTab);
+  const setManpowerPaymentMode = useUiStore((s) => s.setManpowerPaymentMode);
 
   const activePhase = project.projectType ?? 'foundation';
 
@@ -65,13 +67,6 @@ export function HaulingInventoryView() {
   const [newMatCategory, setNewMatCategory] = useState<'foundation' | 'vertical_mast' | 'shared'>(
     activePhase
   );
-
-  // Add hauler & payout forms
-  const [newHaulerName, setNewHaulerName] = useState('');
-  const [payoutHauler, setPayoutHauler] = useState('');
-  const [payoutAmount, setPayoutAmount] = useState('');
-  const [payoutDate, setPayoutDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [payoutNotes, setPayoutNotes] = useState('');
 
   const centralMaterials = useMemo(
     () => resolveCentralMaterials(project),
@@ -119,18 +114,10 @@ export function HaulingInventoryView() {
     [project.haulingLogs, project.haulerPayouts, centralMaterials]
   );
 
-  const knownHaulers = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const name of project.haulerRoster ?? []) {
-      const t = name.trim();
-      if (t) map.set(t.toLowerCase(), t);
-    }
-    for (const log of project.haulingLogs) {
-      const t = log.haulerName.trim();
-      if (t && !map.has(t.toLowerCase())) map.set(t.toLowerCase(), t);
-    }
-    return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
-  }, [project.haulerRoster, project.haulingLogs]);
+  const knownHaulers = useMemo(
+    () => resolveKnownHaulerNames(project),
+    [project]
+  );
 
   const filteredTrips = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -190,18 +177,35 @@ export function HaulingInventoryView() {
     setAddMaterialOpen(false);
   };
 
-  const handleRecordPayout = (e: React.FormEvent) => {
-    e.preventDefault();
-    const amt = Math.max(0, Number(payoutAmount) || 0);
-    if (!payoutHauler.trim() || amt <= 0) return;
-    addHaulerPayout({
-      date: payoutDate,
-      haulerName: payoutHauler.trim(),
-      amountPhp: amt,
-      notes: payoutNotes.trim() || undefined,
+  const handleDeleteTrip = async (trip: HaulingTripSummary) => {
+    const ok = await requestConfirm({
+      tone: 'danger',
+      title: 'Delete Hauling Trip?',
+      message: `Delete ${trip.haulerName} — Trip ${trip.tripNumber} (${formatDateWithWeekday(trip.date)})?`,
+      detail: `${formatNum(trip.totalKg)} kg across ${trip.items.length} material item${trip.items.length === 1 ? '' : 's'} will be removed and hauler 120 kg credits/carried excess will recalculate automatically.`,
+      confirmLabel: 'Delete Trip',
     });
-    setPayoutAmount('');
-    setPayoutNotes('');
+    if (ok) {
+      deleteHaulingLogs(trip.items.map((i) => i.id));
+    }
+  };
+
+  const handleDeleteCustomMaterial = async (item: CentralMaterialItem) => {
+    const ok = await requestConfirm({
+      tone: 'danger',
+      title: 'Delete Material Item?',
+      message: `Remove "${item.name}" from Centralized Inventory?`,
+      confirmLabel: 'Delete Item',
+    });
+    if (ok) {
+      deleteCentralMaterial(item.id);
+    }
+  };
+
+  const handleOpenHaulerPayroll = () => {
+    setActiveAppTab('manpower');
+    setManpowerSubTab('payment');
+    setManpowerPaymentMode('hauler');
   };
 
   const handleYardCuMChange = (item: CentralMaterialItem, cuMStr: string) => {
@@ -229,6 +233,15 @@ export function HaulingInventoryView() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={handleOpenHaulerPayroll}
+            className="inline-flex items-center justify-center gap-1.5 min-h-10 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs transition cursor-pointer"
+          >
+            <Users className="w-4 h-4 text-sky-600" />
+            <span>Hauler Payroll</span>
+            <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+          <button
+            type="button"
             onClick={handleOpenNewTrip}
             className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 min-h-10 px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
           >
@@ -254,7 +267,7 @@ export function HaulingInventoryView() {
 
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 shadow-2xs">
           <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-            Team Credits Earned
+            Hauler Credits Earned
           </div>
           <div className="text-lg font-extrabold text-emerald-900 mt-0.5">
             ₱{totalEarnedPhp.toLocaleString()}
@@ -291,7 +304,7 @@ export function HaulingInventoryView() {
 
       {/* Sub-Navigation + Search/Filter Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 bg-white border border-slate-200 rounded-xl p-2 shadow-2xs">
-        <div className="grid grid-cols-3 sm:inline-flex rounded-lg bg-slate-100 p-1 gap-1">
+        <div className="grid grid-cols-2 sm:inline-flex rounded-lg bg-slate-100 p-1 gap-1">
           <button
             type="button"
             onClick={() => setSubTab('inventory')}
@@ -316,19 +329,6 @@ export function HaulingInventoryView() {
           >
             <Truck className="w-3.5 h-3.5" />
             <span>Hauling ({tripsNewestFirst.length})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setSubTab('payouts')}
-            className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
-              subTab === 'payouts'
-                ? 'bg-white text-sky-700 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Team ({ledgers.length})</span>
           </button>
         </div>
 
@@ -360,22 +360,20 @@ export function HaulingInventoryView() {
             </div>
           )}
 
-          {subTab !== 'payouts' && (
-            <div className="relative flex-1 sm:w-56">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={
-                  subTab === 'inventory'
-                    ? 'Filter materials...'
-                    : 'Search hauler, date, item...'
-                }
-                className="w-full min-h-9 rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:bg-white focus:border-sky-500 focus:outline-none"
-              />
-            </div>
-          )}
+          <div className="relative flex-1 sm:w-56">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={
+                subTab === 'inventory'
+                  ? 'Filter materials...'
+                  : 'Search hauler, date, item...'
+              }
+              className="w-full min-h-9 rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:bg-white focus:border-sky-500 focus:outline-none"
+            />
+          </div>
         </div>
       </div>
 
@@ -526,7 +524,7 @@ export function HaulingInventoryView() {
                       {isCustom && (
                         <button
                           type="button"
-                          onClick={() => deleteCentralMaterial(item.id)}
+                          onClick={() => void handleDeleteCustomMaterial(item)}
                           aria-label={`Delete ${item.name}`}
                           className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
                         >
@@ -803,7 +801,7 @@ export function HaulingInventoryView() {
                         {isCustom && (
                           <button
                             type="button"
-                            onClick={() => deleteCentralMaterial(item.id)}
+                            onClick={() => void handleDeleteCustomMaterial(item)}
                             aria-label={`Delete ${item.name}`}
                             className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
                           >
@@ -876,15 +874,7 @@ export function HaulingInventoryView() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Delete ${trip.haulerName} Trip ${trip.tripNumber} (${trip.date})?`
-                              )
-                            ) {
-                              deleteHaulingLogs(trip.items.map((i) => i.id));
-                            }
-                          }}
+                          onClick={() => void handleDeleteTrip(trip)}
                           aria-label={`Delete ${trip.haulerName} Trip ${trip.tripNumber}`}
                           className="h-9 w-9 inline-flex items-center justify-center rounded-lg border border-rose-200 text-rose-500 hover:bg-rose-50 cursor-pointer"
                         >
@@ -1033,15 +1023,7 @@ export function HaulingInventoryView() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `Delete ${trip.haulerName} Trip ${trip.tripNumber} (${trip.date})?`
-                                  )
-                                ) {
-                                  deleteHaulingLogs(trip.items.map((i) => i.id));
-                                }
-                              }}
+                              onClick={() => void handleDeleteTrip(trip)}
                               aria-label={`Delete ${trip.haulerName} Trip ${trip.tripNumber}`}
                               className="p-1.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
                             >
@@ -1055,296 +1037,6 @@ export function HaulingInventoryView() {
                 </table>
               </div>
             </>
-          )}
-        </div>
-      )}
-
-      {/* ================= SUB-TAB 3: HAULER TEAM & PAYOUT LEDGER ================= */}
-      {subTab === 'payouts' && (
-        <div className="space-y-4">
-          {/* Quick Roster Add & Record Payout */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!newHaulerName.trim()) return;
-                addHaulerRosterMember(newHaulerName.trim());
-                setNewHaulerName('');
-              }}
-              className="rounded-xl border border-slate-200 bg-white p-3.5 flex items-end gap-2 shadow-2xs"
-            >
-              <div className="flex-1">
-                <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
-                  Add Contracted Hauler to Roster
-                </label>
-                <input
-                  type="text"
-                  value={newHaulerName}
-                  onChange={(e) => setNewHaulerName(e.target.value)}
-                  placeholder="Hauler full name"
-                  className="w-full min-h-9 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-900 focus:border-sky-500 focus:outline-none"
-                />
-              </div>
-              <button
-                type="submit"
-                className="min-h-9 px-3.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer"
-              >
-                Add Hauler
-              </button>
-            </form>
-
-            <form
-              onSubmit={handleRecordPayout}
-              className="rounded-xl border border-slate-200 bg-white p-3.5 grid grid-cols-2 sm:grid-cols-4 gap-2 items-end shadow-2xs"
-            >
-              <div className="col-span-2 sm:col-span-1">
-                <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
-                  Record Payout To
-                </label>
-                <select
-                  value={payoutHauler}
-                  onChange={(e) => setPayoutHauler(e.target.value)}
-                  required
-                  className="w-full min-h-9 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-900"
-                >
-                  <option value="">Select hauler...</option>
-                  {knownHaulers.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
-                  Amount (₱)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  step="any"
-                  value={payoutAmount}
-                  onChange={(e) => setPayoutAmount(e.target.value)}
-                  placeholder="1100"
-                  required
-                  className="w-full min-h-9 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-900"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={payoutDate}
-                  onChange={(e) => setPayoutDate(e.target.value)}
-                  required
-                  className="w-full min-h-9 rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-900"
-                />
-              </div>
-              <button
-                type="submit"
-                className="min-h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1"
-              >
-                <Banknote className="w-3.5 h-3.5" />
-                <span>Pay</span>
-              </button>
-            </form>
-          </div>
-
-          {ledgers.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-xs text-slate-500">
-              <AlertCircle className="w-6 h-6 text-slate-300 mx-auto mb-1.5" />
-              Log hauling trips to see per-hauler 120 kg credits, carried excess, and balances due.
-            </div>
-          ) : (
-            <>
-              {/* Mobile Cards (Hauler Ledgers) */}
-              <div className="md:hidden space-y-2.5">
-                {ledgers.map((row) => {
-                  const pct = Math.min(
-                    100,
-                    Math.round((row.currentExcessKg / HAULING_CREDIT_BLOCK_KG) * 100)
-                  );
-                  return (
-                    <div
-                      key={row.haulerName}
-                      className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5 shadow-2xs"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-bold text-slate-900">
-                            {row.haulerName}
-                          </div>
-                          <div className="text-[11px] text-slate-500">
-                            {row.tripsCompleted} trip{row.tripsCompleted === 1 ? '' : 's'} ·{' '}
-                            {row.activeDays} day{row.activeDays === 1 ? '' : 's'} ·{' '}
-                            {formatNum(row.totalHauledKg)} kg total
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-sm font-extrabold text-emerald-700">
-                            ₱{row.grossEarnedPhp.toLocaleString()}
-                          </div>
-                          <div className="text-[10px] font-semibold text-slate-500">
-                            Due: ₱{row.balanceDuePhp.toLocaleString()}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Excess Progress toward next 120 kg credit */}
-                      <div className="rounded-lg bg-amber-50/70 border border-amber-200 p-2 space-y-1">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <span className="font-bold text-amber-900 flex items-center gap-1">
-                            <Scale className="w-3.5 h-3.5 text-amber-600" />
-                            Excess: {formatNum(row.currentExcessKg)} / 120 kg
-                          </span>
-                          <span className="text-amber-700 font-semibold">
-                            {formatNum(row.kgToNextCredit)} kg to next ₱1,100
-                          </span>
-                        </div>
-                        <div className="h-2 rounded-full bg-amber-200/70 overflow-hidden">
-                          <div
-                            className="h-full bg-amber-500 rounded-full transition-all"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-1">
-                        {row.materialTotals.map((m) => (
-                          <span
-                            key={m.materialId}
-                            className="px-2 py-0.5 rounded bg-slate-100 text-[10px] font-medium text-slate-700"
-                          >
-                            {m.name}: {formatNum(m.qty)} {m.unit} ({formatNum(m.kg)} kg)
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Desktop Table (Hauler Ledgers) */}
-              <div className="hidden md:block rounded-xl border border-slate-200 bg-white shadow-2xs overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-[11px] text-slate-600">
-                    <tr>
-                      <th className="px-3 py-2.5 font-bold">Hauler Name</th>
-                      <th className="px-2 py-2.5 font-bold text-center w-16">Days</th>
-                      <th className="px-2 py-2.5 font-bold text-center w-16">Trips</th>
-                      <th className="px-2 py-2.5 font-bold text-right w-28">Total kg</th>
-                      <th className="px-2 py-2.5 font-bold text-center w-28">
-                        120kg Credits
-                      </th>
-                      <th className="px-3 py-2.5 font-bold w-48">Excess Toward Next ₱1,100</th>
-                      <th className="px-2 py-2.5 font-bold text-right w-28">Earned (₱)</th>
-                      <th className="px-2 py-2.5 font-bold text-right w-24">Paid (₱)</th>
-                      <th className="px-3 py-2.5 font-bold text-right w-28">Balance Due</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {ledgers.map((row) => {
-                      const pct = Math.min(
-                        100,
-                        Math.round((row.currentExcessKg / HAULING_CREDIT_BLOCK_KG) * 100)
-                      );
-                      return (
-                        <tr key={row.haulerName} className="hover:bg-slate-50/70">
-                          <td className="px-3 py-2.5">
-                            <div className="font-bold text-slate-900">{row.haulerName}</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">
-                              {row.materialTotals
-                                .map((m) => `${m.name}: ${formatNum(m.qty)} ${m.unit}`)
-                                .join(' · ')}
-                            </div>
-                          </td>
-                          <td className="px-2 py-2.5 text-center font-semibold text-slate-700">
-                            {row.activeDays}
-                          </td>
-                          <td className="px-2 py-2.5 text-center font-semibold text-slate-700">
-                            {row.tripsCompleted}
-                          </td>
-                          <td className="px-2 py-2.5 text-right font-bold text-slate-900">
-                            {formatNum(row.totalHauledKg)} kg
-                          </td>
-                          <td className="px-2 py-2.5 text-center">
-                            <span className="inline-block px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold">
-                              {row.totalCredits}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <div className="flex items-center justify-between text-[10px] mb-1">
-                              <span className="font-bold text-amber-800">
-                                {formatNum(row.currentExcessKg)} / 120 kg
-                              </span>
-                              <span className="text-slate-500">
-                                {formatNum(row.kgToNextCredit)} left
-                              </span>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-amber-100 overflow-hidden">
-                              <div
-                                className="h-full bg-amber-500 rounded-full"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          </td>
-                          <td className="px-2 py-2.5 text-right font-bold text-emerald-800">
-                            ₱{row.grossEarnedPhp.toLocaleString()}
-                          </td>
-                          <td className="px-2 py-2.5 text-right text-slate-600">
-                            ₱{row.totalPaidPhp.toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-extrabold text-slate-900">
-                            ₱{row.balanceDuePhp.toLocaleString()}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-
-          {/* Recorded Payouts History */}
-          {(project.haulerPayouts ?? []).length > 0 && (
-            <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2 shadow-2xs">
-              <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Payout History
-              </div>
-              <div className="divide-y divide-slate-100">
-                {(project.haulerPayouts ?? []).map((p) => (
-                  <div
-                    key={p.id}
-                    className="py-1.5 flex items-center justify-between gap-2 text-xs"
-                  >
-                    <div>
-                      <span className="font-bold text-slate-900">{p.haulerName}</span>
-                      <span className="text-slate-400 mx-1.5">·</span>
-                      <span className="text-slate-500">{formatDateWithWeekday(p.date)}</span>
-                      {p.notes && (
-                        <span className="text-slate-400 ml-2 text-[11px]">({p.notes})</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-emerald-700">
-                        ₱{p.amountPhp.toLocaleString()}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => deleteHaulerPayout(p.id)}
-                        aria-label="Delete payout record"
-                        className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           )}
         </div>
       )}

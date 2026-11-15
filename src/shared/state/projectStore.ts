@@ -8,6 +8,7 @@ import {
   resolveCentralMaterials,
   syncDailyLogMaterialsWithHauling,
 } from '@/entities/project/haulingInventory';
+import { resolveManpowerRoster } from '@/entities/project/manpowerPayroll';
 import {
   BAGS_PER_CUBIC_METER,
   checklistFromStatus,
@@ -46,8 +47,14 @@ import {
   LEGACY_STORAGE_KEY,
   WORKSPACE_STORAGE_KEY,
 } from '@/shared/storage/indexedDb';
+import {
+  resolveClientShowcaseSettings,
+} from '@/entities/project/clientProjection';
 import type {
   CentralMaterialItem,
+  CivilWorksAttendanceRecord,
+  CivilWorksPayrollSnapshot,
+  ClientShowcaseSettings,
   CustomFoundationInspectionItem,
   DailyActivityLogEntry,
   FoundationCustomSpecs,
@@ -64,9 +71,12 @@ import type {
   GuyLayerStatus,
   GuySectorProgress,
   HaulerPayoutRecord,
+  HaulerPayrollSnapshot,
   HaulingLogEntry,
   HaulingMaterialCategory,
+  ManpowerMember,
   MastProjectState,
+  ProjectSyncStatus,
   ProjectType,
   ReportDetailsSpec,
   SavedProjectRecord,
@@ -189,6 +199,19 @@ function createFallbackWorkspace(): WorkspacePayload {
 const workspaceIdbWriter = createCoalescedIdbWriter<WorkspacePayload>(WORKSPACE_STORAGE_KEY);
 let hydrationPromise: Promise<void> | null = null;
 
+export interface ProjectSyncHooks {
+  onProjectMutated?: (projectId: string) => void;
+  onProjectCreated?: (record: SavedProjectRecord) => void;
+  onProjectDeleted?: (projectId: string) => void;
+  onClientSettingsChanged?: (projectId: string, settings: ClientShowcaseSettings) => void;
+}
+
+let activeSyncHooks: ProjectSyncHooks = {};
+
+export function registerProjectSyncHooks(hooks: ProjectSyncHooks): void {
+  activeSyncHooks = hooks;
+}
+
 function persistWorkspace(activeProjectId: string, projects: SavedProjectRecord[]) {
   if (!isIndexedDbAvailable()) return;
   workspaceIdbWriter.enqueue({ activeProjectId, projects });
@@ -202,13 +225,27 @@ function commitActiveProject(
   const hasActive = s.projects.some((p) => p.id === s.activeProjectId);
   const projects = hasActive
     ? s.projects.map((p) =>
-      p.id === s.activeProjectId ? { ...p, updatedAt: now, state: nextProject } : p
+      p.id === s.activeProjectId
+        ? {
+          ...p,
+          updatedAt: now,
+          syncStatus: (p.syncStatus === 'local_only' ? 'local_only' : 'pending') as ProjectSyncStatus,
+          state: nextProject,
+        }
+        : p
     )
     : [
-      { id: s.activeProjectId, createdAt: now, updatedAt: now, state: nextProject },
+      {
+        id: s.activeProjectId,
+        createdAt: now,
+        updatedAt: now,
+        syncStatus: 'pending' as ProjectSyncStatus,
+        state: nextProject,
+      },
       ...s.projects,
     ];
   persistWorkspace(s.activeProjectId, projects);
+  activeSyncHooks.onProjectMutated?.(s.activeProjectId);
   return { project: nextProject, projects };
 }
 
@@ -417,6 +454,45 @@ function appendHaulerToRoster(
   return [...existing, trimmed];
 }
 
+function appendHaulerToManpowerRoster(
+  project: MastProjectState,
+  haulerName: string
+): ManpowerMember[] {
+  const trimmed = haulerName.trim();
+  const base = resolveManpowerRoster(project);
+  if (!trimmed) return base;
+  const key = trimmed.toLowerCase();
+  const existingIdx = base.findIndex(
+    (m) => m.category === 'hauler' && m.name.trim().toLowerCase() === key
+  );
+  if (existingIdx >= 0) {
+    if (!base[existingIdx].active) {
+      return base.map((m, idx) =>
+        idx === existingIdx ? { ...m, active: true } : m
+      );
+    }
+    return base;
+  }
+  return [
+    ...base,
+    {
+      id: `mp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      name: trimmed,
+      category: 'hauler',
+      position: 'Horse Hauler',
+      dailyRatePhp: 0,
+      active: true,
+    },
+  ];
+}
+
+function deriveLegacyHaulerNames(roster: ManpowerMember[]): string[] {
+  return roster
+    .filter((m) => m.category === 'hauler' && m.active)
+    .map((m) => m.name.trim())
+    .filter(Boolean);
+}
+
 function buildHaulingRecord(
   entry: Omit<HaulingLogEntry, 'id' | 'totalKg' | 'equivalentCuM'>
 ): HaulingLogEntry {
@@ -517,6 +593,36 @@ interface ProjectStore {
   addHaulerRosterMember: (name: string) => void;
   addHaulerPayout: (payout: Omit<HaulerPayoutRecord, 'id'>) => void;
   deleteHaulerPayout: (id: string) => void;
+  addManpowerMember: (member: Omit<ManpowerMember, 'id'>) => string;
+  updateManpowerMember: (
+    id: string,
+    patch: Partial<Omit<ManpowerMember, 'id'>>
+  ) => void;
+  deleteManpowerMember: (id: string) => void;
+  setCivilAttendanceForDate: (
+    date: string,
+    presentMemberIds: string[],
+    notes?: string
+  ) => void;
+  toggleCivilAttendanceMember: (date: string, memberId: string) => void;
+  createCivilPayrollSnapshot: (
+    snapshot: Omit<CivilWorksPayrollSnapshot, 'id' | 'createdAt'>
+  ) => string;
+  updateCivilPayrollStatus: (
+    id: string,
+    status: 'generated' | 'paid',
+    paidDate?: string
+  ) => void;
+  deleteCivilPayrollSnapshot: (id: string) => void;
+  createHaulerPayrollSnapshot: (
+    snapshot: Omit<HaulerPayrollSnapshot, 'id' | 'createdAt'>
+  ) => string;
+  updateHaulerPayrollStatus: (
+    id: string,
+    status: 'generated' | 'paid',
+    paidDate?: string
+  ) => void;
+  deleteHaulerPayrollSnapshot: (id: string) => void;
   syncDailyLogDeliveriesFromHauling: (logId: string) => void;
   addDailyLog: (entry: Omit<DailyActivityLogEntry, 'id' | 'totalWorkers' | 'totalManHours'>) => void;
   updateDailyLog: (id: string, patch: Partial<Omit<DailyActivityLogEntry, 'id'>>) => void;
@@ -612,6 +718,21 @@ interface ProjectStore {
     targetKind: 'section' | 'guy_layer',
     id: string,
     patch: Partial<FoundationInspectionMeta>
+  ) => void;
+
+  // Online Cloud Sync & Client Showcase Visibility Actions
+  updateProjectClientSettings: (
+    projectId: string,
+    patch: Partial<ClientShowcaseSettings>
+  ) => void;
+  applyCloudWorkspace: (cloudProjects: SavedProjectRecord[]) => void;
+  applyCloudSyncResult: (
+    projectId: string,
+    serverRecord: SavedProjectRecord
+  ) => void;
+  markProjectSyncStatus: (
+    projectId: string,
+    syncStatus: ProjectSyncStatus
   ) => void;
 }
 
@@ -745,7 +866,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           ...(inheritedLogos ? { logos: inheritedLogos } : {}),
         },
       };
-      const record = buildSavedRecord(nextState);
+      const record: SavedProjectRecord = {
+        ...buildSavedRecord(nextState),
+        syncStatus: 'pending',
+      };
       const projects = [record, ...s.projects];
       persistWorkspace(record.id, projects);
       set({
@@ -754,6 +878,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         project: record.state,
         selectedFoundationId: record.state.foundations[0]?.id ?? 'PF-0',
       });
+      activeSyncHooks.onProjectCreated?.(record);
       return record.id;
     },
 
@@ -787,7 +912,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           projectName: copyName,
         },
       };
-      const record = buildSavedRecord(nextState);
+      const record: SavedProjectRecord = {
+        ...buildSavedRecord(nextState),
+        syncStatus: 'pending',
+      };
       const projects = [record, ...s.projects];
       persistWorkspace(record.id, projects);
       set({
@@ -796,14 +924,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         project: record.state,
         selectedFoundationId: record.state.foundations[0]?.id ?? 'PF-0',
       });
+      activeSyncHooks.onProjectCreated?.(record);
       return record.id;
     },
 
-    deleteProject: (projectId) =>
+    deleteProject: (projectId) => {
       set((s) => {
         const remaining = s.projects.filter((p) => p.id !== projectId);
         if (remaining.length === 0) {
-          const fresh = buildSavedRecord(createCleanBaselineProject());
+          const fresh: SavedProjectRecord = {
+            ...buildSavedRecord(createCleanBaselineProject()),
+            syncStatus: 'local_only',
+          };
           persistWorkspace(fresh.id, [fresh]);
           return {
             projects: [fresh],
@@ -826,7 +958,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               ? nextActive.state.foundations[0]?.id ?? 'PF-0'
               : s.selectedFoundationId,
         };
-      }),
+      });
+      activeSyncHooks.onProjectDeleted?.(projectId);
+    },
 
     importProjectAsNew: (jsonText) => {
       const parsed = JSON.parse(jsonText) as MastProjectState;
@@ -834,7 +968,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         throw new Error('Invalid Mast 2 project JSON file (expected 13 foundations).');
       }
       const s = get();
-      const record = buildSavedRecord(parsed);
+      const record: SavedProjectRecord = {
+        ...buildSavedRecord(parsed),
+        syncStatus: 'pending',
+      };
       const projects = [record, ...s.projects];
       persistWorkspace(record.id, projects);
       set({
@@ -843,6 +980,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         project: record.state,
         selectedFoundationId: record.state.foundations[0].id,
       });
+      activeSyncHooks.onProjectCreated?.(record);
       return record.id;
     },
 
@@ -1179,10 +1317,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => {
         const created = buildHaulingTripEntries(trip);
         if (created.length === 0) return s;
+        const manpowerRoster = appendHaulerToManpowerRoster(
+          s.project,
+          trip.haulerName
+        );
         const next: MastProjectState = {
           ...s.project,
           lastUpdated: new Date().toISOString().slice(0, 10),
           haulerRoster: appendHaulerToRoster(s.project.haulerRoster, trip.haulerName),
+          manpowerRoster,
           haulingLogs: [...created, ...s.project.haulingLogs],
         };
         return commitActiveProject(s, next);
@@ -1196,10 +1339,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           (l) => removeSet.has(l.id) && l.tripGroupId
         )?.tripGroupId;
         const created = buildHaulingTripEntries(trip, existingGroupId);
+        const manpowerRoster = appendHaulerToManpowerRoster(
+          s.project,
+          trip.haulerName
+        );
         const next: MastProjectState = {
           ...s.project,
           lastUpdated: new Date().toISOString().slice(0, 10),
           haulerRoster: appendHaulerToRoster(s.project.haulerRoster, trip.haulerName),
+          manpowerRoster,
           haulingLogs: [...created, ...remaining],
         };
         return commitActiveProject(s, next);
@@ -1250,11 +1398,18 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     addHaulerRosterMember: (name) =>
       set((s) => {
         const nextRoster = appendHaulerToRoster(s.project.haulerRoster, name);
-        if (nextRoster === (s.project.haulerRoster ?? [])) return s;
+        const manpowerRoster = appendHaulerToManpowerRoster(s.project, name);
+        if (
+          nextRoster === (s.project.haulerRoster ?? []) &&
+          manpowerRoster === s.project.manpowerRoster
+        ) {
+          return s;
+        }
         return commitActiveProject(s, {
           ...s.project,
           lastUpdated: new Date().toISOString().slice(0, 10),
           haulerRoster: nextRoster,
+          manpowerRoster,
         });
       }),
 
@@ -1269,11 +1424,13 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           haulerName,
           amountPhp,
           notes: payout.notes?.trim() || undefined,
+          payrollSnapshotId: payout.payrollSnapshotId,
         };
         return commitActiveProject(s, {
           ...s.project,
           lastUpdated: new Date().toISOString().slice(0, 10),
           haulerRoster: appendHaulerToRoster(s.project.haulerRoster, haulerName),
+          manpowerRoster: appendHaulerToManpowerRoster(s.project, haulerName),
           haulerPayouts: [record, ...(s.project.haulerPayouts ?? [])],
         });
       }),
@@ -1284,6 +1441,330 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           ...s.project,
           lastUpdated: new Date().toISOString().slice(0, 10),
           haulerPayouts: (s.project.haulerPayouts ?? []).filter((p) => p.id !== id),
+        }),
+      })),
+
+    addManpowerMember: (member) => {
+      const id = `mp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      set((s) => {
+        const name = member.name.trim();
+        if (!name) return s;
+        const category = member.position === 'Horse Hauler' ? 'hauler' : member.category;
+        const dailyRatePhp =
+          category === 'hauler' ? 0 : Math.max(0, Number(member.dailyRatePhp) || 0);
+        const newMember: ManpowerMember = {
+          id,
+          name,
+          category,
+          position: category === 'hauler' ? 'Horse Hauler' : member.position,
+          dailyRatePhp,
+          active: member.active ?? true,
+          notes: member.notes?.trim() || undefined,
+        };
+        const current = resolveManpowerRoster(s.project);
+        const manpowerRoster = [...current, newMember];
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          manpowerRoster,
+          haulerRoster: deriveLegacyHaulerNames(manpowerRoster),
+        });
+      });
+      return id;
+    },
+
+    updateManpowerMember: (id, patch) =>
+      set((s) => {
+        const current = resolveManpowerRoster(s.project);
+        const target = current.find((m) => m.id === id);
+        if (!target) return s;
+
+        const nextCategory =
+          patch.position === 'Horse Hauler'
+            ? 'hauler'
+            : patch.category ?? target.category;
+        const nextPosition: ManpowerMember['position'] =
+          nextCategory === 'hauler'
+            ? 'Horse Hauler'
+            : patch.position && patch.position !== 'Horse Hauler'
+              ? patch.position
+              : target.position === 'Horse Hauler'
+                ? 'Laborer'
+                : target.position;
+        const nextName = patch.name !== undefined ? patch.name.trim() || target.name : target.name;
+        const nextRate =
+          nextCategory === 'hauler'
+            ? 0
+            : patch.dailyRatePhp !== undefined
+              ? Math.max(0, Number(patch.dailyRatePhp) || 0)
+              : target.dailyRatePhp;
+
+        const manpowerRoster = current.map((m) =>
+          m.id === id
+            ? {
+                ...m,
+                ...patch,
+                id,
+                name: nextName,
+                category: nextCategory,
+                position: nextPosition,
+                dailyRatePhp: nextRate,
+                notes:
+                  patch.notes !== undefined
+                    ? patch.notes.trim() || undefined
+                    : m.notes,
+              }
+            : m
+        );
+
+        const renamedHauler =
+          target.category === 'hauler' &&
+          nextCategory === 'hauler' &&
+          nextName !== target.name;
+        const oldNameKey = target.name.trim().toLowerCase();
+
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          manpowerRoster,
+          haulerRoster: deriveLegacyHaulerNames(manpowerRoster),
+          ...(renamedHauler
+            ? {
+                haulingLogs: s.project.haulingLogs.map((log) =>
+                  log.haulerName.trim().toLowerCase() === oldNameKey
+                    ? { ...log, haulerName: nextName }
+                    : log
+                ),
+                haulerPayouts: (s.project.haulerPayouts ?? []).map((p) =>
+                  p.haulerName.trim().toLowerCase() === oldNameKey
+                    ? { ...p, haulerName: nextName }
+                    : p
+                ),
+              }
+            : {}),
+        });
+      }),
+
+    deleteManpowerMember: (id) =>
+      set((s) => {
+        const current = resolveManpowerRoster(s.project);
+        const manpowerRoster = current.filter((m) => m.id !== id);
+        const civilAttendance = (s.project.civilAttendance ?? [])
+          .map((rec) => ({
+            ...rec,
+            presentMemberIds: rec.presentMemberIds.filter((mid) => mid !== id),
+          }))
+          .filter((rec) => rec.presentMemberIds.length > 0 || Boolean(rec.notes?.trim()));
+
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          manpowerRoster,
+          haulerRoster: deriveLegacyHaulerNames(manpowerRoster),
+          civilAttendance,
+        });
+      }),
+
+    setCivilAttendanceForDate: (date, presentMemberIds, notes) =>
+      set((s) => {
+        if (!date) return s;
+        const uniqueIds = Array.from(new Set(presentMemberIds));
+        const existing = s.project.civilAttendance ?? [];
+        const hasEntry = existing.some((r) => r.date === date);
+        let civilAttendance: CivilWorksAttendanceRecord[];
+        if (uniqueIds.length === 0 && !notes?.trim()) {
+          civilAttendance = existing.filter((r) => r.date !== date);
+        } else if (hasEntry) {
+          civilAttendance = existing.map((r) =>
+            r.date === date
+              ? {
+                  date,
+                  presentMemberIds: uniqueIds,
+                  notes: notes !== undefined ? notes.trim() || undefined : r.notes,
+                }
+              : r
+          );
+        } else {
+          civilAttendance = [
+            ...existing,
+            {
+              date,
+              presentMemberIds: uniqueIds,
+              notes: notes?.trim() || undefined,
+            },
+          ].sort((a, b) => b.date.localeCompare(a.date));
+        }
+
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          civilAttendance,
+        });
+      }),
+
+    toggleCivilAttendanceMember: (date, memberId) =>
+      set((s) => {
+        if (!date || !memberId) return s;
+        const existing = s.project.civilAttendance ?? [];
+        const currentRec = existing.find((r) => r.date === date);
+        const prevIds = currentRec?.presentMemberIds ?? [];
+        const isPresent = prevIds.includes(memberId);
+        const nextIds = isPresent
+          ? prevIds.filter((id) => id !== memberId)
+          : [...prevIds, memberId];
+
+        let civilAttendance: CivilWorksAttendanceRecord[];
+        if (nextIds.length === 0 && !currentRec?.notes?.trim()) {
+          civilAttendance = existing.filter((r) => r.date !== date);
+        } else if (currentRec) {
+          civilAttendance = existing.map((r) =>
+            r.date === date ? { ...r, presentMemberIds: nextIds } : r
+          );
+        } else {
+          civilAttendance = [
+            ...existing,
+            { date, presentMemberIds: nextIds },
+          ].sort((a, b) => b.date.localeCompare(a.date));
+        }
+
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          civilAttendance,
+        });
+      }),
+
+    createCivilPayrollSnapshot: (snapshot) => {
+      const id = `cpay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      set((s) => {
+        const record: CivilWorksPayrollSnapshot = {
+          ...snapshot,
+          id,
+          createdAt: new Date().toISOString(),
+        };
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          civilPayrollHistory: [record, ...(s.project.civilPayrollHistory ?? [])],
+        });
+      });
+      return id;
+    },
+
+    updateCivilPayrollStatus: (id, status, paidDate) =>
+      set((s) => {
+        const today = paidDate ?? new Date().toISOString().slice(0, 10);
+        const civilPayrollHistory = (s.project.civilPayrollHistory ?? []).map((rec) =>
+          rec.id === id
+            ? {
+                ...rec,
+                status,
+                paidDate: status === 'paid' ? today : undefined,
+              }
+            : rec
+        );
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          civilPayrollHistory,
+        });
+      }),
+
+    deleteCivilPayrollSnapshot: (id) =>
+      set((s) => ({
+        ...commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          civilPayrollHistory: (s.project.civilPayrollHistory ?? []).filter(
+            (r) => r.id !== id
+          ),
+        }),
+      })),
+
+    createHaulerPayrollSnapshot: (snapshot) => {
+      const id = `hpay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      set((s) => {
+        const today = snapshot.paidDate ?? new Date().toISOString().slice(0, 10);
+        const record: HaulerPayrollSnapshot = {
+          ...snapshot,
+          id,
+          createdAt: new Date().toISOString(),
+          paidDate: snapshot.status === 'paid' ? today : undefined,
+        };
+        const linkedPayouts: HaulerPayoutRecord[] =
+          snapshot.status === 'paid'
+            ? snapshot.items
+                .filter((item) => item.payoutReleasedPhp > 0)
+                .map((item, idx) => ({
+                  id: `pay-${Date.now().toString(36)}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+                  date: today,
+                  haulerName: item.haulerName,
+                  amountPhp: item.payoutReleasedPhp,
+                  notes: `Hauler Payroll: ${snapshot.title}`,
+                  payrollSnapshotId: id,
+                }))
+            : [];
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulerPayrollHistory: [record, ...(s.project.haulerPayrollHistory ?? [])],
+          haulerPayouts: [...linkedPayouts, ...(s.project.haulerPayouts ?? [])],
+        });
+      });
+      return id;
+    },
+
+    updateHaulerPayrollStatus: (id, status, paidDate) =>
+      set((s) => {
+        const target = (s.project.haulerPayrollHistory ?? []).find((r) => r.id === id);
+        if (!target) return s;
+        const today = paidDate ?? new Date().toISOString().slice(0, 10);
+        const haulerPayrollHistory = (s.project.haulerPayrollHistory ?? []).map((rec) =>
+          rec.id === id
+            ? {
+                ...rec,
+                status,
+                paidDate: status === 'paid' ? today : undefined,
+              }
+            : rec
+        );
+        // Remove previous linked payouts for this snapshot, then re-create if marked paid
+        const basePayouts = (s.project.haulerPayouts ?? []).filter(
+          (p) => p.payrollSnapshotId !== id
+        );
+        const linkedPayouts: HaulerPayoutRecord[] =
+          status === 'paid'
+            ? target.items
+                .filter((item) => item.payoutReleasedPhp > 0)
+                .map((item, idx) => ({
+                  id: `pay-${Date.now().toString(36)}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+                  date: today,
+                  haulerName: item.haulerName,
+                  amountPhp: item.payoutReleasedPhp,
+                  notes: `Hauler Payroll: ${target.title}`,
+                  payrollSnapshotId: id,
+                }))
+            : [];
+
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulerPayrollHistory,
+          haulerPayouts: [...linkedPayouts, ...basePayouts],
+        });
+      }),
+
+    deleteHaulerPayrollSnapshot: (id) =>
+      set((s) => ({
+        ...commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulerPayrollHistory: (s.project.haulerPayrollHistory ?? []).filter(
+            (r) => r.id !== id
+          ),
+          haulerPayouts: (s.project.haulerPayouts ?? []).filter(
+            (p) => p.payrollSnapshotId !== id
+          ),
         }),
       })),
 
@@ -1954,6 +2435,105 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               ),
             };
         return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
+      }),
+
+    updateProjectClientSettings: (projectId, patch) => {
+      let resolvedNext: ClientShowcaseSettings | null = null;
+      set((s) => {
+        const now = new Date().toISOString();
+        const settingFeatured = patch.featured === true;
+        const projects = s.projects.map((p) => {
+          if (p.id === projectId) {
+            const current = resolveClientShowcaseSettings(p);
+            const merged = resolveClientShowcaseSettings({
+              id: p.id,
+              state: p.state,
+              clientSettings: { ...current, ...patch },
+            });
+            resolvedNext = merged;
+            return {
+              ...p,
+              updatedAt: now,
+              syncStatus: 'pending' as ProjectSyncStatus,
+              clientSettings: merged,
+            };
+          }
+          if (settingFeatured && p.clientSettings?.featured) {
+            return {
+              ...p,
+              clientSettings: { ...p.clientSettings, featured: false },
+            };
+          }
+          return p;
+        });
+        persistWorkspace(s.activeProjectId, projects);
+        return { projects };
+      });
+      if (resolvedNext) {
+        activeSyncHooks.onClientSettingsChanged?.(projectId, resolvedNext);
+      }
+    },
+
+    applyCloudWorkspace: (cloudProjects) =>
+      set((s) => {
+        const cloudById = new Map(cloudProjects.map((cp) => [cp.id, cp]));
+        const localById = new Map(s.projects.map((lp) => [lp.id, lp]));
+
+        const merged: SavedProjectRecord[] = [];
+        for (const cp of cloudProjects) {
+          const local = localById.get(cp.id);
+          if (local && local.syncStatus === 'pending') {
+            merged.push({ ...local, version: cp.version });
+          } else {
+            merged.push({ ...normalizeProjectRecord(cp), syncStatus: 'synced' });
+          }
+        }
+
+        // Preserve any local-only or offline-created projects not yet in cloud
+        for (const lp of s.projects) {
+          if (!cloudById.has(lp.id)) {
+            if (lp.id === 'proj-default' && cloudProjects.length > 0 && lp.syncStatus !== 'pending') {
+              continue;
+            }
+            merged.push({
+              ...lp,
+              syncStatus: lp.syncStatus === 'pending' ? 'pending' : 'local_only',
+            });
+          }
+        }
+
+        const nextList = merged.length > 0 ? merged : s.projects;
+        const nextActive =
+          nextList.find((p) => p.id === s.activeProjectId) ?? nextList[0];
+
+        persistWorkspace(nextActive.id, nextList);
+        return {
+          projects: nextList,
+          activeProjectId: nextActive.id,
+          project: nextActive.state,
+          selectedFoundationId: nextActive.state.foundations[0]?.id ?? 'PF-0',
+        };
+      }),
+
+    applyCloudSyncResult: (projectId, serverRecord) =>
+      set((s) => {
+        const normalized = { ...normalizeProjectRecord(serverRecord), syncStatus: 'synced' as ProjectSyncStatus };
+        const projects = s.projects.map((p) => (p.id === projectId ? normalized : p));
+        persistWorkspace(s.activeProjectId, projects);
+        const isActive = s.activeProjectId === projectId;
+        return {
+          projects,
+          ...(isActive ? { project: normalized.state } : {}),
+        };
+      }),
+
+    markProjectSyncStatus: (projectId, syncStatus) =>
+      set((s) => {
+        const projects = s.projects.map((p) =>
+          p.id === projectId ? { ...p, syncStatus } : p
+        );
+        persistWorkspace(s.activeProjectId, projects);
+        return { projects };
       }),
   };
 });

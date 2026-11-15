@@ -14,23 +14,150 @@ export function applyPrintPageStyle(): void {
   document.getElementById(PRINT_PAGE_STYLE_ID)?.remove();
 }
 
+export interface ReportPrintResult {
+  status: 'completed' | 'failed';
+  message: string;
+  detail?: string;
+}
+
 /**
  * Temporarily sets `document.title` and opens the browser's native Print /
- * Save as PDF dialog without forcing a `@page` orientation override.
+ * Save as PDF dialog without forcing a `@page` orientation override, while
+ * reporting completion or failure (including blocked/unsupported WebViews).
  */
-export function triggerReportPrint(documentTitle?: string): void {
-  if (typeof window === 'undefined') return;
+export function triggerReportPrint(
+  documentTitle?: string,
+  onResult?: (result: ReportPrintResult) => void,
+  options?: { blockedTimeoutMs?: number }
+): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    onResult?.({
+      status: 'failed',
+      message: 'Browser printing is not available in this environment.',
+    });
+    return;
+  }
+
+  if (typeof window.print !== 'function') {
+    onResult?.({
+      status: 'failed',
+      message: 'Browser print is not supported in this viewer.',
+      detail:
+        'Open this report in Chrome, Edge, or Safari to Print or Save as PDF.',
+    });
+    return;
+  }
+
   applyPrintPageStyle();
   const previousTitle = document.title;
   const sanitized = (documentTitle ?? '').replace(/[\\/:*?"<>|]+/g, '-').trim();
   if (sanitized) {
     document.title = sanitized;
   }
+
+  let finished = false;
+  let printSessionSeen = false;
+  let blockedTimer: number | null = null;
+  let mediaQueryList: MediaQueryList | null = null;
+
   const restoreTitle = () => {
     document.title = previousTitle;
   };
-  window.addEventListener('afterprint', restoreTitle, { once: true });
-  window.print();
+
+  const cleanup = () => {
+    if (blockedTimer !== null) {
+      window.clearTimeout(blockedTimer);
+      blockedTimer = null;
+    }
+    window.removeEventListener('beforeprint', handleBeforePrint);
+    window.removeEventListener('afterprint', handleAfterPrint);
+    if (mediaQueryList) {
+      mediaQueryList.removeEventListener?.('change', handleMediaChange);
+    }
+    restoreTitle();
+  };
+
+  const finishCompleted = () => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    onResult?.({
+      status: 'completed',
+      message:
+        'Print dialog closed. Check your printer queue or saved PDF file.',
+      detail:
+        'Note: Browsers do not report whether Print/Save or Cancel was pressed inside the system dialog.',
+    });
+  };
+
+  const finishFailed = (message: string, detail?: string) => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    onResult?.({
+      status: 'failed',
+      message,
+      detail,
+    });
+  };
+
+  function handleBeforePrint() {
+    printSessionSeen = true;
+    if (blockedTimer !== null) {
+      window.clearTimeout(blockedTimer);
+      blockedTimer = null;
+    }
+  }
+
+  function handleAfterPrint() {
+    printSessionSeen = true;
+    finishCompleted();
+  }
+
+  function handleMediaChange(e: MediaQueryListEvent) {
+    if (e.matches) {
+      handleBeforePrint();
+    } else if (printSessionSeen) {
+      finishCompleted();
+    }
+  }
+
+  window.addEventListener('beforeprint', handleBeforePrint);
+  window.addEventListener('afterprint', handleAfterPrint);
+
+  if (typeof window.matchMedia === 'function') {
+    mediaQueryList = window.matchMedia('print');
+    if (mediaQueryList?.matches) {
+      printSessionSeen = true;
+    }
+    mediaQueryList?.addEventListener?.('change', handleMediaChange);
+  }
+
+  try {
+    window.print();
+  } catch (err) {
+    finishFailed(
+      err instanceof Error
+        ? `Failed to open print dialog: ${err.message}`
+        : 'Failed to open browser print dialog.',
+      'Try opening this report in a full desktop or mobile browser to Print or Save as PDF.'
+    );
+    return;
+  }
+
+  // Some desktop browsers fire `afterprint` asynchronously on the next task;
+  // restricted embedded WebViews may ignore `window.print()` with no events.
+  if (!finished && !printSessionSeen) {
+    const timeoutMs = options?.blockedTimeoutMs ?? 650;
+    blockedTimer = window.setTimeout(() => {
+      if (!finished && !printSessionSeen) {
+        finishFailed(
+          'Unable to open the print dialog in this browser or app viewer.',
+          'Some embedded WebViews and standalone viewers block window.print(). Open this link in Chrome, Edge, or Safari to Print or Save as PDF.'
+        );
+      }
+    }, timeoutMs);
+  }
 }
 
 export function resolveReportDetails(

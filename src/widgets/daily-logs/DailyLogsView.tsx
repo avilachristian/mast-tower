@@ -61,7 +61,9 @@ import type {
   WorkerAttendanceEntry,
   WorkerRole,
 } from '@/entities/project/types';
-import { readAndResizeImageFile } from '@/shared/lib/imageUpload';
+import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
+import { MANPOWER_POSITIONS } from '@/entities/project/manpowerPayroll';
+import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
 import {
@@ -69,19 +71,7 @@ import {
   type DailyLogModalTarget,
 } from './DailyLogRowEditorModal';
 
-const ROLES: WorkerRole[] = [
-  'Site Engineer',
-  'Foreman',
-  'Safety Officer',
-  'First Aider',
-  'Skilled',
-  'Mason',
-  'Steelman',
-  'Carpenter',
-  'Laborer',
-  'Horse Hauler',
-  'Operator',
-];
+const ROLES: WorkerRole[] = MANPOWER_POSITIONS;
 
 const WEATHER_OPTIONS: {
   value: DailyLogWeather;
@@ -191,11 +181,14 @@ export function DailyLogsView({
   foundations: FoundationRecord[];
 }) {
   const storeProject = useProjectStore((s) => s.project);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const addDailyLog = useProjectStore((s) => s.addDailyLog);
   const updateDailyLog = useProjectStore((s) => s.updateDailyLog);
   const deleteDailyLog = useProjectStore((s) => s.deleteDailyLog);
   const updateProjectMeta = useProjectStore((s) => s.updateProjectMeta);
   const setDailyLogPrintId = useUiStore((s) => s.setDailyLogPrintId);
+  const showAlert = useFeedbackStore((s) => s.showAlert);
+  const requestConfirm = useFeedbackStore((s) => s.requestConfirm);
 
   const project = projectProp ?? storeProject;
   const isVerticalMast = project.projectType === 'vertical_mast';
@@ -597,13 +590,23 @@ export function DailyLogsView({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const dataUrl = await readAndResizeImageFile(file);
-      updateDocumentationRow(idx, {
-        photoDataUrl: dataUrl,
-        photoName: file.name,
+      const uploaded = await uploadOrStageProjectImage({
+        file,
+        projectId: activeProjectId,
+        category: 'daily_log',
       });
+      if (uploaded) {
+        updateDocumentationRow(idx, {
+          photoDataUrl: uploaded.url,
+          photoName: uploaded.name,
+        });
+      }
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Failed to load photo.');
+      void showAlert({
+        tone: 'danger',
+        title: 'Photo Upload Failed',
+        message: err instanceof Error ? err.message : 'Failed to load photo.',
+      });
     } finally {
       e.target.value = '';
     }
@@ -2880,8 +2883,16 @@ export function DailyLogsView({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (window.confirm(`Delete Day ${log.dayNumber} (${log.date}) log?`)) {
+                        onClick={async () => {
+                          const ok = await requestConfirm({
+                            tone: 'danger',
+                            title: 'Delete Daily Log?',
+                            message: `Delete Day ${log.dayNumber} (${log.date}) log?`,
+                            detail:
+                              'This removes the daily log entry and recalculates carried-over material balances for subsequent logs.',
+                            confirmLabel: 'Delete Log',
+                          });
+                          if (ok) {
                             deleteDailyLog(log.id);
                           }
                         }}

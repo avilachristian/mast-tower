@@ -216,6 +216,84 @@ export interface HaulerPayoutRecord {
   haulerName: string;
   amountPhp: number;
   notes?: string;
+  payrollSnapshotId?: string;
+}
+
+export type ManpowerCategory = 'civil_works' | 'hauler';
+
+export interface ManpowerMember {
+  id: string;
+  name: string;
+  category: ManpowerCategory;
+  position: WorkerRole;
+  dailyRatePhp: number; // Applied for civil_works; 0 for individual haulers (₱1,100 per 120 kg)
+  active: boolean;
+  notes?: string;
+}
+
+export interface CivilWorksAttendanceRecord {
+  date: string; // YYYY-MM-DD
+  presentMemberIds: string[];
+  notes?: string;
+}
+
+export type PayrollPeriodType = 'daily' | 'weekly' | 'monthly' | 'overall';
+
+export interface CivilWorksPayrollLineItem {
+  memberId: string;
+  name: string;
+  position: WorkerRole;
+  dailyRatePhp: number;
+  daysPresent: number;
+  datesPresent: string[];
+  grossPayPhp: number;
+}
+
+export interface CivilWorksPayrollSnapshot {
+  id: string;
+  createdAt: string; // ISO timestamp
+  periodType: PayrollPeriodType;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  title: string;
+  items: CivilWorksPayrollLineItem[];
+  totalDaysWorked: number;
+  totalAmountPhp: number;
+  status: 'generated' | 'paid';
+  paidDate?: string;
+  notes?: string;
+}
+
+export interface HaulerPayrollLineItem {
+  haulerName: string;
+  memberId?: string;
+  activeDays: number;
+  tripsCompleted: number;
+  hauledKg: number;
+  priorExcessKg: number;
+  creditsEarned: number;
+  endingExcessKg: number;
+  grossEarnedPhp: number;
+  alreadyPaidInRangePhp: number;
+  payoutReleasedPhp: number;
+  netBalanceAfterPhp: number;
+}
+
+export interface HaulerPayrollSnapshot {
+  id: string;
+  createdAt: string; // ISO timestamp
+  periodType: PayrollPeriodType;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  title: string;
+  items: HaulerPayrollLineItem[];
+  totalHauledKg: number;
+  totalCredits: number;
+  totalEarnedPhp: number;
+  totalPayoutPhp: number;
+  status: 'generated' | 'paid';
+  paidDate?: string;
+  notes?: string;
 }
 
 export type WorkerRole =
@@ -518,15 +596,86 @@ export interface MastProjectState {
   centralMaterials?: CentralMaterialItem[];
   haulerRoster?: string[];
   haulerPayouts?: HaulerPayoutRecord[];
+  manpowerRoster?: ManpowerMember[];
+  civilAttendance?: CivilWorksAttendanceRecord[];
+  civilPayrollHistory?: CivilWorksPayrollSnapshot[];
+  haulerPayrollHistory?: HaulerPayrollSnapshot[];
   dailyLogs: DailyActivityLogEntry[];
   schedule: ScheduleActivityItem[];
   inventory: SiteEquipmentItem[];
 }
 
+export type ClientShowcasePhaseMode = 'both' | 'foundation' | 'vertical_mast';
+
+export interface ClientShowcaseSettings {
+  enabled: boolean;
+  featured: boolean;
+  slug?: string;
+  welcomeNote?: string;
+  phaseMode: ClientShowcasePhaseMode;
+  showSchedule: boolean;
+  showPhotos: boolean;
+}
+
+export type ProjectSyncStatus = 'synced' | 'pending' | 'conflict' | 'local_only';
+
 export interface SavedProjectRecord {
   id: string;
   createdAt: string;
   updatedAt: string;
+  version?: number;
+  syncStatus?: ProjectSyncStatus;
+  clientSettings?: ClientShowcaseSettings;
   state: MastProjectState;
+}
+
+export interface ClientDailyHighlightDto {
+  id: string;
+  date: string;
+  dayNumber: number;
+  weather: DailyLogWeather;
+  activitiesSummary: string;
+  photos: Array<{
+    id: string;
+    url: string;
+    description: string;
+  }>;
+}
+
+export type ClientFoundationSummary = Pick<
+  FoundationRecord,
+  | 'id'
+  | 'code'
+  | 'name'
+  | 'type'
+  | 'sector'
+  | 'radiusM'
+  | 'angleDeg'
+  | 'xM'
+  | 'zM'
+  | 'status'
+  | 'pourDate'
+  | 'completedDate'
+>;
+
+export interface ClientProjectShowcaseDto {
+  id: string;
+  slug: string;
+  featured: boolean;
+  updatedAt: string;
+  lastUpdated: string;
+  projectName: string;
+  location: string;
+  clientName: string;
+  contractor: string;
+  referenceNo: string;
+  towerHeightM: number;
+  projectType: ProjectType;
+  logos?: ReportDetailsSpec['logos'];
+  settings: ClientShowcaseSettings;
+  foundations: ClientFoundationSummary[];
+  verticalMastSummary?: VerticalMastState;
+  schedule: ScheduleActivityItem[];
+  highlights: ClientDailyHighlightDto[];
 }
 

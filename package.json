@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "wrangler dev",
     "build": "tsc -b && vite build",
+    "deploy": "npm run build && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply mast-tower-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply mast-tower-db --remote",
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview"
@@ -13,6 +17,7 @@
   "dependencies": {
     "@fontsource/noto-sans": "^5.2.8",
     "@tailwindcss/vite": "^4.1.18",
+    "hono": "^4.13.18",
     "html-to-image": "^1.11.13",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.0.0",
@@ -23,12 +28,14 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261115.1",
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "wrangler": "^4.162.0"
   }
 }

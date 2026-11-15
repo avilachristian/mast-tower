@@ -16,7 +16,15 @@ export type ActiveAppTab =
   | 'inspection'
   | 'hauling_inventory'
   | 'daily_logs'
+  | 'manpower'
   | 'project_details';
+
+export type ManpowerSubTab = 'roster' | 'payment';
+export type ManpowerPaymentMode = 'civil_works' | 'hauler';
+
+export type PayrollPrintTarget =
+  | { kind: 'civil'; snapshotId?: string }
+  | { kind: 'hauler'; snapshotId?: string };
 
 export type MastSelectionTarget = {
   kind: 'section' | 'guy_layer';
@@ -55,6 +63,9 @@ export function shouldOpenLauncherOnStartup(
 
 interface UiState {
   activeAppTab: ActiveAppTab;
+  manpowerSubTab: ManpowerSubTab;
+  manpowerPaymentMode: ManpowerPaymentMode;
+  payrollPrintTarget: PayrollPrintTarget | null;
   projectBrowserOpen: boolean;
   dailyLogPrintId: string | null;
   reportOpen: boolean;
@@ -68,6 +79,9 @@ interface UiState {
   foundationOrderViolation: FoundationChecklistViolation | null;
 
   setActiveAppTab: (tab: ActiveAppTab) => void;
+  setManpowerSubTab: (subTab: ManpowerSubTab) => void;
+  setManpowerPaymentMode: (mode: ManpowerPaymentMode) => void;
+  setPayrollPrintTarget: (target: PayrollPrintTarget | null) => void;
   hydrateUiStorage: () => Promise<void>;
   setProjectBrowserOpen: (open: boolean) => void;
   setDailyLogPrintId: (id: string | null) => void;
@@ -86,6 +100,9 @@ interface UiState {
 
 export const useUiStore = create<UiState>((set) => ({
   activeAppTab: 'activity',
+  manpowerSubTab: 'roster',
+  manpowerPaymentMode: 'civil_works',
+  payrollPrintTarget: null,
   projectBrowserOpen: shouldOpenLauncherOnStartup(
     typeof window !== 'undefined' ? window.localStorage : null
   ),
@@ -101,6 +118,9 @@ export const useUiStore = create<UiState>((set) => ({
   foundationOrderViolation: null,
 
   setActiveAppTab: (tab) => set({ activeAppTab: tab }),
+  setManpowerSubTab: (manpowerSubTab) => set({ manpowerSubTab }),
+  setManpowerPaymentMode: (manpowerPaymentMode) => set({ manpowerPaymentMode }),
+  setPayrollPrintTarget: (payrollPrintTarget) => set({ payrollPrintTarget }),
   hydrateUiStorage: () => {
     if (uiHydrationPromise) return uiHydrationPromise;
     uiHydrationPromise = (async () => {

@@ -897,13 +897,33 @@ function rasterizeImageToDataUrl(
 
   try {
     ctx.drawImage(img, 0, 0, w, h);
-    const isJpeg = /^data:image\/jpe?g/i.test(img.currentSrc || img.src || '');
+    const src = img.currentSrc || img.src || '';
+    const isJpeg =
+      /^data:image\/jpe?g/i.test(src) || /\.jpe?g(\?|$)/i.test(src);
     return isJpeg
       ? { dataUrl: canvas.toDataURL('image/jpeg', 0.92), format: 'JPEG' }
       : { dataUrl: canvas.toDataURL('image/png'), format: 'PNG' };
   } catch {
     return null;
   }
+}
+
+async function waitForImagesReady(element: HTMLElement): Promise<void> {
+  const imgs = Array.from(element.querySelectorAll('img'));
+  await Promise.all(
+    imgs.map((img) => {
+      if (img.complete) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        const timer = window.setTimeout(resolve, 4000);
+        const done = () => {
+          window.clearTimeout(timer);
+          resolve();
+        };
+        img.addEventListener('load', done, { once: true });
+        img.addEventListener('error', done, { once: true });
+      });
+    })
+  );
 }
 
 async function rasterizeSvgFallback(
@@ -991,6 +1011,8 @@ export async function exportElementToPdf(
   element.style.backgroundColor = '#ffffff';
 
   try {
+    await waitForImagesReady(element);
+
     // Allow browser layout to flush if temporarily resized.
     await new Promise<void>((resolve) =>
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))

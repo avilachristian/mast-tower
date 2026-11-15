@@ -3,9 +3,16 @@ import {
   ArrowLeft,
   Building2,
   CheckCircle2,
+  Cloud,
+  CloudOff,
+  CloudUpload,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   FolderKanban,
+  Globe,
+  Loader2,
   MapPin,
   Plus,
   Search,
@@ -14,13 +21,17 @@ import {
   Upload,
 } from 'lucide-react';
 import { computeProjectMetrics, formatDateWithWeekday } from '@/entities/project/calculations';
-import type { ProjectType, SavedProjectRecord } from '@/entities/project/types';
+import type { ProjectSyncStatus, ProjectType, SavedProjectRecord } from '@/entities/project/types';
 import { resolveReportLogos } from '@/shared/assets/defaultLogos';
 import {
   computeVerticalMastMetrics,
   type VerticalMastMetrics,
 } from '@/entities/project/verticalMastCalculations';
+import { useAuthStore } from '@/shared/state/authStore';
 import { useProjectStore } from '@/shared/state/projectStore';
+import { useFeedbackStore } from '@/shared/state/feedbackStore';
+import { migrateLocalProjectsToCloud } from '@/shared/storage/cloudSync';
+import { ClientVisibilityModal } from '@/widgets/projects/ClientVisibilityModal';
 import { PwaAppStatusBar } from '@/widgets/pwa/PwaStatusBanner';
 
 function slugifyFilename(name: string): string {
@@ -41,6 +52,8 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
   const duplicateProject = useProjectStore((s) => s.duplicateProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
   const importProjectAsNew = useProjectStore((s) => s.importProjectAsNew);
+  const showAlert = useFeedbackStore((s) => s.showAlert);
+  const requestConfirm = useFeedbackStore((s) => s.requestConfirm);
 
   const resolvedLogos = resolveReportLogos(activeProject.reportDetails?.logos);
   const hasCurrentLogos = Boolean(
@@ -64,6 +77,26 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
   const [newProjectType, setNewProjectType] = useState<ProjectType>('foundation');
   const [newTemplate, setNewTemplate] = useState<'clean' | 'sample'>('clean');
   const [copyLogos, setCopyLogos] = useState(hasCurrentLogos);
+  const [visibilityProjectId, setVisibilityProjectId] = useState<string | null>(null);
+  const [migratingCloud, setMigratingCloud] = useState(false);
+
+  const authStatus = useAuthStore((s) => s.status);
+  const localOnlyCount = useMemo(
+    () =>
+      projects.filter(
+        (p) => !p.syncStatus || p.syncStatus === 'local_only' || p.syncStatus === 'pending'
+      ).length,
+    [projects]
+  );
+
+  const handleMigrateToCloud = async () => {
+    setMigratingCloud(true);
+    try {
+      await migrateLocalProjectsToCloud();
+    } finally {
+      setMigratingCloud(false);
+    }
+  };
 
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -165,7 +198,11 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
       importProjectAsNew(text);
       onClose();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'Failed to import project JSON.');
+      void showAlert({
+        tone: 'danger',
+        title: 'Import Failed',
+        message: err instanceof Error ? err.message : 'Failed to import project JSON.',
+      });
     } finally {
       e.target.value = '';
     }
@@ -229,6 +266,36 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </div>
+
+        {/* Local-to-Cloud Sync Prompt */}
+        {authStatus === 'authenticated' && localOnlyCount > 0 && (
+          <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5 text-xs text-sky-900">
+              <CloudUpload className="w-4 h-4 text-sky-600 mt-0.5 shrink-0" />
+              <div>
+                <div className="font-bold">
+                  {localOnlyCount} {localOnlyCount === 1 ? 'project is' : 'projects are'} waiting to sync to Cloud (D1 &amp; R2)
+                </div>
+                <div className="text-[11px] text-sky-800/90">
+                  Upload local drafts and inline photos so they are backed up and can be published to clients.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleMigrateToCloud()}
+              disabled={migratingCloud}
+              className="px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shadow-xs"
+            >
+              {migratingCloud ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <CloudUpload className="w-3.5 h-3.5" />
+              )}
+              <span>{migratingCloud ? 'Syncing...' : 'Sync Local Projects to Cloud'}</span>
+            </button>
+          </div>
+        )}
 
         {/* Create New Project Form */}
         {creatingOpen && (
@@ -537,6 +604,50 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
                               {displayRef}
                             </span>
                           )}
+                          {record.clientSettings?.enabled ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                              <Eye className="w-2.5 h-2.5" />
+                              Visible to Client
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded">
+                              <EyeOff className="w-2.5 h-2.5" />
+                              Private
+                            </span>
+                          )}
+                          {(() => {
+                            const syncState: ProjectSyncStatus = record.syncStatus ?? 'local_only';
+                            if (syncState === 'synced') {
+                              return (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.2 rounded">
+                                  <Cloud className="w-2.5 h-2.5" />
+                                  Synced
+                                </span>
+                              );
+                            }
+                            if (syncState === 'pending') {
+                              return (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded">
+                                  <CloudUpload className="w-2.5 h-2.5" />
+                                  Pending Sync
+                                </span>
+                              );
+                            }
+                            if (syncState === 'conflict') {
+                              return (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded">
+                                  <CloudOff className="w-2.5 h-2.5" />
+                                  Conflict
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded">
+                                <CloudOff className="w-2.5 h-2.5" />
+                                Local Only
+                              </span>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -623,6 +734,20 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
 
                       <button
                         type="button"
+                        onClick={() => setVisibilityProjectId(record.id)}
+                        title="Client Showcase visibility & sharing"
+                        aria-label={`Client Showcase settings for ${displayName}`}
+                        className={`h-10 w-10 sm:h-auto sm:w-auto inline-flex items-center justify-center p-2 sm:p-1.5 rounded-lg border cursor-pointer ${
+                          record.clientSettings?.enabled
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                        }`}
+                      >
+                        <Globe className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => handleDuplicate(record, displayName)}
                         title="Duplicate project"
                         aria-label={`Duplicate ${displayName}`}
@@ -643,12 +768,18 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
 
                       <button
                         type="button"
-                        onClick={() => {
+                        onClick={async () => {
                           const msg =
                             projects.length === 1
                               ? `Delete "${displayName}" and start a fresh blank project?`
                               : `Delete project "${displayName}"? Export a JSON backup first if you still need it.`;
-                          if (window.confirm(msg)) {
+                          const ok = await requestConfirm({
+                            tone: 'danger',
+                            title: 'Delete Project?',
+                            message: msg,
+                            confirmLabel: 'Delete Project',
+                          });
+                          if (ok) {
                             deleteProject(record.id);
                           }
                         }}
@@ -685,6 +816,12 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
 
         <PwaAppStatusBar />
       </div>
+
+      <ClientVisibilityModal
+        projectId={visibilityProjectId}
+        open={visibilityProjectId !== null}
+        onClose={() => setVisibilityProjectId(null)}
+      />
     </div>
   );
 }

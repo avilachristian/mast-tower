@@ -58,6 +58,7 @@ function pwaOfflinePlugin(): Plugin {
       const swSource = `/* Auto-generated offline service worker for Mast 2 Tower */
 const CACHE_PREFIX = 'mast2-pwa-';
 const CACHE_NAME = '${'mast2-pwa-'}' + '${buildId}';
+const IMAGE_CACHE_NAME = 'mast2-images-v1';
 const APP_VERSION = '${APP_VERSION}';
 const BUILD_ID = '${buildId}';
 const PRECACHE_URLS = ${JSON.stringify(precacheUrls, null, 2)};
@@ -117,8 +118,27 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Never intercept update-check endpoints with cached assets.
+  // Never intercept update-check or live auth/admin/client API endpoints with cached assets.
   if (url.pathname === '/sw.js' || url.pathname === '/version.json') {
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/images/')) {
+    event.respondWith(
+      caches.open(IMAGE_CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        const networkResponse = await fetch(request);
+        if (networkResponse.ok) {
+          cache.put(request, networkResponse.clone());
+        }
+        return networkResponse;
+      })
+    );
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/')) {
     return;
   }
 
@@ -189,6 +209,12 @@ export default defineConfig({
   server: {
     port: 5175,
     strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+    },
   },
   optimizeDeps: {
     include: ['jspdf', 'html-to-image'],
