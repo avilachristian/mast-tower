@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -45,7 +45,7 @@ function formatCountdownDetailed(msRemaining: number): string {
   return `${mins}m ${String(secs).padStart(2, '0')}s`;
 }
 
-export function CloudSyncControls() {
+function useCloudSyncDisplayState(tickMs: number) {
   const projects = useProjectStore((s) => s.projects);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const offlineCached = useAuthStore((s) => s.offlineCached);
@@ -59,45 +59,19 @@ export function CloudSyncControls() {
   const nextAutoSyncAt = useCloudSyncStore((s) => s.nextAutoSyncAt);
   const setAutoSyncConfig = useCloudSyncStore((s) => s.setAutoSyncConfig);
 
-  const [open, setOpen] = useState(false);
-  const [customMinutes, setCustomMinutes] = useState(String(intervalMinutes));
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setCustomMinutes(String(intervalMinutes));
-  }, [intervalMinutes]);
-
-  // Refresh countdown quickly while popover is open, and once every 30s when closed
   useEffect(() => {
     setNowMs(Date.now());
-    const tickMs = open ? 1000 : 30_000;
     const timer = window.setInterval(() => setNowMs(Date.now()), tickMs);
     return () => window.clearInterval(timer);
-  }, [open, nextAutoSyncAt]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  }, [tickMs, nextAutoSyncAt]);
 
   const activeRecord = useMemo(
     () => projects.find((p) => p.id === activeProjectId),
     [projects, activeProjectId]
   );
+
   const activeDisplayName =
     activeRecord?.state.reportDetails?.projectName?.trim() ||
     activeRecord?.state.projectName ||
@@ -123,6 +97,292 @@ export function CloudSyncControls() {
       ? Math.max(0, nextAutoSyncAt - nowMs)
       : null;
 
+  return {
+    activeDisplayName,
+    activeNeedsSync,
+    activeStagedImages,
+    totalUnsyncedProjects,
+    isOffline,
+    isConflict,
+    isSyncing,
+    lastSyncedAt,
+    lastError,
+    pendingDeleteIds,
+    autoSyncEnabled,
+    intervalMinutes,
+    setAutoSyncConfig,
+    remainingMs,
+  };
+}
+
+export function CloudSyncPanel({
+  onActionComplete,
+}: {
+  onActionComplete?: () => void;
+}) {
+  const customInputId = useId();
+  const {
+    activeDisplayName,
+    activeNeedsSync,
+    activeStagedImages,
+    totalUnsyncedProjects,
+    isOffline,
+    isConflict,
+    isSyncing,
+    lastSyncedAt,
+    lastError,
+    pendingDeleteIds,
+    autoSyncEnabled,
+    intervalMinutes,
+    setAutoSyncConfig,
+    remainingMs,
+  } = useCloudSyncDisplayState(1000);
+
+  const [customMinutes, setCustomMinutes] = useState(String(intervalMinutes));
+
+  useEffect(() => {
+    setCustomMinutes(String(intervalMinutes));
+  }, [intervalMinutes]);
+
+  const handleApplyCustomMinutes = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsed = Number.parseInt(customMinutes, 10);
+    if (!Number.isFinite(parsed)) return;
+    setAutoSyncConfig({ autoSyncEnabled: true, intervalMinutes: parsed });
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Header Status */}
+      <div className="space-y-1 border-b border-slate-100 pb-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-bold text-slate-900 truncate">
+            {activeDisplayName}
+          </span>
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
+              isConflict
+                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                : activeNeedsSync
+                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            }`}
+          >
+            {isConflict
+              ? 'Conflict'
+              : activeNeedsSync
+                ? 'Unsaved Edits'
+                : 'Synced'}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-500">
+          <span>
+            {lastSyncedAt
+              ? `Last synced: ${new Date(lastSyncedAt).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}`
+              : 'Not synced in this session'}
+          </span>
+          {autoSyncEnabled ? (
+            <span className="font-medium text-slate-700 tabular-nums">
+              {activeNeedsSync && remainingMs !== null
+                ? `Auto-sync in ${formatCountdownDetailed(remainingMs)}`
+                : remainingMs !== null
+                  ? `Check in ${formatCountdownDetailed(remainingMs)}`
+                  : `Every ${intervalMinutes} min`}
+            </span>
+          ) : (
+            <span className="font-medium text-slate-500">Manual only</span>
+          )}
+        </div>
+
+        {activeStagedImages.count > 0 && (
+          <div className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-900">
+            <ImageIcon className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>
+              <strong>{activeStagedImages.uniqueCount}</strong> staged{' '}
+              {activeStagedImages.uniqueCount === 1 ? 'photo' : 'photos'} (~
+              {formatStorageBytes(activeStagedImages.estimatedBytes)}) will upload to R2 on Sync
+            </span>
+          </div>
+        )}
+
+        {lastError && (
+          <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-rose-50 border border-rose-200 px-2.5 py-1.5 text-[11px] text-rose-800">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-600 mt-0.5 shrink-0" />
+            <span className="line-clamp-2">{lastError}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Interval Configurator */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="font-bold text-slate-700">
+            Active Project Auto-Sync Interval
+          </span>
+          <button
+            type="button"
+            onClick={() => setAutoSyncConfig({ autoSyncEnabled: !autoSyncEnabled })}
+            className={`px-2 py-0.5 rounded-md font-semibold border cursor-pointer ${
+              autoSyncEnabled
+                ? 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100'
+                : 'border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {autoSyncEnabled ? 'Auto On' : 'Manual Only'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-5 gap-1">
+          <button
+            type="button"
+            onClick={() => setAutoSyncConfig({ autoSyncEnabled: false })}
+            className={`py-1.5 rounded-md border text-[11px] font-semibold cursor-pointer transition ${
+              !autoSyncEnabled
+                ? 'border-slate-800 bg-slate-900 text-white'
+                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            Off
+          </button>
+          {INTERVAL_PRESETS.map((mins) => {
+            const selected = autoSyncEnabled && intervalMinutes === mins;
+            return (
+              <button
+                key={mins}
+                type="button"
+                onClick={() =>
+                  setAutoSyncConfig({ autoSyncEnabled: true, intervalMinutes: mins })
+                }
+                className={`py-1.5 rounded-md border text-[11px] font-semibold cursor-pointer transition ${
+                  selected
+                    ? 'border-sky-600 bg-sky-600 text-white'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {mins}m
+              </button>
+            );
+          })}
+        </div>
+
+        <form onSubmit={handleApplyCustomMinutes} className="flex items-center gap-1.5">
+          <label
+            htmlFor={customInputId}
+            className="text-[11px] text-slate-500 shrink-0"
+          >
+            Custom:
+          </label>
+          <input
+            id={customInputId}
+            type="number"
+            min={MIN_SYNC_INTERVAL_MINUTES}
+            max={MAX_SYNC_INTERVAL_MINUTES}
+            value={customMinutes}
+            onChange={(e) => setCustomMinutes(e.target.value)}
+            className="w-16 px-2 py-1 rounded-md border border-slate-200 text-xs font-semibold text-slate-900 focus:border-sky-500 focus:outline-none tabular-nums"
+          />
+          <span className="text-[11px] text-slate-500">min</span>
+          <button
+            type="submit"
+            className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
+          >
+            <Check className="w-3 h-3" />
+            Set
+          </button>
+        </form>
+
+        <p className="text-[10px] text-slate-400 leading-snug">
+          Edits &amp; photos save locally in IndexedDB and only push to D1/R2 when you click Sync, publish to Client Showcase, or when the interval elapses with unsaved changes.
+        </p>
+      </div>
+
+      {/* Sync Actions */}
+      <div className="space-y-1.5 pt-1 border-t border-slate-100">
+        <button
+          type="button"
+          disabled={isSyncing || isOffline}
+          onClick={() => {
+            onActionComplete?.();
+            void syncActiveProjectNow();
+          }}
+          className="w-full py-2 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+          <span>Sync Active Project Now</span>
+        </button>
+
+        {(totalUnsyncedProjects > 1 ||
+          (totalUnsyncedProjects === 1 && !activeNeedsSync) ||
+          pendingDeleteIds.length > 0) && (
+          <button
+            type="button"
+            disabled={isSyncing || isOffline}
+            onClick={() => {
+              onActionComplete?.();
+              void flushAllPendingSyncs();
+            }}
+            className="w-full py-1.5 px-3 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-900 text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <CloudUpload className="w-3.5 h-3.5" />
+            <span>
+              Sync All Pending Projects ({totalUnsyncedProjects}
+              {pendingDeleteIds.length > 0 ? ` + ${pendingDeleteIds.length} del` : ''})
+            </span>
+          </button>
+        )}
+
+        <button
+          type="button"
+          disabled={isSyncing || isOffline}
+          onClick={() => {
+            onActionComplete?.();
+            void hydrateCloudWorkspace();
+          }}
+          className="w-full py-1.5 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+        >
+          <CloudDownload className="w-3.5 h-3.5 text-slate-500" />
+          <span>Pull Latest from Cloud</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function CloudSyncControls() {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const {
+    activeNeedsSync,
+    isOffline,
+    isConflict,
+    isSyncing,
+    autoSyncEnabled,
+    intervalMinutes,
+    remainingMs,
+  } = useCloudSyncDisplayState(open ? 1000 : 30_000);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
   const pillTone = isSyncing
     ? 'border-sky-300 bg-sky-50 text-sky-800'
     : isOffline
@@ -132,13 +392,6 @@ export function CloudSyncControls() {
         : activeNeedsSync
           ? 'border-amber-300 bg-amber-50 text-amber-900'
           : 'border-emerald-200 bg-emerald-50 text-emerald-800';
-
-  const handleApplyCustomMinutes = (e: React.FormEvent) => {
-    e.preventDefault();
-    const parsed = Number.parseInt(customMinutes, 10);
-    if (!Number.isFinite(parsed)) return;
-    setAutoSyncConfig({ autoSyncEnabled: true, intervalMinutes: parsed });
-  };
 
   return (
     <div ref={containerRef} className="relative flex items-center">
@@ -206,203 +459,9 @@ export function CloudSyncControls() {
         <div
           role="dialog"
           aria-label="Cloud Sync Settings"
-          className="fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-1.5 z-50 w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-slate-200 bg-white shadow-xl text-slate-800 p-3.5 space-y-3"
+          className="fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-1.5 z-50 w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-slate-200 bg-white shadow-xl text-slate-800 p-3.5"
         >
-          {/* Header Status */}
-          <div className="space-y-1 border-b border-slate-100 pb-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-bold text-slate-900 truncate">
-                {activeDisplayName}
-              </span>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${
-                  isConflict
-                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                    : activeNeedsSync
-                      ? 'bg-amber-50 text-amber-800 border-amber-200'
-                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                }`}
-              >
-                {isConflict
-                  ? 'Conflict'
-                  : activeNeedsSync
-                    ? 'Unsaved Edits'
-                    : 'Synced'}
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-500">
-              <span>
-                {lastSyncedAt
-                  ? `Last synced: ${new Date(lastSyncedAt).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}`
-                  : 'Not synced in this session'}
-              </span>
-              {autoSyncEnabled ? (
-                <span className="font-medium text-slate-700 tabular-nums">
-                  {activeNeedsSync && remainingMs !== null
-                    ? `Auto-sync in ${formatCountdownDetailed(remainingMs)}`
-                    : remainingMs !== null
-                      ? `Check in ${formatCountdownDetailed(remainingMs)}`
-                      : `Every ${intervalMinutes} min`}
-                </span>
-              ) : (
-                <span className="font-medium text-slate-500">Manual only</span>
-              )}
-            </div>
-
-            {activeStagedImages.count > 0 && (
-              <div className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-900">
-                <ImageIcon className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span>
-                  <strong>{activeStagedImages.uniqueCount}</strong> staged{' '}
-                  {activeStagedImages.uniqueCount === 1 ? 'photo' : 'photos'} (~
-                  {formatStorageBytes(activeStagedImages.estimatedBytes)}) will upload to R2 on Sync
-                </span>
-              </div>
-            )}
-
-            {lastError && (
-              <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-rose-50 border border-rose-200 px-2.5 py-1.5 text-[11px] text-rose-800">
-                <AlertCircle className="w-3.5 h-3.5 text-rose-600 mt-0.5 shrink-0" />
-                <span className="line-clamp-2">{lastError}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Interval Configurator */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="font-bold text-slate-700">
-                Active Project Auto-Sync Interval
-              </span>
-              <button
-                type="button"
-                onClick={() => setAutoSyncConfig({ autoSyncEnabled: !autoSyncEnabled })}
-                className={`px-2 py-0.5 rounded-md font-semibold border cursor-pointer ${
-                  autoSyncEnabled
-                    ? 'border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100'
-                    : 'border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {autoSyncEnabled ? 'Auto On' : 'Manual Only'}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-5 gap-1">
-              <button
-                type="button"
-                onClick={() => setAutoSyncConfig({ autoSyncEnabled: false })}
-                className={`py-1.5 rounded-md border text-[11px] font-semibold cursor-pointer transition ${
-                  !autoSyncEnabled
-                    ? 'border-slate-800 bg-slate-900 text-white'
-                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                Off
-              </button>
-              {INTERVAL_PRESETS.map((mins) => {
-                const selected = autoSyncEnabled && intervalMinutes === mins;
-                return (
-                  <button
-                    key={mins}
-                    type="button"
-                    onClick={() =>
-                      setAutoSyncConfig({ autoSyncEnabled: true, intervalMinutes: mins })
-                    }
-                    className={`py-1.5 rounded-md border text-[11px] font-semibold cursor-pointer transition ${
-                      selected
-                        ? 'border-sky-600 bg-sky-600 text-white'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    {mins}m
-                  </button>
-                );
-              })}
-            </div>
-
-            <form onSubmit={handleApplyCustomMinutes} className="flex items-center gap-1.5">
-              <label
-                htmlFor="sync-interval-custom-input"
-                className="text-[11px] text-slate-500 shrink-0"
-              >
-                Custom:
-              </label>
-              <input
-                id="sync-interval-custom-input"
-                type="number"
-                min={MIN_SYNC_INTERVAL_MINUTES}
-                max={MAX_SYNC_INTERVAL_MINUTES}
-                value={customMinutes}
-                onChange={(e) => setCustomMinutes(e.target.value)}
-                className="w-16 px-2 py-1 rounded-md border border-slate-200 text-xs font-semibold text-slate-900 focus:border-sky-500 focus:outline-none tabular-nums"
-              />
-              <span className="text-[11px] text-slate-500">min</span>
-              <button
-                type="submit"
-                className="ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
-              >
-                <Check className="w-3 h-3" />
-                Set
-              </button>
-            </form>
-
-            <p className="text-[10px] text-slate-400 leading-snug">
-              Edits &amp; photos save locally in IndexedDB and only push to D1/R2 when you click Sync, publish to Client Showcase, or when the interval elapses with unsaved changes.
-            </p>
-          </div>
-
-          {/* Sync Actions */}
-          <div className="space-y-1.5 pt-1 border-t border-slate-100">
-            <button
-              type="button"
-              disabled={isSyncing || isOffline}
-              onClick={() => {
-                setOpen(false);
-                void syncActiveProjectNow();
-              }}
-              className="w-full py-2 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>Sync Active Project Now</span>
-            </button>
-
-            {(totalUnsyncedProjects > 1 ||
-              (totalUnsyncedProjects === 1 && !activeNeedsSync) ||
-              pendingDeleteIds.length > 0) && (
-              <button
-                type="button"
-                disabled={isSyncing || isOffline}
-                onClick={() => {
-                  setOpen(false);
-                  void flushAllPendingSyncs();
-                }}
-                className="w-full py-1.5 px-3 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 text-amber-900 text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <CloudUpload className="w-3.5 h-3.5" />
-                <span>
-                  Sync All Pending Projects ({totalUnsyncedProjects}
-                  {pendingDeleteIds.length > 0 ? ` + ${pendingDeleteIds.length} del` : ''})
-                </span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              disabled={isSyncing || isOffline}
-              onClick={() => {
-                setOpen(false);
-                void hydrateCloudWorkspace();
-              }}
-              className="w-full py-1.5 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <CloudDownload className="w-3.5 h-3.5 text-slate-500" />
-              <span>Pull Latest from Cloud</span>
-            </button>
-          </div>
+          <CloudSyncPanel onActionComplete={() => setOpen(false)} />
         </div>
       )}
     </div>

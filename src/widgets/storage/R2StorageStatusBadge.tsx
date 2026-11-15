@@ -2,7 +2,7 @@ import { AlertOctagon, AlertTriangle, HardDrive, RefreshCw, X } from 'lucide-rea
 import { useStorageQuotaStore } from '@/shared/state/storageQuotaStore';
 import { formatStorageBytes } from '@/shared/storage/r2Quota';
 
-export function R2StorageHeaderPill() {
+export function R2StorageHeaderPill({ showAlways = false }: { showAlways?: boolean }) {
   const status = useStorageQuotaStore((s) => s.status);
   const loading = useStorageQuotaStore((s) => s.loading);
   const reconcileStatus = useStorageQuotaStore((s) => s.reconcileStatus);
@@ -22,11 +22,15 @@ export function R2StorageHeaderPill() {
       onClick={() => void reconcileStatus()}
       disabled={loading}
       title={`Cloudflare R2 Free Tier: ${formatStorageBytes(status.usedBytes)} used / ${formatStorageBytes(status.limitBytes)} (${formatStorageBytes(status.remainingBytes)} remaining). Click to sync bucket usage.`}
-      className={`hidden lg:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] font-semibold transition cursor-pointer disabled:opacity-60 ${badgeTone}`}
+      className={`${
+        showAlways ? 'inline-flex w-full justify-between px-3 py-2 text-xs' : 'hidden lg:inline-flex px-2 py-1 text-[11px]'
+      } items-center gap-1.5 rounded-md border font-semibold transition cursor-pointer disabled:opacity-60 ${badgeTone}`}
     >
-      <HardDrive className="w-3.5 h-3.5 shrink-0" />
-      <span>
-        R2: {formatStorageBytes(status.remainingBytes)} left
+      <span className="inline-flex items-center gap-1.5">
+        <HardDrive className="w-3.5 h-3.5 shrink-0" />
+        <span>
+          R2: {formatStorageBytes(status.remainingBytes)} left
+        </span>
       </span>
       {loading && <RefreshCw className="w-3 h-3 animate-spin" />}
     </button>

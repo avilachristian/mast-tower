@@ -184,6 +184,12 @@ export const useCloudSyncStore = create<CloudSyncState>((set, get) => ({
 let syncInitialized = false;
 let schedulerIntervalId: number | null = null;
 let activeDeleteFlushPromise: Promise<void> | null = null;
+const inFlightProjectSyncs = new Map<string, Promise<boolean>>();
+const pendingResyncQueue = new Map<string, { forceOverwrite?: boolean }>();
+const inFlightVisibilityPatches = new Map<
+  string,
+  { settingsKey: string; promise: Promise<void> }
+>();
 
 function isBrowserOnline(): boolean {
   if (typeof navigator === 'undefined') return true;
@@ -231,7 +237,7 @@ export async function flushPendingDeletesOnly(): Promise<void> {
   return activeDeleteFlushPromise;
 }
 
-export async function syncSingleProjectToCloud(
+async function executeSingleProjectSync(
   projectId: string,
   options: { forceOverwrite?: boolean } = {}
 ): Promise<boolean> {
@@ -351,6 +357,57 @@ export async function syncSingleProjectToCloud(
       lastError: err instanceof Error ? err.message : 'Cloud sync failed.',
     });
     return false;
+  }
+}
+
+export async function syncSingleProjectToCloud(
+  projectId: string,
+  options: { forceOverwrite?: boolean } = {}
+): Promise<boolean> {
+  if (!isOnlineAndAuthed()) return false;
+
+  const existing = inFlightProjectSyncs.get(projectId);
+  if (existing) {
+    const queued = pendingResyncQueue.get(projectId);
+    pendingResyncQueue.set(projectId, {
+      forceOverwrite: Boolean(queued?.forceOverwrite || options.forceOverwrite),
+    });
+    const firstResult = await existing;
+    const followUp = inFlightProjectSyncs.get(projectId);
+    if (followUp) {
+      return followUp;
+    }
+    return firstResult;
+  }
+
+  const runLoop = (async () => {
+    let currentOptions = options;
+    let lastResult = false;
+    while (true) {
+      lastResult = await executeSingleProjectSync(projectId, currentOptions);
+      const queued = pendingResyncQueue.get(projectId);
+      pendingResyncQueue.delete(projectId);
+      if (!queued || !lastResult) {
+        break;
+      }
+      const latestRecord = useProjectStore
+        .getState()
+        .projects.find((p) => p.id === projectId);
+      if (!latestRecord || (!queued.forceOverwrite && !doesRecordNeedSync(latestRecord))) {
+        break;
+      }
+      currentOptions = queued;
+    }
+    return lastResult;
+  })();
+
+  inFlightProjectSyncs.set(projectId, runLoop);
+  try {
+    return await runLoop;
+  } finally {
+    if (inFlightProjectSyncs.get(projectId) === runLoop) {
+      inFlightProjectSyncs.delete(projectId);
+    }
   }
 }
 
@@ -548,51 +605,107 @@ export async function resolveConflictOverwriteCloud(): Promise<void> {
   await syncSingleProjectToCloud(conflictProjectId, { forceOverwrite: true });
 }
 
-async function syncClientVisibilityPatch(
+export async function syncClientVisibilityPatch(
   projectId: string,
   settings: ClientShowcaseSettings,
   hadUnsavedStateEdits = false
 ): Promise<void> {
   if (!isOnlineAndAuthed()) return;
-  const record = useProjectStore.getState().projects.find((p) => p.id === projectId);
-  if (!record) return;
 
-  // Publishing a project to the Client Showcase pushes full state + staged photos immediately
-  // so clients see complete, accurate live diagrams & photos.
-  if (settings.enabled) {
-    await syncSingleProjectToCloud(projectId);
-    return;
+  const settingsKey = JSON.stringify(settings);
+  const existing = inFlightVisibilityPatches.get(projectId);
+  if (existing) {
+    if (existing.settingsKey === settingsKey) {
+      return existing.promise;
+    }
+    await existing.promise;
   }
 
-  // If private and never uploaded to cloud yet, keep it local until next manual/scheduled sync.
-  if (!record.version) {
-    return;
-  }
+  const runPromise = (async () => {
+    const record = useProjectStore.getState().projects.find((p) => p.id === projectId);
+    if (!record) return;
 
-  try {
-    const snapshotUpdatedAt = record.updatedAt;
-    const res = await apiClient.updateClientVisibility(projectId, settings);
-    if (res.project) {
-      useProjectStore
-        .getState()
-        .applyCloudSyncResult(
-          projectId,
-          { ...res.project, state: record.state },
-          snapshotUpdatedAt
-        );
-      if (hadUnsavedStateEdits) {
-        useProjectStore.getState().markProjectSyncStatus(projectId, 'pending');
+    // Publishing a project to the Client Showcase pushes full state + staged photos immediately
+    // so clients see complete, accurate live diagrams & photos.
+    if (settings.enabled) {
+      await syncSingleProjectToCloud(projectId);
+      return;
+    }
+
+    // If private and never uploaded to cloud yet, keep it local until next manual/scheduled sync.
+    if (!record.version) {
+      return;
+    }
+
+    try {
+      const snapshotUpdatedAt = record.updatedAt;
+      const res = await apiClient.updateClientVisibility(projectId, settings);
+      if (res.project) {
+        useProjectStore
+          .getState()
+          .applyCloudSyncResult(
+            projectId,
+            { ...res.project, state: record.state },
+            snapshotUpdatedAt
+          );
+        if (hadUnsavedStateEdits) {
+          useProjectStore.getState().markProjectSyncStatus(projectId, 'pending');
+        }
+      }
+      useCloudSyncStore.getState().setStatePatch({
+        lastSyncedAt: new Date().toISOString(),
+        lastError: null,
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        useAuthStore.getState().markSessionExpired();
       }
     }
-    useCloudSyncStore.getState().setStatePatch({
-      lastSyncedAt: new Date().toISOString(),
-      lastError: null,
-    });
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      useAuthStore.getState().markSessionExpired();
+  })();
+
+  inFlightVisibilityPatches.set(projectId, { settingsKey, promise: runPromise });
+  try {
+    await runPromise;
+  } finally {
+    if (inFlightVisibilityPatches.get(projectId)?.promise === runPromise) {
+      inFlightVisibilityPatches.delete(projectId);
     }
   }
+}
+
+export async function syncPendingChangesForClientPreview(
+  targetProjectId?: string
+): Promise<boolean> {
+  if (!isOnlineAndAuthed()) return false;
+
+  await flushPendingDeletesOnly();
+
+  const { activeProjectId, projects } = useProjectStore.getState();
+  const primaryId = targetProjectId ?? activeProjectId;
+  const candidateIds = new Set<string>();
+
+  for (const record of projects) {
+    const isPrimary = record.id === primaryId;
+    const isEnabled = record.clientSettings?.enabled === true;
+    if ((isPrimary || isEnabled) && doesRecordNeedSync(record)) {
+      candidateIds.add(record.id);
+    }
+  }
+
+  let allOk = true;
+  for (const id of candidateIds) {
+    const ok = await syncSingleProjectToCloud(id);
+    if (!ok) allOk = false;
+  }
+
+  if (primaryId) {
+    const inFlightVis = inFlightVisibilityPatches.get(primaryId);
+    if (inFlightVis) {
+      await inFlightVis.promise;
+    }
+  }
+
+  return allOk;
 }
 
 export function initializeCloudSync(): void {
@@ -672,4 +785,7 @@ export function stopCloudSyncSchedulerForTest(): void {
   }
   schedulerIntervalId = null;
   syncInitialized = false;
+  inFlightProjectSyncs.clear();
+  pendingResyncQueue.clear();
+  inFlightVisibilityPatches.clear();
 }

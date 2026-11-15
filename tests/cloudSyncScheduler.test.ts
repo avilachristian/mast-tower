@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCleanBaselineProject } from '../src/entities/project/mast2Baseline';
 import type { SavedProjectRecord } from '../src/entities/project/types';
+import { apiClient } from '../src/shared/api/client';
+import type { R2StorageStatus } from '../src/shared/storage/r2Quota';
 import { DEFAULT_REPORT_LOGOS } from '../src/shared/assets/defaultLogos';
 import {
   estimateDataUrlBytes,
@@ -13,6 +15,9 @@ import {
   doesRecordNeedSync,
   normalizeAutoSyncConfig,
   runScheduledActiveProjectSyncIfDue,
+  stopCloudSyncSchedulerForTest,
+  syncPendingChangesForClientPreview,
+  syncSingleProjectToCloud,
   useCloudSyncStore,
 } from '../src/shared/storage/cloudSync';
 
@@ -204,5 +209,279 @@ describe('Auto-Sync Schedule & Deferred Staging', () => {
     expect(useCloudSyncStore.getState().nextAutoSyncAt).toBe(
       2_000_500 + 15 * 60_000
     );
+  });
+});
+
+const MOCK_STORAGE: R2StorageStatus = {
+  usedBytes: 0,
+  limitBytes: 10_000_000_000,
+  remainingBytes: 10_000_000_000,
+  objectCount: 0,
+  usedPercent: 0,
+  level: 'ok',
+  message: null,
+};
+
+describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    stopCloudSyncSchedulerForTest();
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('window', globalThis);
+    useAuthStore.setState({
+      status: 'authenticated',
+      user: { id: 'adm-1', username: 'admin', displayName: 'Admin' },
+      offlineCached: false,
+      checking: false,
+      errorMessage: null,
+    });
+    useCloudSyncStore.getState().setStatePatch({
+      isSyncing: false,
+      syncingProjectId: null,
+      lastError: null,
+      pendingDeleteIds: [],
+    });
+  });
+
+  it('serializes concurrent syncSingleProjectToCloud calls and flushes mid-flight edits sequentially', async () => {
+    const rec = makeRecord('proj-concurrent', 'pending');
+    rec.version = 1;
+    rec.clientSettings = {
+      enabled: true,
+      featured: false,
+      slug: 'proj-concurrent',
+      phaseMode: 'foundation',
+      showPhotos: true,
+    };
+
+    useProjectStore.setState({
+      projects: [rec],
+      activeProjectId: 'proj-concurrent',
+      project: rec.state,
+    });
+
+    let resolveFirst!: (val: {
+      project: SavedProjectRecord;
+      storage: R2StorageStatus;
+    }) => void;
+    const firstCallPromise = new Promise<{
+      project: SavedProjectRecord;
+      storage: R2StorageStatus;
+    }>((resolve) => {
+      resolveFirst = resolve;
+    });
+
+    const saveSpy = vi
+      .spyOn(apiClient, 'saveAdminProject')
+      .mockImplementationOnce(() => firstCallPromise)
+      .mockImplementationOnce(async (_id, payload) => ({
+        project: {
+          ...rec,
+          version: 3,
+          syncStatus: 'synced',
+          updatedAt: '2026-11-15T06:10:00.000Z',
+          clientSettings: payload.clientSettings
+            ? {
+              enabled: Boolean(payload.clientSettings.enabled),
+              featured: Boolean(payload.clientSettings.featured),
+              slug: payload.clientSettings.slug ?? rec.clientSettings!.slug,
+              welcomeNote: payload.clientSettings.welcomeNote,
+              phaseMode:
+                payload.clientSettings.phaseMode ?? rec.clientSettings!.phaseMode,
+              showPhotos:
+                payload.clientSettings.showPhotos ?? rec.clientSettings!.showPhotos,
+            }
+            : rec.clientSettings,
+          state: payload.state,
+        },
+        storage: MOCK_STORAGE,
+      }));
+
+    // Start first sync in flight
+    const p1 = syncSingleProjectToCloud('proj-concurrent');
+    await vi.waitFor(() => {
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+    });
+
+    // Mutate project clientSettings mid-flight & trigger a second concurrent sync
+    useProjectStore.getState().updateProjectClientSettings('proj-concurrent', {
+      enabled: true,
+      featured: false,
+      slug: 'proj-concurrent',
+      phaseMode: 'vertical_mast',
+      showPhotos: true,
+    });
+    const p2 = syncSingleProjectToCloud('proj-concurrent');
+
+    // Second request must wait for the first to finish rather than racing expectedVersion: 1
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+
+    resolveFirst({
+      project: {
+        ...rec,
+        version: 2,
+        syncStatus: 'synced',
+        updatedAt: '2026-11-15T06:05:00.000Z',
+        clientSettings: { ...rec.clientSettings, phaseMode: 'foundation' },
+      },
+      storage: MOCK_STORAGE,
+    });
+
+    const [res1, res2] = await Promise.all([p1, p2]);
+    expect(res1).toBe(true);
+    expect(res2).toBe(true);
+    expect(saveSpy).toHaveBeenCalledTimes(2);
+    expect(saveSpy.mock.calls[1][1].expectedVersion).toBe(2);
+    expect(saveSpy.mock.calls[1][1].clientSettings?.phaseMode).toBe('vertical_mast');
+
+    const finalRecord = useProjectStore
+      .getState()
+      .projects.find((p) => p.id === 'proj-concurrent');
+    expect(finalRecord?.version).toBe(3);
+    expect(finalRecord?.syncStatus).toBe('synced');
+    expect(finalRecord?.clientSettings?.phaseMode).toBe('vertical_mast');
+  });
+
+  it('preserves newer local clientSettings when applyCloudSyncResult finishes after a mid-sync edit', () => {
+    const rec = makeRecord('proj-mid-edit', 'pending');
+    rec.version = 1;
+    rec.updatedAt = '2026-11-15T07:00:00.000Z';
+    rec.clientSettings = {
+      enabled: true,
+      featured: false,
+      slug: 'proj-mid-edit',
+      phaseMode: 'vertical_mast',
+      showPhotos: true,
+    };
+
+    useProjectStore.setState({
+      projects: [rec],
+      activeProjectId: 'proj-mid-edit',
+      project: rec.state,
+    });
+
+    // Simulate response from an earlier snapshot before local clientSettings was updated
+    useProjectStore.getState().applyCloudSyncResult(
+      'proj-mid-edit',
+      {
+        ...rec,
+        version: 2,
+        syncStatus: 'synced',
+        clientSettings: {
+          enabled: true,
+          featured: false,
+          slug: 'proj-mid-edit',
+          phaseMode: 'foundation',
+          showPhotos: false,
+        },
+      },
+      '2026-11-15T06:00:00.000Z'
+    );
+
+    const updated = useProjectStore
+      .getState()
+      .projects.find((p) => p.id === 'proj-mid-edit');
+    expect(updated?.version).toBe(2);
+    expect(updated?.syncStatus).toBe('pending');
+    expect(updated?.clientSettings?.phaseMode).toBe('vertical_mast');
+    expect(updated?.clientSettings?.showPhotos).toBe(true);
+  });
+
+  it('syncPendingChangesForClientPreview flushes deletes and syncs active + published dirty projects only', async () => {
+    const activeClean = makeRecord('proj-active-clean', 'synced');
+    const publishedDirty = makeRecord('proj-pub-dirty', 'pending');
+    publishedDirty.version = 2;
+    publishedDirty.clientSettings = {
+      enabled: true,
+      featured: true,
+      slug: 'proj-pub-dirty',
+      phaseMode: 'both',
+      showPhotos: true,
+    };
+    const privateDirty = makeRecord('proj-priv-dirty', 'pending');
+    privateDirty.clientSettings = {
+      enabled: false,
+      featured: false,
+      slug: 'proj-priv-dirty',
+      phaseMode: 'foundation',
+      showPhotos: true,
+    };
+
+    useProjectStore.setState({
+      projects: [activeClean, publishedDirty, privateDirty],
+      activeProjectId: 'proj-active-clean',
+      project: activeClean.state,
+    });
+    useCloudSyncStore.getState().setStatePatch({
+      pendingDeleteIds: ['proj-deleted-offline'],
+    });
+
+    const delSpy = vi.spyOn(apiClient, 'deleteAdminProject').mockResolvedValue({
+      ok: true,
+      deletedMediaCount: 0,
+      storage: MOCK_STORAGE,
+    });
+    const saveSpy = vi
+      .spyOn(apiClient, 'saveAdminProject')
+      .mockResolvedValue({
+        project: { ...publishedDirty, version: 3, syncStatus: 'synced' },
+        storage: MOCK_STORAGE,
+      });
+
+    const ok = await syncPendingChangesForClientPreview('proj-active-clean');
+
+    expect(ok).toBe(true);
+    expect(delSpy).toHaveBeenCalledWith('proj-deleted-offline');
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    expect(saveSpy.mock.calls[0][0]).toBe('proj-pub-dirty');
+    expect(useCloudSyncStore.getState().pendingDeleteIds).toEqual([]);
+  });
+
+  it('clears installedDate when reverting vertical mast sections to not_started', () => {
+    const rec = makeRecord('proj-mast-reset', 'synced');
+    rec.state.projectType = 'vertical_mast';
+    useProjectStore.setState({
+      projects: [rec],
+      activeProjectId: 'proj-mast-reset',
+      project: rec.state,
+    });
+
+    useProjectStore.getState().updateTowerSectionStatus('S01', 'plumbed_verified');
+    let sec1 = useProjectStore
+      .getState()
+      .project.verticalMast?.sections.find((s) => s.id === 'S01');
+    expect(sec1?.status).toBe('plumbed_verified');
+    expect(sec1?.installedDate).toBeTruthy();
+
+    useProjectStore.getState().updateTowerSectionStatus('S01', 'not_started');
+    sec1 = useProjectStore
+      .getState()
+      .project.verticalMast?.sections.find((s) => s.id === 'S01');
+    expect(sec1?.status).toBe('not_started');
+    expect(sec1?.installedDate).toBeUndefined();
+
+    useProjectStore.getState().updateTowerSectionStatus('S01', 'plumbed_verified');
+    useProjectStore
+      .getState()
+      .batchUpdateTowerSectionRange(2, 4, 'plumbed_verified');
+    expect(
+      useProjectStore
+        .getState()
+        .project.verticalMast?.sections.find((s) => s.id === 'S03')?.installedDate
+    ).toBeTruthy();
+
+    useProjectStore
+      .getState()
+      .batchUpdateTowerSectionRange(2, 4, 'not_started');
+    expect(
+      useProjectStore
+        .getState()
+        .project.verticalMast?.sections.find((s) => s.id === 'S03')?.installedDate
+    ).toBeUndefined();
   });
 });

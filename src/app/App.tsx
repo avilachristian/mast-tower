@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   BarChart3,
@@ -11,12 +12,15 @@ import {
   FolderKanban,
   Globe,
   Layers,
+  Loader2,
   LogOut,
+  Menu,
   RefreshCw,
   RotateCcw,
   Truck,
   Upload,
   Users,
+  X,
 } from 'lucide-react';
 import {
   computeCivilWorksPayrollPreview,
@@ -30,12 +34,15 @@ import { usePwaStore } from '@/shared/pwa/pwaManager';
 import { useAuthStore } from '@/shared/state/authStore';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
+import { useStorageQuotaStore } from '@/shared/state/storageQuotaStore';
 import { useUiStore } from '@/shared/state/uiStore';
 import {
+  doesRecordNeedSync,
   hydrateCloudWorkspace,
   initializeCloudSync,
   resolveConflictOverwriteCloud,
   resolveConflictUseCloud,
+  syncPendingChangesForClientPreview,
   useCloudSyncStore,
 } from '@/shared/storage/cloudSync';
 import { AdminLoginView } from '@/widgets/auth/AdminLoginView';
@@ -44,7 +51,10 @@ import { AppDialogModal } from '@/widgets/common/AppDialogModal';
 import { ToastBanner } from '@/widgets/common/ToastBanner';
 import { PwaStatusBanner } from '@/widgets/pwa/PwaStatusBanner';
 import { ClientVisibilityModal } from '@/widgets/projects/ClientVisibilityModal';
-import { CloudSyncControls } from '@/widgets/storage/CloudSyncControls';
+import {
+  CloudSyncControls,
+  CloudSyncPanel,
+} from '@/widgets/storage/CloudSyncControls';
 import {
   R2StorageAlertBanner,
   R2StorageHeaderPill,
@@ -85,12 +95,22 @@ function AdminWorkspace() {
   } = useProjectStore();
 
   const authUser = useAuthStore((s) => s.user);
+  const offlineCached = useAuthStore((s) => s.offlineCached);
   const logout = useAuthStore((s) => s.logout);
   const conflictProjectId = useCloudSyncStore((s) => s.conflictProjectId);
+  const syncError = useCloudSyncStore((s) => s.lastError);
+  const pendingDeleteCount = useCloudSyncStore((s) => s.pendingDeleteIds.length);
+  const r2StatusLevel = useStorageQuotaStore((s) => s.status?.level);
   const [clientModalProjectId, setClientModalProjectId] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [openingClientView, setOpeningClientView] = useState(false);
   const activeRecord = useMemo(
     () => projects.find((p) => p.id === activeProjectId),
     [projects, activeProjectId]
+  );
+  const hasUnsyncedProjects = useMemo(
+    () => projects.some((p) => doesRecordNeedSync(p)),
+    [projects]
   );
 
   const {
@@ -266,6 +286,70 @@ function AdminWorkspace() {
     }
   };
 
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileMenuOpen]);
+
+  const isOffline =
+    offlineCached || (typeof navigator !== 'undefined' && navigator.onLine === false);
+  const mobileMenuDotTone =
+    conflictProjectId || r2StatusLevel === 'blocked' || syncError
+      ? 'bg-rose-500'
+      : isOffline ||
+          hasUnsyncedProjects ||
+          pendingDeleteCount > 0 ||
+          r2StatusLevel === 'warning'
+        ? 'bg-amber-500'
+        : updateAvailable
+          ? 'bg-emerald-500'
+          : null;
+
+  const handleOpenReport = () => {
+    if (activeAppTab === 'project_status') {
+      setOverallReportOpen(true);
+    } else if (activeAppTab === 'daily_logs' && project.dailyLogs[0]) {
+      setDailyLogPrintId(project.dailyLogs[0].id);
+    } else if (activeAppTab === 'inspection') {
+      setInspectionReportOpen(true);
+    } else if (activeAppTab === 'manpower') {
+      setPayrollPrintTarget({
+        kind: manpowerPaymentMode === 'hauler' ? 'hauler' : 'civil',
+      });
+    } else {
+      setReportOpen(true);
+    }
+  };
+
+  const handleResetAll = async () => {
+    const confirmed = await requestConfirm({
+      tone: 'danger',
+      title: 'Reset All Project Data?',
+      message:
+        'Reset all foundation & vertical mast progress, photos, daily logs, and material inputs?',
+      confirmLabel: 'Reset All',
+    });
+    if (confirmed) {
+      resetCleanBaseline();
+    }
+  };
+
+  const handleOpenClientView = async () => {
+    if (openingClientView) return;
+    setOpeningClientView(true);
+    try {
+      await syncPendingChangesForClientPreview(activeProjectId);
+    } finally {
+      setOpeningClientView(false);
+      setMobileMenuOpen(false);
+    }
+    navigateTo('/');
+  };
+
   return (
     <div className="min-h-dvh flex flex-col bg-slate-50 text-slate-900">
       {/* Slim Mobile-First Header */}
@@ -322,146 +406,351 @@ function AdminWorkspace() {
             )}
           </div>
 
-          {/* Utility Actions */}
-          {!projectBrowserOpen && (
-            <div className="flex items-center gap-1.5 shrink-0">
-            {updateAvailable && (
-              <button
-                type="button"
-                onClick={() => void applyUpdate()}
-                disabled={isUpdating}
-                title="Update to newest app version"
-                aria-label="Update to newest app version"
-                className="inline-flex items-center justify-center gap-1 min-h-10 sm:min-h-0 px-2.5 py-2 sm:py-1.5 rounded-lg sm:rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs disabled:opacity-70"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isUpdating ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">{isUpdating ? 'Updating...' : 'Update'}</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                if (activeAppTab === 'project_status') {
-                  setOverallReportOpen(true);
-                } else if (activeAppTab === 'daily_logs' && project.dailyLogs[0]) {
-                  setDailyLogPrintId(project.dailyLogs[0].id);
-                } else if (activeAppTab === 'inspection') {
-                  setInspectionReportOpen(true);
-                } else if (activeAppTab === 'manpower') {
-                  setPayrollPrintTarget({
-                    kind: manpowerPaymentMode === 'hauler' ? 'hauler' : 'civil',
-                  });
-                } else {
-                  setReportOpen(true);
-                }
-              }}
-              title="Open Report Preview"
-              aria-label="Open Report Preview"
-              className="inline-flex items-center justify-center gap-1.5 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-2.5 py-2 sm:py-1.5 rounded-lg sm:rounded-md bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
-            >
-              <FileText className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-              <span className="hidden sm:inline">Report</span>
-            </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            onChange={handleImportFile}
+            className="hidden"
+          />
 
-            <button
-              type="button"
-              onClick={handleExportJson}
-              title="Export JSON Backup"
-              aria-label="Export JSON Backup"
-              className="inline-flex items-center justify-center gap-1 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md bg-white hover:bg-slate-50 border border-slate-200 text-xs text-slate-700 transition cursor-pointer"
-            >
-              <Download className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-500" />
-              <span className="hidden md:inline">Export</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              title="Import JSON Backup"
-              aria-label="Import JSON Backup"
-              className="inline-flex items-center justify-center gap-1 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md bg-white hover:bg-slate-50 border border-slate-200 text-xs text-slate-700 transition cursor-pointer"
-            >
-              <Upload className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-500" />
-              <span className="hidden md:inline">Import</span>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/json"
-              onChange={handleImportFile}
-              className="hidden"
-            />
-
-            <button
-              type="button"
-              onClick={async () => {
-                const confirmed = await requestConfirm({
-                  tone: 'danger',
-                  title: 'Reset All Project Data?',
-                  message:
-                    'Reset all foundation & vertical mast progress, photos, daily logs, and material inputs?',
-                  confirmLabel: 'Reset All',
-                });
-                if (confirmed) {
-                  resetCleanBaseline();
-                }
-              }}
-              title="Reset All"
-              aria-label="Reset All"
-              className="inline-flex items-center justify-center min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-xs text-slate-500 hover:text-rose-600 transition cursor-pointer"
-            >
-              <RotateCcw className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-            </button>
-            </div>
-          )}
-
-          {/* Cloud, R2 Quota, Showcase & Auth Controls */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <R2StorageHeaderPill />
-
+          {/* Desktop Controls (>= md) */}
+          <div className="hidden md:flex items-center gap-1.5 shrink-0">
             {!projectBrowserOpen && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {updateAvailable && (
+                  <button
+                    type="button"
+                    onClick={() => void applyUpdate()}
+                    disabled={isUpdating}
+                    title="Update to newest app version"
+                    aria-label="Update to newest app version"
+                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs disabled:opacity-70"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isUpdating ? 'animate-spin' : ''}`} />
+                    <span>{isUpdating ? 'Updating...' : 'Update'}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleOpenReport}
+                  title="Open Report Preview"
+                  aria-label="Open Report Preview"
+                  className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Report</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportJson}
+                  title="Export JSON Backup"
+                  aria-label="Export JSON Backup"
+                  className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-white hover:bg-slate-50 border border-slate-200 text-xs text-slate-700 transition cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Export</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Import JSON Backup"
+                  aria-label="Import JSON Backup"
+                  className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-white hover:bg-slate-50 border border-slate-200 text-xs text-slate-700 transition cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Import</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleResetAll()}
+                  title="Reset All"
+                  aria-label="Reset All"
+                  className="inline-flex items-center justify-center px-2 py-1.5 rounded-md bg-white hover:bg-rose-50 border border-slate-200 hover:border-rose-200 text-xs text-slate-500 hover:text-rose-600 transition cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Cloud, R2 Quota, Showcase & Auth Controls */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <R2StorageHeaderPill />
+
+              {!projectBrowserOpen && (
+                <button
+                  type="button"
+                  onClick={() => setClientModalProjectId(activeProjectId)}
+                  title="Configure Client Showcase visibility for active project"
+                  aria-label="Client Showcase settings"
+                  className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border text-xs font-semibold transition cursor-pointer ${
+                    activeRecord?.clientSettings?.enabled
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                  <span className="hidden xl:inline">
+                    {activeRecord?.clientSettings?.enabled ? 'Client: Live' : 'Client Share'}
+                  </span>
+                </button>
+              )}
+
+              <CloudSyncControls />
+
               <button
                 type="button"
-                onClick={() => setClientModalProjectId(activeProjectId)}
-                title="Configure Client Showcase visibility for active project"
-                aria-label="Client Showcase settings"
-                className={`inline-flex items-center justify-center gap-1 min-h-10 sm:min-h-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md border text-xs font-semibold transition cursor-pointer ${
-                  activeRecord?.clientSettings?.enabled
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                }`}
+                disabled={openingClientView}
+                onClick={() => void handleOpenClientView()}
+                title="Sync pending edits and open Public Client Showcase Page"
+                className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-60 text-xs font-semibold text-slate-700 transition cursor-pointer disabled:cursor-not-allowed"
               >
-                <Globe className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                <span className="hidden xl:inline">
-                  {activeRecord?.clientSettings?.enabled ? 'Client: Live' : 'Client Share'}
+                {openingClientView ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
+                ) : (
+                  <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+                )}
+                <span className="hidden lg:inline">
+                  {openingClientView ? 'Syncing...' : 'Client View'}
                 </span>
               </button>
-            )}
 
-            <CloudSyncControls />
+              <button
+                type="button"
+                onClick={() => void logout()}
+                title={`Sign out${authUser ? ` (${authUser.username})` : ''}`}
+                aria-label="Sign out of Admin Workspace"
+                className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-xs font-semibold text-slate-600 hover:text-rose-700 transition cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden xl:inline">Sign Out</span>
+              </button>
+            </div>
+          </div>
 
+          {/* Mobile Compact Menu Toggle (< md) */}
+          <div className="flex md:hidden items-center shrink-0">
             <button
               type="button"
-              onClick={() => navigateTo('/')}
-              title="Open Public Client Showcase Page"
-              className="inline-flex items-center justify-center gap-1 min-h-10 sm:min-h-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition cursor-pointer"
+              onClick={() => setMobileMenuOpen((v) => !v)}
+              aria-expanded={mobileMenuOpen}
+              aria-label={mobileMenuOpen ? 'Close workspace menu' : 'Open workspace menu'}
+              title="Workspace menu, Cloud Sync & Tools"
+              className="relative inline-flex items-center justify-center min-h-10 min-w-10 px-2.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer"
             >
-              <ExternalLink className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-500" />
-              <span className="hidden lg:inline">Client View</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => void logout()}
-              title={`Sign out${authUser ? ` (${authUser.username})` : ''}`}
-              aria-label="Sign out of Admin Workspace"
-              className="inline-flex items-center justify-center gap-1 min-h-10 sm:min-h-0 px-2.5 sm:px-2 py-2 sm:py-1.5 rounded-lg sm:rounded-md border border-slate-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-xs font-semibold text-slate-600 hover:text-rose-700 transition cursor-pointer"
-            >
-              <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-              <span className="hidden xl:inline">Sign Out</span>
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {mobileMenuDotTone && (
+                <span
+                  aria-hidden="true"
+                  className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ring-2 ring-white ${mobileMenuDotTone}`}
+                />
+              )}
             </button>
           </div>
         </div>
+
+        {/* Mobile Drawer Menu (< md) */}
+        {mobileMenuOpen &&
+          createPortal(
+            <div className="fixed inset-0 z-50 md:hidden flex justify-end">
+              <div
+                className="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px]"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-hidden="true"
+              />
+              <aside
+                role="dialog"
+                aria-modal="true"
+                aria-label="Workspace Menu"
+                className="relative w-[min(22rem,92vw)] h-full bg-white shadow-2xl border-l border-slate-200 flex flex-col overflow-hidden"
+              >
+                <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/70 flex items-start justify-between gap-2 shrink-0">
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Admin Workspace Menu
+                    </div>
+                    <div className="text-xs font-bold text-slate-900 truncate mt-0.5">
+                      {project.reportDetails?.projectName?.trim() || project.projectName}
+                    </div>
+                    {!projectBrowserOpen && (
+                      <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+                        Foundation: {completedCount}/{project.foundations.length} · Mast:{' '}
+                        {verticalMastMetrics
+                          ? `${verticalMastMetrics.erectedSections}/${verticalMastMetrics.totalSections}`
+                          : '0/41'}{' '}
+                        Sec
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMobileMenuOpen(false)}
+                    aria-label="Close workspace menu"
+                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-200/70 transition cursor-pointer shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+                  {/* Cloud Sync & R2 Quota */}
+                  <section className="space-y-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Cloud Sync &amp; Storage
+                    </div>
+                    <R2StorageHeaderPill showAlways />
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/40 p-3">
+                      <CloudSyncPanel onActionComplete={() => setMobileMenuOpen(false)} />
+                    </div>
+                  </section>
+
+                  {/* Client Showcase */}
+                  <section className="space-y-2">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Client Showcase
+                    </div>
+                    {!projectBrowserOpen && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          setClientModalProjectId(activeProjectId);
+                        }}
+                        className={`w-full py-2 px-3 rounded-lg border text-xs font-semibold inline-flex items-center justify-between gap-2 cursor-pointer ${
+                          activeRecord?.clientSettings?.enabled
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <Globe className="w-4 h-4 shrink-0" />
+                          <span>Client Share Settings</span>
+                        </span>
+                        <span className="text-[10px] font-bold uppercase">
+                          {activeRecord?.clientSettings?.enabled ? 'Live' : 'Private'}
+                        </span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={openingClientView}
+                      onClick={() => void handleOpenClientView()}
+                      className="w-full py-2 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-60 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      {openingClientView ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-sky-600" />
+                      ) : (
+                        <ExternalLink className="w-4 h-4 text-slate-500" />
+                      )}
+                      <span>
+                        {openingClientView ? 'Syncing & Opening Client View...' : 'Open Client View'}
+                      </span>
+                    </button>
+                  </section>
+
+                  {/* Project Tools */}
+                  {!projectBrowserOpen && (
+                    <section className="space-y-2">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Report &amp; Backup Tools
+                      </div>
+
+                      {updateAvailable && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            void applyUpdate();
+                          }}
+                          disabled={isUpdating}
+                          className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold inline-flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isUpdating ? 'animate-spin' : ''}`} />
+                          <span>{isUpdating ? 'Updating App...' : 'Update to Newest Version'}</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          handleOpenReport();
+                        }}
+                        className="w-full py-2 px-3 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold inline-flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span>Open Report Preview</span>
+                      </button>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            handleExportJson();
+                          }}
+                          className="py-2 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Export JSON</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMobileMenuOpen(false);
+                            fileInputRef.current?.click();
+                          }}
+                          className="py-2 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Import JSON</span>
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          void handleResetAll();
+                        }}
+                        className="w-full py-2 px-3 rounded-lg border border-rose-200 bg-rose-50/70 hover:bg-rose-100 text-xs font-semibold text-rose-700 inline-flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset All Project Data</span>
+                      </button>
+                    </section>
+                  )}
+                </div>
+
+                <div className="p-3.5 border-t border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2 shrink-0">
+                  <div className="min-w-0">
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                      Signed In As
+                    </div>
+                    <div className="text-xs font-bold text-slate-800 truncate">
+                      {authUser?.username ?? 'Admin'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      void logout();
+                    }}
+                    className="px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-rose-50 hover:border-rose-200 text-xs font-semibold text-rose-700 inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </aside>
+            </div>,
+            document.body
+          )}
 
         {/* Navigation Bar (Phase Toggle on all viewports; Text Tabs on Desktop >= md) */}
         {!projectBrowserOpen && (

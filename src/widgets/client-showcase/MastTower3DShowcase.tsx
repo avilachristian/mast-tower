@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RotateCcw, Eye, EyeOff, Box, AlertTriangle } from 'lucide-react';
 import { STATUS_META } from '@/entities/project/mast2Baseline';
@@ -17,6 +18,7 @@ import type {
 import {
   GUY_SECTOR_KEYS,
   GUY_STRAND_COLOR_META,
+  applyMaterialTransparency,
   createFoundationPadVisual,
   createGuyCableVisual,
   createSurveyDatumGroup,
@@ -174,8 +176,7 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMapping = THREE.NoToneMapping;
 
     const initialWidth = Math.max(320, container.clientWidth);
     const initialHeight = Math.max(460, container.clientHeight);
@@ -188,6 +189,12 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#F7F6F2');
     scene.fog = new THREE.Fog('#F7F6F2', 260, 520);
+
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    const roomEnv = new RoomEnvironment();
+    const envRT = pmremGenerator.fromScene(roomEnv, 0.04);
+    scene.environment = envRT.texture;
+    roomEnv.dispose();
 
     const camera = new THREE.PerspectiveCamera(38, initialWidth / initialHeight, 0.5, 900);
     const defaultPreset = CAMERA_PRESETS[0];
@@ -202,11 +209,11 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
     controls.maxPolarAngle = Math.PI * 0.62;
     controls.update();
 
-    // Neutral studio lighting matching warm drafting palette
-    const hemiLight = new THREE.HemisphereLight('#ffffff', '#d6d3cd', 1.15);
+    // Neutral studio lighting matching warm drafting palette with IBL
+    const hemiLight = new THREE.HemisphereLight('#ffffff', '#d6d3cd', 0.85);
     scene.add(hemiLight);
 
-    const keyDirLight = new THREE.DirectionalLight('#fffdf8', 1.55);
+    const keyDirLight = new THREE.DirectionalLight('#fffdf8', 1.25);
     keyDirLight.position.set(110, 165, 95);
     scene.add(keyDirLight);
 
@@ -257,6 +264,9 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
       const showPending = showPendingRef.current;
       const currentFoundations = foundationsRef.current;
       const currentMast = verticalMastRef.current;
+      const sMap = new Map((currentMast?.sections ?? []).map((s) => [s.id, s]));
+      const baseSectionStatus: TowerSectionStatus =
+        sMap.get('S01')?.status ?? 'not_started';
 
       // 1. Update Foundations (PF-0 + 12 Pull Anchors)
       const fMap = new Map(currentFoundations.map((f) => [f.id, f]));
@@ -270,21 +280,22 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
           isSelected,
           showPending,
           currentMast?.guyLayers,
+          baseSectionStatus,
         );
       }
 
       // 2. Update 41 Tower Sections (S01..S41)
-      const sMap = new Map((currentMast?.sections ?? []).map((s) => [s.id, s]));
       for (const sh of sectionHandles) {
         const secRec = sMap.get(sh.sectionId);
         const status: TowerSectionStatus = secRec?.status ?? 'not_started';
         const isSelected = sel?.kind === 'section' && sel.sectionId === sh.sectionId;
         const colorHex = resolveSectionColorHex(status, mode);
+        const sectionOpacity =
+          mode === 'foundation' ? 0.35 : status === 'not_started' ? 0.72 : 1.0;
 
         for (const mat of sh.materials) {
           mat.color.set(colorHex);
-          mat.opacity =
-            mode === 'foundation' ? 0.24 : status === 'not_started' ? 0.42 : 0.96;
+          applyMaterialTransparency(mat, sectionOpacity);
           mat.emissive.set(isSelected ? colorHex : '#000000');
           mat.emissiveIntensity = isSelected ? 0.42 : 0;
         }
@@ -417,10 +428,9 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
               const prevMat = mesh.material;
               const perSectionMat = new THREE.MeshStandardMaterial({
                 color: new THREE.Color('#94a3b8'),
-                roughness: 0.45,
-                metalness: 0.4,
-                transparent: true,
-                opacity: 0.95,
+                roughness: 0.52,
+                metalness: 0.14,
+                side: THREE.DoubleSide,
               });
               mesh.material = perSectionMat;
               mesh.userData = {
@@ -578,6 +588,9 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
       disposeGroupChildren(cableLayerGroup);
       disposeGroupChildren(surveyDatum);
 
+      scene.environment = null;
+      envRT.dispose();
+      pmremGenerator.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);
@@ -741,10 +754,15 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
         <div ref={containerRef} className="w-full h-full" />
 
         {/* Coordinate & status HUD overlay */}
-        <div className="pointer-events-none absolute top-3 left-3 flex flex-col gap-1">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white/90 border border-slate-300 text-[10px] font-mono uppercase tracking-wider text-slate-700">
-            <Box className="w-3 h-3 text-slate-900" />
-            Revit 41-Section Mast + 13 Footings + 48 Guys · N.G.L. Y = 0.00m
+        <div className="pointer-events-none absolute top-3 left-3 right-3 flex flex-col items-start gap-1">
+          <div className="inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 bg-white/90 border border-slate-300 text-[10px] font-mono uppercase tracking-wider text-slate-700 truncate">
+            <Box className="w-3 h-3 text-slate-900 shrink-0" />
+            <span className="hidden sm:inline truncate">
+              Revit 41-Section Mast + 13 Footings + 48 Guys · N.G.L. Y = 0.00m
+            </span>
+            <span className="sm:hidden truncate">
+              41-Sec Mast · 13 Pads · 48 Guys
+            </span>
           </div>
           {modelStatus === 'loading' && (
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 text-white text-[10px] font-mono uppercase tracking-wider">
@@ -760,11 +778,14 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
 
         {/* Hover badge & interaction hint */}
         <div className="pointer-events-none absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 text-[10px] font-mono uppercase tracking-wider">
-          <span className="px-2 py-1 bg-white/85 border border-slate-300 text-slate-600">
-            Drag Orbit · Scroll Zoom · Right-Drag Pan · Click Pad / Section / Guy
+          <span className="px-2 py-1 bg-white/85 border border-slate-300 text-slate-600 truncate">
+            <span className="hidden sm:inline">
+              Drag Orbit · Scroll Zoom · Right-Drag Pan · Click Pad / Section / Guy
+            </span>
+            <span className="sm:hidden">Drag · Pinch · Tap</span>
           </span>
           {hoverLabel && (
-            <span className="px-2.5 py-1 bg-slate-900 text-white border border-slate-900">
+            <span className="px-2.5 py-1 bg-slate-900 text-white border border-slate-900 truncate max-w-[48%] sm:max-w-none shrink-0">
               {hoverLabel}
             </span>
           )}

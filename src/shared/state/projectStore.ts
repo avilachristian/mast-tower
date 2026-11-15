@@ -2018,7 +2018,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               ...sec,
               status,
               checklist: sectionChecklistFromStatus(status),
-              installedDate: isInstalled ? sec.installedDate || today : sec.installedDate,
+              installedDate: isInstalled
+                ? sec.installedDate || today
+                : status === 'not_started'
+                  ? undefined
+                  : sec.installedDate,
               verifiedDate:
                 status === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
             }
@@ -2124,7 +2128,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               ...sec,
               status,
               checklist: sectionChecklistFromStatus(status),
-              installedDate: isInstalled ? sec.installedDate || today : sec.installedDate,
+              installedDate: isInstalled
+                ? sec.installedDate || today
+                : status === 'not_started'
+                  ? undefined
+                  : sec.installedDate,
               verifiedDate:
                 status === 'plumbed_verified' ? sec.verifiedDate || today : undefined,
             }
@@ -2555,7 +2563,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           ? {
               ...current,
               version: normalized.version,
-              clientSettings: normalized.clientSettings,
               syncStatus: 'pending',
             }
           : {

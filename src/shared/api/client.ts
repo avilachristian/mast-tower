@@ -49,6 +49,7 @@ async function requestJson<T>(
 
   const res = await fetch(input, {
     ...init,
+    cache: init.cache ?? 'no-store',
     credentials: 'include',
     headers,
   });

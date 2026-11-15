@@ -168,15 +168,43 @@ export function computeAnchorGuyStage(
   return 'pending';
 }
 
+/** Updates material opacity and transparent/depthWrite queue flags only when needed. */
+export function applyMaterialTransparency(
+  mat: THREE.MeshStandardMaterial | THREE.LineBasicMaterial,
+  opacity: number,
+): void {
+  const clamped = Math.max(0, Math.min(1, opacity));
+  const shouldBeTransparent = clamped < 0.99;
+  const shouldDepthWrite = clamped >= 0.65;
+  if (mat.transparent !== shouldBeTransparent || mat.depthWrite !== shouldDepthWrite) {
+    mat.transparent = shouldBeTransparent;
+    mat.depthWrite = shouldDepthWrite;
+    mat.needsUpdate = true;
+  }
+  mat.opacity = clamped;
+}
+
 /** Resolves pad display color according to active 3D legend mode. */
 export function resolveFoundationColorHex(
   foundation: Pick<ClientFoundationSummary, 'id' | 'type' | 'sector' | 'status'>,
   mode: Tower3DColorMode,
   guyLayers?: GuyLayerRecord[],
+  baseSectionStatus?: TowerSectionStatus,
 ): string {
-  if (mode === 'mast_guying' && foundation.type !== 'principal' && guyLayers) {
-    const stage = computeAnchorGuyStage(foundation.id, foundation.sector, guyLayers);
-    if (stage) return ANCHOR_GUY_STAGE_META[stage].color;
+  if (mode === 'mast_guying') {
+    if (foundation.type === 'principal') {
+      if (!baseSectionStatus || baseSectionStatus === 'not_started') {
+        return ANCHOR_GUY_STAGE_META.pending.color;
+      }
+      if (baseSectionStatus === 'plumbed_verified') {
+        return ANCHOR_GUY_STAGE_META.all_tensioned.color;
+      }
+      return TOWER_SECTION_STATUS_META[baseSectionStatus].color;
+    }
+    if (guyLayers) {
+      const stage = computeAnchorGuyStage(foundation.id, foundation.sector, guyLayers);
+      if (stage) return ANCHOR_GUY_STAGE_META[stage].color;
+    }
   }
   return STATUS_META[foundation.status].color;
 }
@@ -336,9 +364,8 @@ export function createFoundationPadVisual(
     color: new THREE.Color(initialColorHex),
     roughness: 0.72,
     metalness: 0.08,
-    transparent: true,
-    opacity: 0.92,
   });
+  applyMaterialTransparency(bodyMat, 1.0);
   const bodyMesh = new THREE.Mesh(bodyGeom, bodyMat);
   bodyMesh.position.y = metrics.padCenterY;
   bodyMesh.userData = { ...pickMeta };
@@ -349,7 +376,7 @@ export function createFoundationPadVisual(
   const edgeMat = new THREE.LineBasicMaterial({
     color: 0x1e293b,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.65,
   });
   const wireframe = new THREE.LineSegments(edgesGeom, edgeMat);
   wireframe.position.copy(bodyMesh.position);
@@ -365,8 +392,6 @@ export function createFoundationPadVisual(
     color: 0xd6d3d1,
     roughness: 0.92,
     metalness: 0.02,
-    transparent: true,
-    opacity: 0.85,
   });
   const leanMesh = new THREE.Mesh(leanGeom, leanMat);
   leanMesh.position.y = metrics.leanCenterY;
@@ -384,6 +409,7 @@ export function createFoundationPadVisual(
     const pitMat = new THREE.LineBasicMaterial({
       color: 0xa8a29e,
       transparent: true,
+      depthWrite: false,
       opacity: 0.28,
     });
     const pitLines = new THREE.LineSegments(pitEdges, pitMat);
@@ -449,21 +475,35 @@ export function updateFoundationPadVisual(
   isSelected: boolean,
   showPendingGhosts: boolean,
   guyLayers?: GuyLayerRecord[],
+  baseSectionStatus?: TowerSectionStatus,
 ): void {
   handle.foundation = foundation;
   const status: FoundationStatus = foundation.status;
-  const colorHex = resolveFoundationColorHex(foundation, mode, guyLayers);
-  const isMuted = status === 'not_started';
+  const colorHex = resolveFoundationColorHex(foundation, mode, guyLayers, baseSectionStatus);
+
+  const isMastBasePending =
+    mode === 'mast_guying' &&
+    foundation.type === 'principal' &&
+    (!baseSectionStatus || baseSectionStatus === 'not_started');
+  const isAnchorPending =
+    mode === 'mast_guying' &&
+    foundation.type !== 'principal' &&
+    (!guyLayers ||
+      computeAnchorGuyStage(foundation.id, foundation.sector, guyLayers) === 'pending');
+  const isMuted =
+    mode === 'mast_guying'
+      ? isMastBasePending || isAnchorPending
+      : status === 'not_started';
 
   const bodyMat = handle.bodyMesh.material as THREE.MeshStandardMaterial;
   bodyMat.color.set(colorHex);
-  bodyMat.opacity = isMuted && showPendingGhosts ? 0.48 : 0.92;
+  applyMaterialTransparency(bodyMat, isMuted ? 0.5 : 1.0);
   bodyMat.emissive.set(isSelected ? colorHex : '#000000');
   bodyMat.emissiveIntensity = isSelected ? 0.35 : 0;
 
   const lineMat = handle.wireframe.material as THREE.LineBasicMaterial;
   lineMat.color.set(isSelected ? 0x0f172a : 0x334155);
-  lineMat.opacity = isSelected ? 1 : 0.55;
+  applyMaterialTransparency(lineMat, isSelected ? 1.0 : 0.65);
 
   handle.group.visible = !(isMuted && !showPendingGhosts);
 }
@@ -490,11 +530,10 @@ export function createGuyCableVisual(
   const geom = new THREE.TubeGeometry(curve, 14, 0.055, 5, false);
   const mat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(resolveGuyStrandColorHex(progress)),
-    roughness: 0.45,
-    metalness: 0.35,
-    transparent: true,
-    opacity: strandStatus === 'pending' ? 0.25 : 0.95,
+    roughness: 0.48,
+    metalness: 0.14,
   });
+  applyMaterialTransparency(mat, strandStatus === 'pending' ? 0.42 : 1.0);
 
   const mesh = new THREE.Mesh(geom, mat);
   mesh.name = `Cable_${layer.id}_${sector}`;
@@ -520,7 +559,7 @@ export function updateGuyCableVisual(
 
   if (mode === 'foundation') {
     mat.color.set('#cbd5e1');
-    mat.opacity = 0.22;
+    applyMaterialTransparency(mat, 0.3);
     mat.emissive.set('#000000');
     mat.emissiveIntensity = 0;
     handle.mesh.visible = showPendingGhosts;
@@ -529,8 +568,8 @@ export function updateGuyCableVisual(
 
   const colorHex = resolveGuyStrandColorHex(progress);
   mat.color.set(colorHex);
-  mat.opacity = strandStatus === 'pending' ? 0.24 : 0.96;
+  applyMaterialTransparency(mat, strandStatus === 'pending' ? 0.42 : 1.0);
   mat.emissive.set(isSelected ? colorHex : '#000000');
-  mat.emissiveIntensity = isSelected ? 0.45 : 0;
+  mat.emissiveIntensity = isSelected ? 0.42 : 0;
   handle.mesh.visible = !(strandStatus === 'pending' && !showPendingGhosts);
 }

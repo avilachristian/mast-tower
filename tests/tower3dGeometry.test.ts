@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import { buildClientShowcaseDto } from '../src/entities/project/clientProjection';
 import {
   FOUNDATION_SPECS,
@@ -18,14 +19,19 @@ import {
   GUY_SECTOR_KEYS,
   GUY_STRAND_COLOR_META,
   SECTOR_ANGLES_DEG,
+  applyMaterialTransparency,
   buildGuyCableCurvePoints,
   computeAnchorGuyStage,
   computeFoundationBoxMetrics,
   computeTowerGuyAttachmentVec3,
+  createFoundationPadVisual,
+  createGuyCableVisual,
   resolveFoundationColorHex,
   resolveGuyStrandColorHex,
   resolveLayerGussetElevationM,
   resolveSectionColorHex,
+  updateFoundationPadVisual,
+  updateGuyCableVisual,
 } from '../src/widgets/client-showcase/tower3dGeometry';
 
 describe('Tower 3D Geometry & Legend Color Mapping', () => {
@@ -189,5 +195,93 @@ describe('Tower 3D Geometry & Legend Color Mapping', () => {
     expect(resolveGuyStrandColorHex({ pulled: true, terminated: true, tensioned: true })).toBe(
       GUY_STRAND_COLOR_META.tensioned.color,
     );
+  });
+
+  it('colors PF-0 from S01 stage in mast_guying mode and toggles opaque/transparent depthWrite flags cleanly', () => {
+    const foundations = createInitialFoundations();
+    const vm = createInitialVerticalMastState();
+    const pf0 = foundations.find((f) => f.id === 'PF-0')!;
+    pf0.status = 'completed';
+
+    // In mast_guying mode, PF-0 reflects S01 erection stage rather than civil completed status
+    expect(resolveFoundationColorHex(pf0, 'mast_guying', vm.guyLayers)).toBe(
+      ANCHOR_GUY_STAGE_META.pending.color,
+    );
+    expect(resolveFoundationColorHex(pf0, 'mast_guying', vm.guyLayers, 'not_started')).toBe(
+      ANCHOR_GUY_STAGE_META.pending.color,
+    );
+    expect(resolveFoundationColorHex(pf0, 'mast_guying', vm.guyLayers, 'hoisted')).toBe(
+      TOWER_SECTION_STATUS_META.hoisted.color,
+    );
+    expect(
+      resolveFoundationColorHex(pf0, 'mast_guying', vm.guyLayers, 'plumbed_verified'),
+    ).toBe(ANCHOR_GUY_STAGE_META.all_tensioned.color);
+
+    // Civil modes still honor PF-0 civil completion color
+    expect(resolveFoundationColorHex(pf0, 'foundation', vm.guyLayers, 'not_started')).toBe(
+      STATUS_META.completed.color,
+    );
+
+    const mat = new THREE.MeshStandardMaterial({ color: '#10b981' });
+    applyMaterialTransparency(mat, 1.0);
+    expect(mat.transparent).toBe(false);
+    expect(mat.depthWrite).toBe(true);
+    expect(mat.opacity).toBe(1);
+
+    applyMaterialTransparency(mat, 0.72);
+    expect(mat.transparent).toBe(true);
+    expect(mat.depthWrite).toBe(true);
+    expect(mat.opacity).toBeCloseTo(0.72, 5);
+
+    applyMaterialTransparency(mat, 0.35);
+    expect(mat.transparent).toBe(true);
+    expect(mat.depthWrite).toBe(false);
+    expect(mat.opacity).toBeCloseTo(0.35, 5);
+
+    // Pad visual reflects mast_guying pending visibility when showPendingGhosts=false
+    const pf0Handle = createFoundationPadVisual(pf0, STATUS_META.completed.color);
+    updateFoundationPadVisual(
+      pf0Handle,
+      pf0,
+      'mast_guying',
+      false,
+      false,
+      vm.guyLayers,
+      'not_started',
+    );
+    expect(pf0Handle.group.visible).toBe(false);
+
+    updateFoundationPadVisual(
+      pf0Handle,
+      pf0,
+      'mast_guying',
+      true,
+      true,
+      vm.guyLayers,
+      'plumbed_verified',
+    );
+    expect(pf0Handle.group.visible).toBe(true);
+    const bodyMat = pf0Handle.bodyMesh.material as THREE.MeshStandardMaterial;
+    expect(bodyMat.transparent).toBe(false);
+    expect(bodyMat.opacity).toBe(1);
+    expect(bodyMat.color.getHexString()).toBe(
+      ANCHOR_GUY_STAGE_META.all_tensioned.color.slice(1).toLowerCase(),
+    );
+
+    // Guy cable active vs pending opacity & metalness
+    const anchorPos = computeFoundationBoxMetrics(
+      foundations.find((f) => f.id === 'I-A1')!,
+    ).attachmentWorld;
+    const cable = createGuyCableVisual(vm.guyLayers[0], 'I', 7.56, anchorPos);
+    const cableMat = cable.mesh.material as THREE.MeshStandardMaterial;
+    expect(cableMat.metalness).toBeCloseTo(0.14, 2);
+    expect(cableMat.transparent).toBe(true);
+    expect(cableMat.depthWrite).toBe(false);
+
+    vm.guyLayers[0].sectors.I = { pulled: true, terminated: true, tensioned: true };
+    updateGuyCableVisual(cable, vm.guyLayers[0], 'mast_guying', false, true);
+    expect(cableMat.transparent).toBe(false);
+    expect(cableMat.depthWrite).toBe(true);
+    expect(cableMat.opacity).toBe(1);
   });
 });

@@ -1,4 +1,12 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -134,46 +142,78 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     };
   }, []);
 
-  const loadProjects = useCallback(async (isManualRefresh = false) => {
-    if (isManualRefresh) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setError(null);
+  const lastFetchAtRef = useRef<number>(0);
+  const lastSyncedDiagramRef = useRef<{ id: string; phaseMode: string } | null>(null);
 
-    try {
-      const response = await apiClient.fetchClientProjects();
-      const list = Array.isArray(response.projects) ? response.projects : [];
-      setProjects(list);
-      setUsingCachedSnapshot(false);
-      setCachedAt(null);
-
-      await idbSet<CachedShowcaseSnapshot>(CLIENT_SHOWCASE_CACHE_KEY, {
-        updatedAt: new Date().toISOString(),
-        projects: list,
-      });
-    } catch (err) {
-      const cached = await idbGet<CachedShowcaseSnapshot>(CLIENT_SHOWCASE_CACHE_KEY);
-      if (cached && Array.isArray(cached.projects) && cached.projects.length > 0) {
-        setProjects(cached.projects);
-        setUsingCachedSnapshot(true);
-        setCachedAt(cached.updatedAt);
-      } else {
-        const message =
-          err instanceof ApiError
-            ? err.message
-            : 'Unable to connect to the live project server right now.';
-        setError(message);
+  const loadProjects = useCallback(
+    async (isManualRefresh = false, silent = false) => {
+      lastFetchAtRef.current = Date.now();
+      if (!silent) {
+        if (isManualRefresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
       }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+      setError(null);
+
+      try {
+        const response = await apiClient.fetchClientProjects();
+        const list = Array.isArray(response.projects) ? response.projects : [];
+        setProjects(list);
+        setUsingCachedSnapshot(false);
+        setCachedAt(null);
+
+        await idbSet<CachedShowcaseSnapshot>(CLIENT_SHOWCASE_CACHE_KEY, {
+          updatedAt: new Date().toISOString(),
+          projects: list,
+        });
+      } catch (err) {
+        const cached = await idbGet<CachedShowcaseSnapshot>(CLIENT_SHOWCASE_CACHE_KEY);
+        if (cached && Array.isArray(cached.projects) && cached.projects.length > 0) {
+          setProjects(cached.projects);
+          setUsingCachedSnapshot(true);
+          setCachedAt(cached.updatedAt);
+        } else if (!silent) {
+          const message =
+            err instanceof ApiError
+              ? err.message
+              : 'Unable to connect to the live project server right now.';
+          setError(message);
+        }
+      } finally {
+        if (!silent) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     void loadProjects(false);
+  }, [loadProjects]);
+
+  useEffect(() => {
+    const maybeSilentRefresh = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        return;
+      }
+      if (Date.now() - lastFetchAtRef.current < 5000) {
+        return;
+      }
+      void loadProjects(false, true);
+    };
+    window.addEventListener('focus', maybeSilentRefresh);
+    document.addEventListener('visibilitychange', maybeSilentRefresh);
+    return () => {
+      window.removeEventListener('focus', maybeSilentRefresh);
+      document.removeEventListener('visibilitychange', maybeSilentRefresh);
+    };
   }, [loadProjects]);
 
   const activeDto = useMemo(() => {
@@ -185,29 +225,47 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     return projects.find((p) => p.featured) ?? projects[0];
   }, [projects, slug]);
 
-  // Reset diagram selections cleanly when switching showcase projects
+  // Reset diagram selections on project switch and keep active diagram mode valid when phaseMode updates
   useEffect(() => {
     if (!activeDto) return;
-    if (activeDto.settings.phaseMode === 'vertical_mast') {
-      setDiagramMode('vertical_mast');
-    } else if (activeDto.settings.phaseMode === 'foundation') {
-      setDiagramMode('foundation');
-    } else {
-      // For 'both', auto-focus Vertical Mast when mast erection has started, else Foundation
+
+    const resolveDefaultMode = (dto: ClientProjectShowcaseDto): 'foundation' | 'vertical_mast' => {
+      if (dto.settings.phaseMode === 'vertical_mast') {
+        return 'vertical_mast';
+      }
+      if (dto.settings.phaseMode === 'foundation') {
+        return 'foundation';
+      }
       const hasErectionProgress = Boolean(
-        activeDto.verticalMastSummary?.sections.some((s) => s.status !== 'not_started') ||
-          activeDto.verticalMastSummary?.guyLayers.some((l) => l.status !== 'not_started')
+        dto.verticalMastSummary?.sections.some((s) => s.status !== 'not_started') ||
+          dto.verticalMastSummary?.guyLayers.some((l) => l.status !== 'not_started')
       );
-      setDiagramMode(hasErectionProgress ? 'vertical_mast' : 'foundation');
+      return hasErectionProgress ? 'vertical_mast' : 'foundation';
+    };
+
+    const prev = lastSyncedDiagramRef.current;
+    const isNewProject = !prev || prev.id !== activeDto.id;
+    const phaseChanged = !prev || prev.phaseMode !== activeDto.settings.phaseMode;
+
+    if (isNewProject) {
+      setDiagramMode(resolveDefaultMode(activeDto));
+      const firstFoundation = activeDto.foundations[0]?.id ?? 'PF-0';
+      setSelectedFoundationId(firstFoundation);
+      setSelectedMastTarget({ kind: 'section', id: 'S01' });
+      setSelectedGuyAnchorId(undefined);
+      setSelected3DTarget({ kind: 'foundation', foundationId: firstFoundation });
+      setLightboxIndex(null);
+    } else if (phaseChanged) {
+      setDiagramMode((current) =>
+        current === '3d_model' ? '3d_model' : resolveDefaultMode(activeDto)
+      );
     }
 
-    const firstFoundation = activeDto.foundations[0]?.id ?? 'PF-0';
-    setSelectedFoundationId(firstFoundation);
-    setSelectedMastTarget({ kind: 'section', id: 'S01' });
-    setSelectedGuyAnchorId(undefined);
-    setSelected3DTarget({ kind: 'foundation', foundationId: firstFoundation });
-    setLightboxIndex(null);
-  }, [activeDto?.id]);
+    lastSyncedDiagramRef.current = {
+      id: activeDto.id,
+      phaseMode: activeDto.settings.phaseMode,
+    };
+  }, [activeDto]);
 
   const renderProject = useMemo(
     () => (activeDto ? toClientRenderProjectState(activeDto) : null),
