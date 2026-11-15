@@ -925,7 +925,6 @@ export function DailyLogsView({
       dayNumber,
       weather,
       weatherNotes: weatherNotes.trim(),
-      schedulePhaseId: '',
       activitiesSummary: derivedSummary,
       activities: cleanActivities,
       foundationsWorked: selectedFoundations,

@@ -3,7 +3,6 @@ import {
   checklistFromStatus,
   createInitialFoundations,
   createInitialInventory,
-  createInitialSchedule,
 } from './mast2Baseline';
 import type {
   AnchorGuyStage,
@@ -644,7 +643,6 @@ export function createCleanVerticalMastProject(): MastProjectState {
     },
     foundations: createCompletedSiteFoundationsForTower(),
     verticalMast: createInitialVerticalMastState(),
-    schedule: createInitialSchedule(),
     inventory: createInitialInventory(),
     haulingLogs: [],
     dailyLogs: [],
@@ -725,7 +723,6 @@ export function createSampleVerticalMastProject(): MastProjectState {
         date: '2026-11-13',
         dayNumber: 5,
         weather: 'Sunny',
-        schedulePhaseId: 'phase-10',
         activitiesSummary:
           'Completed plumb verification up to S10 (30m) and tensioned Guy Layers L01–L03 to Inner Anchor Ring C1. Hoisted S13–S14 via gin pole.',
         activities: [

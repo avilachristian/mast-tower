@@ -374,7 +374,6 @@ describe('Workspace UI & Foundation Activity Report', () => {
       dayNumber: 1,
       weather: 'Foggy / Windy',
       weatherNotes: 'Low visibility after 3 PM',
-      schedulePhaseId: 'phase-3',
       activitiesSummary: 'Excavated I-A1 pit and hauled rebar.',
       activities: [
         {
@@ -479,7 +478,6 @@ describe('Workspace UI & Foundation Activity Report', () => {
       date: '2026-11-12',
       dayNumber: 1,
       weather: 'Sunny',
-      schedulePhaseId: '',
       activitiesSummary: 'Day 1 stock',
       foundationsWorked: ['PF-0'],
       workers: [{ role: 'Foreman', count: 1, names: 'Lead', hours: 0 }],
@@ -497,7 +495,6 @@ describe('Workspace UI & Foundation Activity Report', () => {
       date: '2026-11-13',
       dayNumber: 2,
       weather: 'Sunny',
-      schedulePhaseId: '',
       activitiesSummary: 'Day 2 pour',
       foundationsWorked: ['PF-0'],
       workers: [{ role: 'Foreman', count: 1, names: 'Lead', hours: 0 }],
@@ -608,7 +605,6 @@ describe('Workspace UI & Foundation Activity Report', () => {
       date: '2026-11-13',
       dayNumber: 1,
       weather: 'Light Rain',
-      schedulePhaseId: '',
       activitiesSummary: 'Safety check and formwork',
       foundationsWorked: ['PF-0', 'I-B1'],
       workers: [
@@ -1158,7 +1154,6 @@ describe('Workspace UI & Foundation Activity Report', () => {
       date: '2026-11-12',
       dayNumber: 1,
       weather: 'Sunny' as const,
-      schedulePhaseId: 'ph-2',
       foundationsWorked: ['PF-0'],
       workers: [],
       totalWorkers: 0,
@@ -1795,7 +1790,6 @@ describe('Hauling & Centralized Inventory System', () => {
         date: '2026-04-05',
         dayNumber: 1,
         weather: 'Sunny',
-        schedulePhaseId: 'ph-2',
         activitiesSummary: 'Foundation pouring prep',
         foundationsWorked: [],
         workers: [],

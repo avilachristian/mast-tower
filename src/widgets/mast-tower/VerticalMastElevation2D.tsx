@@ -83,6 +83,7 @@ export function VerticalMastElevation2D({
   compact = false,
   fillParent = false,
   hideHeader = false,
+  frameless = false,
   enableVerticalScale,
 }: {
   verticalMast: VerticalMastState;
@@ -93,6 +94,7 @@ export function VerticalMastElevation2D({
   compact?: boolean;
   fillParent?: boolean;
   hideHeader?: boolean;
+  frameless?: boolean;
   enableVerticalScale?: boolean;
 }) {
   const [focus, setFocus] = useState<ElevationFocus>('all');
@@ -217,11 +219,19 @@ export function VerticalMastElevation2D({
       className={
         fillParent
           ? 'w-full h-full flex flex-col bg-white overflow-hidden'
-          : 'rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden'
+          : frameless
+            ? 'w-full bg-white'
+            : 'rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden'
       }
     >
       {!hideHeader && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/70 shrink-0">
+        <div
+          className={
+            frameless
+              ? 'flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-stone-200 bg-white shrink-0'
+              : 'flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/70 shrink-0'
+          }
+        >
           <div>
             <h2 className="text-sm font-bold text-slate-900">{title}</h2>
             <p className="text-xs text-slate-500">{subtitle}</p>
@@ -230,7 +240,11 @@ export function VerticalMastElevation2D({
           <div className="flex flex-wrap items-center gap-1.5">
             {canScale && (
               <div
-                className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
+                className={
+                  frameless
+                    ? 'inline-flex items-center border border-stone-300 bg-[#F7F6F2] p-0.5 text-[11px]'
+                    : 'inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]'
+                }
                 role="group"
                 aria-label="Vertical diagram scale"
                 title="Stretch diagram vertically to make tower sections easier to tap or click"
@@ -243,9 +257,13 @@ export function VerticalMastElevation2D({
                     key={opt.value}
                     type="button"
                     onClick={() => setMastVerticalScale(opt.value)}
-                    className={`px-2 py-0.5 rounded-md font-semibold transition cursor-pointer ${
+                    className={`px-2 py-0.5 font-semibold transition cursor-pointer ${
+                      frameless ? '' : 'rounded-md'
+                    } ${
                       activeVScale === opt.value
-                        ? 'bg-white text-teal-700 shadow-2xs'
+                        ? frameless
+                          ? 'bg-neutral-900 text-white'
+                          : 'bg-white text-teal-700 shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -255,7 +273,13 @@ export function VerticalMastElevation2D({
               </div>
             )}
 
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]">
+            <div
+              className={
+                frameless
+                  ? 'inline-flex border border-stone-300 bg-[#F7F6F2] p-0.5 text-[11px]'
+                  : 'inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]'
+              }
+            >
               {(
                 [
                   { id: 'all', label: 'Full 129m' },
@@ -267,9 +291,13 @@ export function VerticalMastElevation2D({
                   key={opt.id}
                   type="button"
                   onClick={() => setFocus(opt.id)}
-                  className={`px-2 py-0.5 rounded-md font-semibold transition cursor-pointer ${
+                  className={`px-2 py-0.5 font-semibold transition cursor-pointer ${
+                    frameless ? '' : 'rounded-md'
+                  } ${
                     focus === opt.id
-                      ? 'bg-white text-sky-700 shadow-2xs'
+                      ? frameless
+                        ? 'bg-neutral-900 text-white'
+                        : 'bg-white text-sky-700 shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -283,7 +311,13 @@ export function VerticalMastElevation2D({
 
       {/* Stage Pill Strip */}
       {!hideHeader && (
-        <div className="px-4 py-1.5 bg-slate-50/40 border-b border-slate-100 flex flex-wrap items-center gap-1.5 text-[10.5px]">
+        <div
+          className={
+            frameless
+              ? 'px-4 py-1.5 bg-white border-b border-stone-200 flex flex-wrap items-center gap-3 text-[10.5px]'
+              : 'px-4 py-1.5 bg-slate-50/40 border-b border-slate-100 flex flex-wrap items-center gap-1.5 text-[10.5px]'
+          }
+        >
           {SIMPLIFIED_TOWER_SECTION_STATUSES.map((st) => {
             const count =
               st === 'plumbed_verified'
@@ -292,10 +326,14 @@ export function VerticalMastElevation2D({
             return (
               <span
                 key={st}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200"
+                className={
+                  frameless
+                    ? 'inline-flex items-center gap-1.5 font-mono text-[10px] text-neutral-700'
+                    : 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200'
+                }
               >
                 <span
-                  className="w-2 h-2 rounded-full"
+                  className={frameless ? 'w-2 h-2' : 'w-2 h-2 rounded-full'}
                   style={{ backgroundColor: TOWER_SECTION_STATUS_META[st].color }}
                 />
                 <span>
@@ -980,7 +1018,7 @@ export function VerticalMastElevation2D({
                 y={0}
                 width={224}
                 height={188}
-                rx={7}
+                rx={frameless ? 0 : 7}
                 fill="#ffffff"
                 fillOpacity={0.96}
                 stroke="#cbd5e1"

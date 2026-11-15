@@ -30,7 +30,10 @@ import {
 import { useAuthStore } from '@/shared/state/authStore';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
-import { migrateLocalProjectsToCloud } from '@/shared/storage/cloudSync';
+import {
+  doesRecordNeedSync,
+  flushAllPendingSyncs,
+} from '@/shared/storage/cloudSync';
 import { ClientVisibilityModal } from '@/widgets/projects/ClientVisibilityModal';
 import { PwaAppStatusBar } from '@/widgets/pwa/PwaStatusBanner';
 
@@ -81,18 +84,15 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
   const [migratingCloud, setMigratingCloud] = useState(false);
 
   const authStatus = useAuthStore((s) => s.status);
-  const localOnlyCount = useMemo(
-    () =>
-      projects.filter(
-        (p) => !p.syncStatus || p.syncStatus === 'local_only' || p.syncStatus === 'pending'
-      ).length,
+  const unsyncedCount = useMemo(
+    () => projects.filter((p) => doesRecordNeedSync(p)).length,
     [projects]
   );
 
   const handleMigrateToCloud = async () => {
     setMigratingCloud(true);
     try {
-      await migrateLocalProjectsToCloud();
+      await flushAllPendingSyncs();
     } finally {
       setMigratingCloud(false);
     }
@@ -268,16 +268,16 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Local-to-Cloud Sync Prompt */}
-        {authStatus === 'authenticated' && localOnlyCount > 0 && (
+        {authStatus === 'authenticated' && unsyncedCount > 0 && (
           <div className="rounded-xl border border-sky-200 bg-sky-50/80 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-start gap-2.5 text-xs text-sky-900">
               <CloudUpload className="w-4 h-4 text-sky-600 mt-0.5 shrink-0" />
               <div>
                 <div className="font-bold">
-                  {localOnlyCount} {localOnlyCount === 1 ? 'project is' : 'projects are'} waiting to sync to Cloud (D1 &amp; R2)
+                  {unsyncedCount} {unsyncedCount === 1 ? 'project has' : 'projects have'} unsynced edits or staged photos
                 </div>
                 <div className="text-[11px] text-sky-800/90">
-                  Upload local drafts and inline photos so they are backed up and can be published to clients.
+                  Changes stay saved locally until the auto-sync interval runs or you push them manually to D1 &amp; R2.
                 </div>
               </div>
             </div>
@@ -292,7 +292,7 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
               ) : (
                 <CloudUpload className="w-3.5 h-3.5" />
               )}
-              <span>{migratingCloud ? 'Syncing...' : 'Sync Local Projects to Cloud'}</span>
+              <span>{migratingCloud ? 'Syncing...' : 'Sync Pending Projects'}</span>
             </button>
           </div>
         )}

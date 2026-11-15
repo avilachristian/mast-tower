@@ -577,7 +577,6 @@ describe('Cloudflare Worker API Integration', () => {
         date: '2026-01-10',
         dayNumber: 1,
         weather: 'Sunny',
-        schedulePhaseId: 'step-1',
         activitiesSummary: 'Site photo test',
         foundationsWorked: [],
         workers: [],

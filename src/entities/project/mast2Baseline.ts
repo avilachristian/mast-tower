@@ -8,7 +8,6 @@ import type {
   FoundationStatus,
   FoundationType,
   MastProjectState,
-  ScheduleActivityItem,
   SectorId,
   SiteEquipmentItem,
 } from './types';
@@ -665,121 +664,6 @@ export function createInitialFoundations(): FoundationRecord[] {
   return list;
 }
 
-export function createInitialSchedule(): ScheduleActivityItem[] {
-  return [
-    {
-      id: 'phase-1',
-      stepNo: 1,
-      title: 'Mobilization & Site Setup',
-      plannedDurationDays: '2 days',
-      indicativeTiming: 'Days 1–2',
-      workDetails: 'Bring tools and initial supplies; establish safe work areas, storage locations, access routes, and water arrangements.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-2',
-      stepNo: 2,
-      title: 'Construct Temporary Barracks',
-      plannedDurationDays: '3 days',
-      indicativeTiming: 'Days 3–5',
-      workDetails: 'Build simple timber/tree-post structure with blue-sheet covering; provide sleeping/rest area and basic sanitation.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-3',
-      stepNo: 3,
-      title: 'Construct Temporary Warehouse',
-      plannedDurationDays: '2 days',
-      indicativeTiming: 'Days 6–7',
-      workDetails: 'Build dry, secure storage area for cement, tools, reinforcement, and site materials.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-4',
-      stepNo: 4,
-      title: 'Initial & Continuing Horse Material Hauling',
-      plannedDurationDays: '8 days initial + parallel',
-      indicativeTiming: 'Days 1–8, ongoing',
-      workDetails: 'Dedicated horse haulers bring cement, sand, gravel, and rebar up Mt. Labo for the main mast and anchor pours.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-5',
-      stepNo: 5,
-      title: 'Inspect & Prepare Excavations',
-      plannedDurationDays: '4 days',
-      indicativeTiming: 'Days 8–11',
-      workDetails: 'Check dimensions, levels, bearing conditions (>150 kPa), cleanliness, and drainage; excavation pits already dug.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-6',
-      stepNo: 6,
-      title: 'Prepare Reinforcement, Anchor Rods & Formwork',
-      plannedDurationDays: '6 days',
-      indicativeTiming: 'Days 9–14',
-      workDetails: 'Cut/bend Ø20mm rebar (M_02 & M_26), prepare phenolic forms, anchor-bolt templates, and Ø25mm ground anchor rods.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-7',
-      stepNo: 7,
-      title: 'Main Mast Foundation Pour (PF-0)',
-      plannedDurationDays: '2 days',
-      indicativeTiming: 'Days 15–16',
-      workDetails: 'Pre-pour inspection, mix and place Class AA concrete (4.0 cu.m), vibrate, level M27 bolt frame (±3mm), and record pour.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-8',
-      stepNo: 8,
-      title: 'Initial Curing & Protection of Main Foundation',
-      plannedDurationDays: '7 days min',
-      indicativeTiming: 'Days 17–23',
-      workDetails: 'Protect PF-0 from disturbance, runoff, and moisture loss while crew prepares anchor foundations in parallel.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-9',
-      stepNo: 9,
-      title: '12 Anchor Foundation Preparations & Pours',
-      plannedDurationDays: '42–60 days',
-      indicativeTiming: 'Days 17–75',
-      workDetails: 'Pour the 12 pull anchor foundations (3×A, 6×B, 3×C) sequentially with lean concrete, rebar cages, and anchor rods.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-10',
-      stepNo: 10,
-      title: 'Final Curing, Backfilling & Site Cleanup',
-      plannedDurationDays: '5–8 days',
-      indicativeTiming: 'Days 76–83',
-      workDetails: 'Compact backfill soil in layers (>=16 kN/m³), clear waste, and inspect all completed foundations.',
-      status: 'pending',
-      progressPct: 0,
-    },
-    {
-      id: 'phase-11',
-      stepNo: 11,
-      title: 'Final Inspection & Handover',
-      plannedDurationDays: '2 days',
-      indicativeTiming: 'Days 84–85',
-      workDetails: 'Verify final foundation dimensions, levels, anchor rod & M27 bolt frame alignments, and as-built civil records.',
-      status: 'pending',
-      progressPct: 0,
-    },
-  ];
-}
-
 export function createInitialInventory(): SiteEquipmentItem[] {
   return [
     { id: 'eq-1', category: 'Tools & Equipment', name: 'Shovel', unit: 'pcs', requiredQty: 7, onHandQty: 0, deliveredQty: 0, remarks: 'Existing shovels damaged/unusable' },
@@ -838,26 +722,6 @@ export function createSampleMast2Project(): MastProjectState {
   setSampleStatus('II-B1', 'excavated', undefined, 'Pit dimensions 2.0m×2.0m×2.0m verified.');
   setSampleStatus('III-B1', 'excavated', undefined, 'Dewatered and leveled.');
 
-  const schedule = createInitialSchedule();
-  schedule[0].status = 'completed';
-  schedule[0].progressPct = 100;
-  schedule[1].status = 'completed';
-  schedule[1].progressPct = 100;
-  schedule[2].status = 'completed';
-  schedule[2].progressPct = 100;
-  schedule[3].status = 'in_progress';
-  schedule[3].progressPct = 42;
-  schedule[4].status = 'completed';
-  schedule[4].progressPct = 100;
-  schedule[5].status = 'in_progress';
-  schedule[5].progressPct = 45;
-  schedule[6].status = 'completed';
-  schedule[6].progressPct = 100;
-  schedule[7].status = 'in_progress';
-  schedule[7].progressPct = 85;
-  schedule[8].status = 'in_progress';
-  schedule[8].progressPct = 22;
-
   return {
     projectName: 'Guyed Mast Tower – Mast 2',
     location: 'Mt. Labo, Camarines Norte',
@@ -869,7 +733,6 @@ export function createSampleMast2Project(): MastProjectState {
       logos: createDefaultReportLogos(),
     },
     foundations,
-    schedule,
     inventory: createInitialInventory(),
     haulingLogs: [
       {
@@ -991,7 +854,6 @@ export function createSampleMast2Project(): MastProjectState {
         date: '2026-11-08',
         dayNumber: 15,
         weather: 'Cloudy',
-        schedulePhaseId: 'phase-7',
         activitiesSummary: 'Poured Principal Foundation (PF-0) 4.0 cu.m Class AA concrete with vibrator. Verified M27 bolt frame & locating plate alignment (±1.5mm).',
         foundationsWorked: ['PF-0'],
         workers: [
@@ -1020,7 +882,6 @@ export function createSampleMast2Project(): MastProjectState {
         date: '2026-11-10',
         dayNumber: 17,
         weather: 'Sunny',
-        schedulePhaseId: 'phase-9',
         activitiesSummary: 'Completed rebar cage, dual Ø25mm ground anchor rod installation, and Class AA concrete pour for I-C1 (Sector I 18m). Prepared II-C1 formwork.',
         foundationsWorked: ['I-C1', 'II-C1'],
         workers: [
@@ -1051,7 +912,6 @@ export function createSampleMast2Project(): MastProjectState {
         date: '2026-11-11',
         dayNumber: 18,
         weather: 'Light Rain',
-        schedulePhaseId: 'phase-9',
         activitiesSummary: 'Poured II-C1 (Sector II 18m) concrete. Installed lean concrete and started M_02/M_26 rebar assembly for III-C1.',
         foundationsWorked: ['II-C1', 'III-C1', 'I-B1'],
         workers: [
@@ -1092,7 +952,6 @@ export function createCleanBaselineProject(): MastProjectState {
       logos: createDefaultReportLogos(),
     },
     foundations: createInitialFoundations(),
-    schedule: createInitialSchedule(),
     inventory: createInitialInventory(),
     haulingLogs: [],
     dailyLogs: [],

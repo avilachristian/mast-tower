@@ -1,7 +1,7 @@
-import { apiClient, R2StorageBlockedError } from '@/shared/api/client';
+import { apiClient } from '@/shared/api/client';
 import { DEFAULT_REPORT_LOGOS } from '@/shared/assets/defaultLogos';
-import { useAuthStore } from '@/shared/state/authStore';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
+import { useProjectStore } from '@/shared/state/projectStore';
 import { useStorageQuotaStore } from '@/shared/state/storageQuotaStore';
 import { canAcceptUpload, formatStorageBytes } from '@/shared/storage/r2Quota';
 
@@ -97,10 +97,176 @@ export interface UploadedImageResult {
   queuedOffline: boolean;
 }
 
+export interface InlineImageCapableState {
+  foundations: Array<{
+    inspectionChecklist?: Record<
+      string,
+      { photoDataUrl?: string; photoName?: string } | undefined
+    >;
+  }>;
+  verticalMast?: {
+    sections: Array<{
+      inspectionChecklist?: Record<
+        string,
+        { photoDataUrl?: string; photoName?: string } | undefined
+      >;
+    }>;
+    guyLayers: Array<{
+      inspectionChecklist?: Record<
+        string,
+        { photoDataUrl?: string; photoName?: string } | undefined
+      >;
+    }>;
+  };
+  dailyLogs: Array<{
+    documentationItems?: Array<{ photoDataUrl?: string; photoName?: string }>;
+  }>;
+  reportDetails?: {
+    logos?: {
+      left?: { dataUrl: string; caption?: string };
+      center?: { dataUrl: string; caption?: string };
+      right?: { dataUrl: string; caption?: string };
+    };
+  };
+}
+
+interface InlineImageRef {
+  category: 'inspection' | 'daily_log' | 'logo';
+  nameHint: string;
+  getValue: () => string | undefined;
+  setValue: (next: string) => void;
+}
+
+function collectInlineImageRefs(state: InlineImageCapableState): InlineImageRef[] {
+  const refs: InlineImageRef[] = [];
+
+  for (const f of state.foundations ?? []) {
+    if (!f.inspectionChecklist) continue;
+    for (const [key, entry] of Object.entries(f.inspectionChecklist)) {
+      if (entry?.photoDataUrl && entry.photoDataUrl.startsWith('data:image/')) {
+        refs.push({
+          category: 'inspection',
+          nameHint: entry.photoName || `foundation-${key}.jpg`,
+          getValue: () => entry.photoDataUrl,
+          setValue: (next) => {
+            entry.photoDataUrl = next;
+          },
+        });
+      }
+    }
+  }
+
+  for (const sec of state.verticalMast?.sections ?? []) {
+    if (!sec.inspectionChecklist) continue;
+    for (const [key, entry] of Object.entries(sec.inspectionChecklist)) {
+      if (entry?.photoDataUrl && entry.photoDataUrl.startsWith('data:image/')) {
+        refs.push({
+          category: 'inspection',
+          nameHint: entry.photoName || `mast-sec-${key}.jpg`,
+          getValue: () => entry.photoDataUrl,
+          setValue: (next) => {
+            entry.photoDataUrl = next;
+          },
+        });
+      }
+    }
+  }
+
+  for (const layer of state.verticalMast?.guyLayers ?? []) {
+    if (!layer.inspectionChecklist) continue;
+    for (const [key, entry] of Object.entries(layer.inspectionChecklist)) {
+      if (entry?.photoDataUrl && entry.photoDataUrl.startsWith('data:image/')) {
+        refs.push({
+          category: 'inspection',
+          nameHint: entry.photoName || `mast-layer-${key}.jpg`,
+          getValue: () => entry.photoDataUrl,
+          setValue: (next) => {
+            entry.photoDataUrl = next;
+          },
+        });
+      }
+    }
+  }
+
+  for (const log of state.dailyLogs ?? []) {
+    for (const doc of log.documentationItems ?? []) {
+      if (doc.photoDataUrl && doc.photoDataUrl.startsWith('data:image/')) {
+        refs.push({
+          category: 'daily_log',
+          nameHint: doc.photoName || 'daily-doc.jpg',
+          getValue: () => doc.photoDataUrl,
+          setValue: (next) => {
+            doc.photoDataUrl = next;
+          },
+        });
+      }
+    }
+  }
+
+  const logos = state.reportDetails?.logos;
+  if (logos) {
+    for (const slot of ['left', 'center', 'right'] as const) {
+      const item = logos[slot];
+      const defaultUrl = DEFAULT_REPORT_LOGOS[slot]?.dataUrl;
+      if (
+        item?.dataUrl &&
+        item.dataUrl.startsWith('data:image/') &&
+        item.dataUrl !== defaultUrl
+      ) {
+        refs.push({
+          category: 'logo',
+          nameHint: `logo-${slot}.png`,
+          getValue: () => item.dataUrl,
+          setValue: (next) => {
+            item.dataUrl = next;
+          },
+        });
+      }
+    }
+  }
+
+  return refs;
+}
+
+export function estimateDataUrlBytes(dataUrl: string): number {
+  const base64Marker = ';base64,';
+  const idx = dataUrl.indexOf(base64Marker);
+  if (idx === -1) return dataUrl.length;
+  const b64 = dataUrl.slice(idx + base64Marker.length);
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - padding);
+}
+
 /**
- * Resizes an image, enforces R2 free-tier storage quota limits (< 100 MB remaining blocks upload,
- * <= 1 GB remaining warns), and uploads to Cloudflare R2 when online — or stages as an offline
- * local data URL to be auto-uploaded to R2 when connectivity returns.
+ * Counts inline `data:image/...` photos staged inside a project state
+ * and estimates their decoded upload size in bytes.
+ */
+export function estimateInlineImagesUsage(
+  state: InlineImageCapableState | undefined | null
+): { count: number; uniqueCount: number; estimatedBytes: number } {
+  if (!state) return { count: 0, uniqueCount: 0, estimatedBytes: 0 };
+  const refs = collectInlineImageRefs(state);
+  const seen = new Set<string>();
+  let estimatedBytes = 0;
+
+  for (const ref of refs) {
+    const val = ref.getValue();
+    if (!val || seen.has(val)) continue;
+    seen.add(val);
+    estimatedBytes += estimateDataUrlBytes(val);
+  }
+
+  return {
+    count: refs.length,
+    uniqueCount: seen.size,
+    estimatedBytes,
+  };
+}
+
+/**
+ * Resizes an image, validates R2 free-tier storage quota limits (< 100 MB remaining blocks staging),
+ * and saves it locally in IndexedDB so zero cloud requests occur until the periodic sync timer
+ * or manual Sync button uploads staged photos to R2.
  */
 export async function uploadOrStageProjectImage(params: {
   file: File;
@@ -109,7 +275,7 @@ export async function uploadOrStageProjectImage(params: {
   maxDimension?: number;
   quality?: number;
 }): Promise<UploadedImageResult | null> {
-  const { file, projectId, category, maxDimension = 960, quality = 0.8 } = params;
+  const { file, category, maxDimension = 960, quality = 0.8 } = params;
   const quotaStore = useStorageQuotaStore.getState();
   const feedback = useFeedbackStore.getState();
 
@@ -132,8 +298,13 @@ export async function uploadOrStageProjectImage(params: {
   const blob = await dataUrlToBlob(dataUrl);
 
   if (quotaStore.status) {
+    const projects = useProjectStore.getState().projects;
+    const stagedBytesTotal = projects.reduce(
+      (sum, p) => sum + estimateInlineImagesUsage(p.state).estimatedBytes,
+      0
+    );
     const check = canAcceptUpload(
-      quotaStore.status.usedBytes,
+      quotaStore.status.usedBytes + stagedBytesTotal,
       blob.size,
       quotaStore.status.objectCount
     );
@@ -147,201 +318,52 @@ export async function uploadOrStageProjectImage(params: {
     }
   }
 
-  const isAuthenticated = useAuthStore.getState().status === 'authenticated';
-  const isOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+  feedback.pushToast({
+    tone: 'info',
+    title: 'Photo Saved Locally',
+    message: `${file.name} (${formatStorageBytes(blob.size)}) queued for R2 upload on next Sync.`,
+    durationMs: 2600,
+  });
 
-  if (!isAuthenticated || !isOnline) {
-    feedback.pushToast({
-      tone: 'info',
-      title: 'Photo Staged Offline',
-      message: `${file.name} (${formatStorageBytes(blob.size)}) saved locally and will upload to R2 when online.`,
-    });
-    return {
-      url: dataUrl,
-      name: file.name,
-      queuedOffline: true,
-    };
-  }
-
-  try {
-    const ext =
-      blob.type === 'image/png'
-        ? 'png'
-        : blob.type === 'image/webp'
-          ? 'webp'
-          : blob.type === 'image/svg+xml'
-            ? 'svg'
-            : 'jpg';
-    const safeFilename = file.name.replace(/\.[^.]+$/, '') + `.${ext}`;
-    const uploaded = await apiClient.uploadImageToR2({
-      blob,
-      filename: safeFilename,
-      projectId,
-      category,
-    });
-    quotaStore.applyStatus(uploaded.storage, true);
-    return {
-      url: uploaded.url,
-      name: file.name,
-      queuedOffline: false,
-    };
-  } catch (err) {
-    if (err instanceof R2StorageBlockedError) {
-      if (err.storage) {
-        quotaStore.applyStatus(err.storage, false);
-      }
-      await feedback.showAlert({
-        tone: 'danger',
-        title: 'Image Upload Blocked (R2 Free Tier)',
-        message: err.message,
-      });
-      return null;
-    }
-
-    // Network interruption while uploading: fall back to offline staging
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      feedback.pushToast({
-        tone: 'warning',
-        title: 'Saved Offline Pending R2 Upload',
-        message: `${file.name} will upload to R2 automatically when connection returns.`,
-      });
-      return {
-        url: dataUrl,
-        name: file.name,
-        queuedOffline: true,
-      };
-    }
-
-    await feedback.showAlert({
-      tone: 'danger',
-      title: 'Photo Upload Failed',
-      message: err instanceof Error ? err.message : 'Unable to upload photo to R2.',
-    });
-    return null;
-  }
+  return {
+    url: dataUrl,
+    name: file.name,
+    queuedOffline: true,
+  };
 }
 
 /**
  * Uploads any inline `data:image/...` strings embedded in a MastProjectState to R2,
  * returning an updated state where those URLs point to `/api/images/...`.
- * Used during offline reconnect sync and local-to-cloud project migration.
+ * Invoked when manual Sync or the periodic Sync timer runs.
  */
 export async function uploadInlineImagesInProjectState<
-  T extends {
-    foundations: Array<{
-      inspectionChecklist?: Record<string, { photoDataUrl?: string; photoName?: string } | undefined>;
-    }>;
-    verticalMast?: {
-      sections: Array<{
-        inspectionChecklist?: Record<string, { photoDataUrl?: string; photoName?: string } | undefined>;
-      }>;
-      guyLayers: Array<{
-        inspectionChecklist?: Record<string, { photoDataUrl?: string; photoName?: string } | undefined>;
-      }>;
-    };
-    dailyLogs: Array<{
-      documentationItems?: Array<{ photoDataUrl?: string; photoName?: string }>;
-    }>;
-    reportDetails?: {
-      logos?: {
-        left?: { dataUrl: string; caption?: string };
-        center?: { dataUrl: string; caption?: string };
-        right?: { dataUrl: string; caption?: string };
-      };
-    };
-  },
+  T extends InlineImageCapableState,
 >(projectId: string, state: T): Promise<{ nextState: T; uploadedCount: number }> {
   const cloned = JSON.parse(JSON.stringify(state)) as T;
+  const refs = collectInlineImageRefs(cloned);
   const cache = new Map<string, string>();
   let uploadedCount = 0;
 
-  const maybeUploadDataUrl = async (
-    value: string | undefined,
-    category: 'inspection' | 'daily_log' | 'logo',
-    nameHint: string
-  ): Promise<string | undefined> => {
-    if (!value || !value.startsWith('data:image/')) return value;
-    // Skip tiny Vite-inlined default logos if already static? No, data:image/png in custom logos or legacy photos can go to R2
-    if (cache.has(value)) return cache.get(value);
-    const blob = await dataUrlToBlob(value);
-    const uploaded = await apiClient.uploadImageToR2({
-      blob,
-      filename: nameHint,
-      projectId,
-      category,
-    });
-    useStorageQuotaStore.getState().applyStatus(uploaded.storage, true);
-    cache.set(value, uploaded.url);
-    uploadedCount += 1;
-    return uploaded.url;
-  };
+  for (const ref of refs) {
+    const value = ref.getValue();
+    if (!value || !value.startsWith('data:image/')) continue;
 
-  for (const f of cloned.foundations ?? []) {
-    if (!f.inspectionChecklist) continue;
-    for (const [key, entry] of Object.entries(f.inspectionChecklist)) {
-      if (entry?.photoDataUrl) {
-        entry.photoDataUrl = await maybeUploadDataUrl(
-          entry.photoDataUrl,
-          'inspection',
-          entry.photoName || `foundation-${key}.jpg`
-        );
-      }
+    let uploadedUrl = cache.get(value);
+    if (!uploadedUrl) {
+      const blob = await dataUrlToBlob(value);
+      const uploaded = await apiClient.uploadImageToR2({
+        blob,
+        filename: ref.nameHint,
+        projectId,
+        category: ref.category,
+      });
+      useStorageQuotaStore.getState().applyStatus(uploaded.storage, true);
+      uploadedUrl = uploaded.url;
+      cache.set(value, uploadedUrl);
+      uploadedCount += 1;
     }
-  }
-
-  for (const sec of cloned.verticalMast?.sections ?? []) {
-    if (!sec.inspectionChecklist) continue;
-    for (const [key, entry] of Object.entries(sec.inspectionChecklist)) {
-      if (entry?.photoDataUrl) {
-        entry.photoDataUrl = await maybeUploadDataUrl(
-          entry.photoDataUrl,
-          'inspection',
-          entry.photoName || `mast-sec-${key}.jpg`
-        );
-      }
-    }
-  }
-
-  for (const layer of cloned.verticalMast?.guyLayers ?? []) {
-    if (!layer.inspectionChecklist) continue;
-    for (const [key, entry] of Object.entries(layer.inspectionChecklist)) {
-      if (entry?.photoDataUrl) {
-        entry.photoDataUrl = await maybeUploadDataUrl(
-          entry.photoDataUrl,
-          'inspection',
-          entry.photoName || `mast-layer-${key}.jpg`
-        );
-      }
-    }
-  }
-
-  for (const log of cloned.dailyLogs ?? []) {
-    for (const doc of log.documentationItems ?? []) {
-      if (doc.photoDataUrl) {
-        doc.photoDataUrl = await maybeUploadDataUrl(
-          doc.photoDataUrl,
-          'daily_log',
-          doc.photoName || 'daily-doc.jpg'
-        );
-      }
-    }
-  }
-
-  const logos = cloned.reportDetails?.logos;
-  if (logos) {
-    for (const slot of ['left', 'center', 'right'] as const) {
-      const item = logos[slot];
-      const defaultUrl = DEFAULT_REPORT_LOGOS[slot]?.dataUrl;
-      if (
-        item?.dataUrl &&
-        item.dataUrl.startsWith('data:image/') &&
-        item.dataUrl !== defaultUrl
-      ) {
-        item.dataUrl =
-          (await maybeUploadDataUrl(item.dataUrl, 'logo', `logo-${slot}.png`)) ||
-          item.dataUrl;
-      }
-    }
+    ref.setValue(uploadedUrl);
   }
 
   return { nextState: cloned, uploadedCount };

@@ -396,7 +396,6 @@ export interface DailyActivityLogEntry {
   preparedBy?: string;
   weather: DailyLogWeather;
   weatherNotes?: string;
-  schedulePhaseId: string;
   activitiesSummary: string;
   activities?: DailyLogActivityItem[];
   foundationsWorked: string[]; // Foundation IDs
@@ -417,17 +416,6 @@ export interface DailyActivityLogEntry {
   safetyAndVisitors?: string;
   nextDayPlan?: string;
   issuesOrDelays: string;
-}
-
-export interface ScheduleActivityItem {
-  id: string;
-  stepNo: number;
-  title: string;
-  plannedDurationDays: string;
-  indicativeTiming: string;
-  workDetails: string;
-  status: 'pending' | 'in_progress' | 'completed';
-  progressPct: number;
 }
 
 export interface SiteEquipmentItem {
@@ -601,7 +589,6 @@ export interface MastProjectState {
   civilPayrollHistory?: CivilWorksPayrollSnapshot[];
   haulerPayrollHistory?: HaulerPayrollSnapshot[];
   dailyLogs: DailyActivityLogEntry[];
-  schedule: ScheduleActivityItem[];
   inventory: SiteEquipmentItem[];
 }
 
@@ -613,7 +600,6 @@ export interface ClientShowcaseSettings {
   slug?: string;
   welcomeNote?: string;
   phaseMode: ClientShowcasePhaseMode;
-  showSchedule: boolean;
   showPhotos: boolean;
 }
 
@@ -634,7 +620,24 @@ export interface ClientDailyHighlightDto {
   date: string;
   dayNumber: number;
   weather: DailyLogWeather;
+  weatherNotes?: string;
+  preparedBy: string;
+  totalWorkers: number;
+  foundationsWorked: string[];
   activitiesSummary: string;
+  safetyOfficer?: string;
+  safetyLogs: DailyLogSafetyItem[];
+  equipment: Array<{
+    id: string;
+    name: string;
+    qty: number;
+    status: string;
+  }>;
+  delays: Array<{
+    id: string;
+    description: string;
+    impact: string;
+  }>;
   photos: Array<{
     id: string;
     url: string;
@@ -675,7 +678,6 @@ export interface ClientProjectShowcaseDto {
   settings: ClientShowcaseSettings;
   foundations: ClientFoundationSummary[];
   verticalMastSummary?: VerticalMastState;
-  schedule: ScheduleActivityItem[];
   highlights: ClientDailyHighlightDto[];
 }
 

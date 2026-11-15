@@ -17,7 +17,6 @@ import {
 import type {
   ClientShowcasePhaseMode,
   SavedProjectRecord,
-  ScheduleActivityItem,
 } from '@/entities/project/types';
 import { navigateTo } from '@/shared/lib/router';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
@@ -36,9 +35,6 @@ export function ClientVisibilityModal({
   const updateProjectClientSettings = useProjectStore(
     (s) => s.updateProjectClientSettings
   );
-  const updateScheduleItem = useProjectStore((s) => s.updateScheduleItem);
-  const switchProject = useProjectStore((s) => s.switchProject);
-  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const pushToast = useFeedbackStore((s) => s.pushToast);
 
   const record: SavedProjectRecord | undefined = projectId
@@ -54,7 +50,6 @@ export function ClientVisibilityModal({
   const [slug, setSlug] = useState('');
   const [welcomeNote, setWelcomeNote] = useState('');
   const [phaseMode, setPhaseMode] = useState<ClientShowcasePhaseMode>('both');
-  const [showSchedule, setShowSchedule] = useState(true);
   const [showPhotos, setShowPhotos] = useState(true);
   const [copied, setCopied] = useState(false);
 
@@ -65,7 +60,6 @@ export function ClientVisibilityModal({
     setSlug(resolved.slug || '');
     setWelcomeNote(resolved.welcomeNote || '');
     setPhaseMode(resolved.phaseMode);
-    setShowSchedule(resolved.showSchedule);
     setShowPhotos(resolved.showPhotos);
     setCopied(false);
   }, [open, projectId]);
@@ -99,7 +93,6 @@ export function ClientVisibilityModal({
       slug: cleanSlug,
       welcomeNote: welcomeNote.trim() || undefined,
       phaseMode,
-      showSchedule,
       showPhotos,
     });
     pushToast({
@@ -124,16 +117,6 @@ export function ClientVisibilityModal({
         message: shareUrl,
       });
     }
-  };
-
-  const handleScheduleChange = (
-    itemId: string,
-    patch: Partial<Pick<ScheduleActivityItem, 'status' | 'progressPct'>>
-  ) => {
-    if (activeProjectId !== record.id) {
-      switchProject(record.id);
-    }
-    updateScheduleItem(itemId, patch);
   };
 
   return createPortal(
@@ -195,7 +178,7 @@ export function ClientVisibilityModal({
                   <span>Visible to Client</span>
                 </div>
                 <p className="text-[11px] text-slate-600 mt-0.5">
-                  Show this project on the public Client Showcase page (manpower, payroll &amp; internal logs stay hidden).
+                  Show this project on the public Client Showcase page (wages, payroll, inventory &amp; internal remarks stay hidden).
                 </p>
               </div>
             </label>
@@ -304,15 +287,6 @@ export function ClientVisibilityModal({
                 <label className="inline-flex items-center gap-2 cursor-pointer text-slate-700">
                   <input
                     type="checkbox"
-                    checked={showSchedule}
-                    onChange={(e) => setShowSchedule(e.target.checked)}
-                    className="rounded border-slate-300 text-sky-600"
-                  />
-                  <span>Show Project Milestones / Schedule Progress</span>
-                </label>
-                <label className="inline-flex items-center gap-2 cursor-pointer text-slate-700">
-                  <input
-                    type="checkbox"
                     checked={showPhotos}
                     onChange={(e) => setShowPhotos(e.target.checked)}
                     className="rounded border-slate-300 text-sky-600"
@@ -336,83 +310,6 @@ export function ClientVisibilityModal({
               className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-sky-500 focus:outline-none"
             />
           </label>
-
-          {/* Compact Milestones Updater */}
-          <div className="space-y-2 border-t border-slate-200 pt-4">
-            <div>
-              <h3 className="font-bold text-slate-800">
-                Milestones Progress (Displayed on Client Timeline)
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                Quickly update high-level construction milestones shown to the client.
-              </p>
-            </div>
-
-            <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
-              {record.state.schedule.map((item) => (
-                <div
-                  key={item.id}
-                  className="px-3 py-2 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 bg-white"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-semibold text-slate-800 truncate">
-                      {item.stepNo}. {item.title}
-                    </div>
-                    <div className="text-[10px] text-slate-500">
-                      {item.indicativeTiming} ({item.plannedDurationDays})
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <select
-                      aria-label={`Status for ${item.title}`}
-                      value={item.status}
-                      onChange={(e) => {
-                        const status = e.target.value as ScheduleActivityItem['status'];
-                        handleScheduleChange(item.id, {
-                          status,
-                          progressPct:
-                            status === 'completed'
-                              ? 100
-                              : status === 'pending'
-                                ? 0
-                                : Math.max(10, item.progressPct || 25),
-                        });
-                      }}
-                      className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700"
-                    >
-                      <option value="pending">Upcoming</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      aria-label={`Percent for ${item.title}`}
-                      value={item.progressPct}
-                      onChange={(e) => {
-                        const pct = Math.max(
-                          0,
-                          Math.min(100, Number(e.target.value) || 0)
-                        );
-                        handleScheduleChange(item.id, {
-                          progressPct: pct,
-                          status:
-                            pct === 100
-                              ? 'completed'
-                              : pct > 0
-                                ? 'in_progress'
-                                : 'pending',
-                        });
-                      }}
-                      className="w-14 rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-right tabular-nums"
-                    />
-                    <span className="text-[11px] text-slate-500">%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
             <button

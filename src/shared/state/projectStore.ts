@@ -80,7 +80,6 @@ import type {
   ProjectType,
   ReportDetailsSpec,
   SavedProjectRecord,
-  ScheduleActivityItem,
   SectorId,
   SiteEquipmentItem,
   TowerSectionChecklist,
@@ -103,7 +102,35 @@ function stripLegacyBoilerplateNotes(state: MastProjectState): MastProjectState 
     }
     return f;
   });
-  return changed ? { ...state, foundations } : state;
+
+  const legacyRecord = state as MastProjectState & { schedule?: unknown };
+  const hasLegacySchedule = 'schedule' in legacyRecord;
+  const hasLegacyDailyLogPhase = (state.dailyLogs ?? []).some(
+    (log) => 'schedulePhaseId' in (log as unknown as Record<string, unknown>)
+  );
+
+  if (!changed && !hasLegacySchedule && !hasLegacyDailyLogPhase) {
+    return state;
+  }
+
+  const { schedule: _omittedSchedule, ...restState } = legacyRecord;
+  void _omittedSchedule;
+
+  const dailyLogs = hasLegacyDailyLogPhase
+    ? state.dailyLogs.map((log) => {
+        const { schedulePhaseId: _omittedPhase, ...restLog } = log as DailyActivityLogEntry & {
+          schedulePhaseId?: unknown;
+        };
+        void _omittedPhase;
+        return restLog as DailyActivityLogEntry;
+      })
+    : state.dailyLogs;
+
+  return {
+    ...restState,
+    foundations,
+    dailyLogs,
+  };
 }
 
 export interface CreateProjectOptions {
@@ -203,7 +230,11 @@ export interface ProjectSyncHooks {
   onProjectMutated?: (projectId: string) => void;
   onProjectCreated?: (record: SavedProjectRecord) => void;
   onProjectDeleted?: (projectId: string) => void;
-  onClientSettingsChanged?: (projectId: string, settings: ClientShowcaseSettings) => void;
+  onClientSettingsChanged?: (
+    projectId: string,
+    settings: ClientShowcaseSettings,
+    hadUnsavedStateEdits?: boolean
+  ) => void;
 }
 
 let activeSyncHooks: ProjectSyncHooks = {};
@@ -631,10 +662,6 @@ interface ProjectStore {
     patch: Partial<Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy' | 'contractor'>>
   ) => void;
   updateReportDetails: (patch: Partial<ReportDetailsSpec>) => void;
-  updateScheduleItem: (
-    id: string,
-    patch: Partial<Pick<ScheduleActivityItem, 'status' | 'progressPct'>>
-  ) => void;
   updateInventoryItem: (
     id: string,
     patch: Partial<Pick<SiteEquipmentItem, 'onHandQty' | 'deliveredQty' | 'remarks'>>
@@ -728,7 +755,8 @@ interface ProjectStore {
   applyCloudWorkspace: (cloudProjects: SavedProjectRecord[]) => void;
   applyCloudSyncResult: (
     projectId: string,
-    serverRecord: SavedProjectRecord
+    serverRecord: SavedProjectRecord,
+    expectedSnapshotUpdatedAt?: string
   ) => void;
   markProjectSyncStatus: (
     projectId: string,
@@ -1912,19 +1940,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return commitActiveProject(s, next);
       }),
 
-    updateScheduleItem: (id, patch) =>
-      set((s) => {
-        const schedule = s.project.schedule.map((item) =>
-          item.id === id ? { ...item, ...patch } : item
-        );
-        const next: MastProjectState = {
-          ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
-          schedule,
-        };
-        return commitActiveProject(s, next);
-      }),
-
     updateInventoryItem: (id, patch) =>
       set((s) => {
         const inventory = s.project.inventory.map((item) =>
@@ -1974,9 +1989,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       if (!parsed || !Array.isArray(parsed.foundations) || parsed.foundations.length !== 13) {
         throw new Error('Invalid Mast 2 project JSON file (expected 13 foundations).');
       }
+      const cleaned = stripLegacyBoilerplateNotes(parsed);
       set((s) => ({
-        ...commitActiveProject(s, parsed),
-        selectedFoundationId: parsed.foundations[0].id,
+        ...commitActiveProject(s, cleaned),
+        selectedFoundationId: cleaned.foundations[0].id,
       }));
     },
 
@@ -2439,11 +2455,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateProjectClientSettings: (projectId, patch) => {
       let resolvedNext: ClientShowcaseSettings | null = null;
+      let hadUnsavedStateEdits = false;
       set((s) => {
         const now = new Date().toISOString();
         const settingFeatured = patch.featured === true;
         const projects = s.projects.map((p) => {
           if (p.id === projectId) {
+            hadUnsavedStateEdits =
+              p.syncStatus === 'pending' || p.syncStatus === 'local_only';
             const current = resolveClientShowcaseSettings(p);
             const merged = resolveClientShowcaseSettings({
               id: p.id,
@@ -2470,7 +2489,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return { projects };
       });
       if (resolvedNext) {
-        activeSyncHooks.onClientSettingsChanged?.(projectId, resolvedNext);
+        activeSyncHooks.onClientSettingsChanged?.(
+          projectId,
+          resolvedNext,
+          hadUnsavedStateEdits
+        );
       }
     },
 
@@ -2482,8 +2505,11 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const merged: SavedProjectRecord[] = [];
         for (const cp of cloudProjects) {
           const local = localById.get(cp.id);
-          if (local && local.syncStatus === 'pending') {
-            merged.push({ ...local, version: cp.version });
+          if (
+            local &&
+            (local.syncStatus === 'pending' || local.syncStatus === 'conflict')
+          ) {
+            merged.push({ ...local });
           } else {
             merged.push({ ...normalizeProjectRecord(cp), syncStatus: 'synced' });
           }
@@ -2515,15 +2541,34 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         };
       }),
 
-    applyCloudSyncResult: (projectId, serverRecord) =>
+    applyCloudSyncResult: (projectId, serverRecord, expectedSnapshotUpdatedAt) =>
       set((s) => {
-        const normalized = { ...normalizeProjectRecord(serverRecord), syncStatus: 'synced' as ProjectSyncStatus };
-        const projects = s.projects.map((p) => (p.id === projectId ? normalized : p));
+        const current = s.projects.find((p) => p.id === projectId);
+        const normalized = normalizeProjectRecord(serverRecord);
+        const editedMidSync = Boolean(
+          expectedSnapshotUpdatedAt &&
+            current &&
+            current.updatedAt !== expectedSnapshotUpdatedAt
+        );
+
+        const nextRecord: SavedProjectRecord = editedMidSync && current
+          ? {
+              ...current,
+              version: normalized.version,
+              clientSettings: normalized.clientSettings,
+              syncStatus: 'pending',
+            }
+          : {
+              ...normalized,
+              syncStatus: 'synced',
+            };
+
+        const projects = s.projects.map((p) => (p.id === projectId ? nextRecord : p));
         persistWorkspace(s.activeProjectId, projects);
         const isActive = s.activeProjectId === projectId;
         return {
           projects,
-          ...(isActive ? { project: normalized.state } : {}),
+          ...(isActive && !editedMidSync ? { project: nextRecord.state } : {}),
         };
       }),
 

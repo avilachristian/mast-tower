@@ -3,6 +3,7 @@ import type {
   ClientFoundationSummary,
   ClientProjectShowcaseDto,
   ClientShowcaseSettings,
+  DailyActivityLogEntry,
   FoundationRecord,
   MastProjectState,
   SavedProjectRecord,
@@ -13,7 +14,6 @@ export const DEFAULT_CLIENT_SHOWCASE_SETTINGS: ClientShowcaseSettings = {
   enabled: false,
   featured: false,
   phaseMode: 'both',
-  showSchedule: true,
   showPhotos: true,
 };
 
@@ -51,7 +51,6 @@ export function resolveClientShowcaseSettings(
       raw?.phaseMode === 'both'
         ? raw.phaseMode
         : 'both',
-    showSchedule: raw?.showSchedule ?? true,
     showPhotos: raw?.showPhotos ?? true,
   };
 }
@@ -136,6 +135,105 @@ function sanitizeVerticalMastForClient(
 }
 
 /**
+ * Projects a single daily log entry into a sanitized client-safe update record,
+ * keeping worker headcount, lead engineer, safety entries, equipment, and delays
+ * while stripping individual worker names, hours, payroll rates, and internal notes.
+ */
+function projectClientDailyHighlight(
+  log: DailyActivityLogEntry,
+  fallbackEngineer: string
+): ClientDailyHighlightDto {
+  const equipment =
+    log.equipmentItems && log.equipmentItems.length > 0
+      ? log.equipmentItems
+          .filter((eq) => Boolean(eq.name?.trim()))
+          .map((eq) => ({
+            id: eq.id,
+            name: eq.name.trim(),
+            qty: Number.isFinite(eq.qty) ? Math.max(0, eq.qty) : 1,
+            status: eq.status?.trim() || 'Operational',
+          }))
+      : log.equipmentOnSite?.trim()
+        ? [
+            {
+              id: 'legacy-equip',
+              name: log.equipmentOnSite.trim(),
+              qty: 1,
+              status: 'Operational',
+            },
+          ]
+        : [];
+
+  const isEmptyDelayText = (text: string | undefined) => {
+    const t = (text ?? '').trim().toLowerCase();
+    return !t || t === 'none' || t === 'none.' || t === 'n/a' || t === 'nil' || t === '-';
+  };
+
+  const delays =
+    log.delayItems && log.delayItems.length > 0
+      ? log.delayItems
+          .filter((d) => !isEmptyDelayText(d.description))
+          .map((d) => ({
+            id: d.id,
+            description: d.description.trim(),
+            impact: d.impact?.trim() || '',
+          }))
+      : !isEmptyDelayText(log.issuesOrDelays)
+        ? [
+            {
+              id: 'legacy-delay',
+              description: log.issuesOrDelays.trim(),
+              impact: '',
+            },
+          ]
+        : [];
+
+  const safetyLogs = (log.safetyLogs ?? [])
+    .filter(
+      (s) =>
+        Boolean(s.timeOrActivity?.trim()) ||
+        Boolean(s.hazardOrFinding?.trim()) ||
+        Boolean(s.actionTaken?.trim())
+    )
+    .map((s) => ({
+      id: s.id,
+      timeOrActivity: s.timeOrActivity?.trim() || '',
+      hazardOrFinding: s.hazardOrFinding?.trim() || '',
+      actionTaken: s.actionTaken?.trim() || '',
+      status: s.status?.trim() || 'Compliant',
+    }));
+
+  const resolvedWorkers =
+    Number.isFinite(log.totalWorkers) && log.totalWorkers > 0
+      ? log.totalWorkers
+      : (log.workers ?? []).reduce((sum, w) => sum + Math.max(0, w.count || 0), 0);
+
+  return {
+    id: log.id,
+    date: log.date,
+    dayNumber: log.dayNumber,
+    weather: log.weather,
+    ...(log.weatherNotes?.trim() ? { weatherNotes: log.weatherNotes.trim() } : {}),
+    preparedBy: log.preparedBy?.trim() || fallbackEngineer,
+    totalWorkers: resolvedWorkers,
+    foundationsWorked: [...(log.foundationsWorked ?? [])],
+    activitiesSummary: log.activitiesSummary?.trim() || '',
+    ...(log.safetyOfficer?.trim() ? { safetyOfficer: log.safetyOfficer.trim() } : {}),
+    safetyLogs,
+    equipment,
+    delays,
+    photos: (log.documentationItems ?? [])
+      .filter((item) => Boolean(item.photoDataUrl))
+      .map((item) => ({
+        id: item.id,
+        url: item.photoDataUrl!,
+        description:
+          item.description?.trim() || item.photoName || 'Site progress photo',
+      })),
+  };
+}
+
+/**
  * Produces a strictly sanitized, client-safe showcase payload.
  * Strips manpower, payroll, hauler rates/payouts, inventory, inspection remarks, and internal delays.
  */
@@ -154,24 +252,20 @@ export function buildClientShowcaseDto(
     b.date.localeCompare(a.date)
   );
 
+  const fallbackEngineer =
+    state.reportDetails?.preparedBy?.trim() || state.preparedBy?.trim() || '';
+
   const highlights: ClientDailyHighlightDto[] = settings.showPhotos
     ? sortedLogs
-        .map((log) => ({
-          id: log.id,
-          date: log.date,
-          dayNumber: log.dayNumber,
-          weather: log.weather,
-          activitiesSummary: log.activitiesSummary?.trim() || '',
-          photos: (log.documentationItems ?? [])
-            .filter((item) => Boolean(item.photoDataUrl))
-            .map((item) => ({
-              id: item.id,
-              url: item.photoDataUrl!,
-              description:
-                item.description?.trim() || item.photoName || 'Site progress photo',
-            })),
-        }))
-        .filter((h) => h.photos.length > 0 || h.activitiesSummary.length > 0)
+        .map((log) => projectClientDailyHighlight(log, fallbackEngineer))
+        .filter(
+          (h) =>
+            h.photos.length > 0 ||
+            h.activitiesSummary.length > 0 ||
+            h.totalWorkers > 0 ||
+            h.safetyLogs.length > 0 ||
+            h.delays.length > 0
+        )
     : [];
 
   return {
@@ -202,9 +296,6 @@ export function buildClientShowcaseDto(
       settings.phaseMode === 'foundation'
         ? undefined
         : sanitizeVerticalMastForClient(state.verticalMast),
-    schedule: settings.showSchedule
-      ? (state.schedule ?? []).map((item) => ({ ...item }))
-      : [],
     highlights,
   };
 }

@@ -5,15 +5,12 @@ import {
   Building2,
   ClipboardCheck,
   ClipboardList,
-  Cloud,
-  CloudOff,
   Download,
   ExternalLink,
   FileText,
   FolderKanban,
   Globe,
   Layers,
-  Loader2,
   LogOut,
   RefreshCw,
   RotateCcw,
@@ -47,6 +44,7 @@ import { AppDialogModal } from '@/widgets/common/AppDialogModal';
 import { ToastBanner } from '@/widgets/common/ToastBanner';
 import { PwaStatusBanner } from '@/widgets/pwa/PwaStatusBanner';
 import { ClientVisibilityModal } from '@/widgets/projects/ClientVisibilityModal';
+import { CloudSyncControls } from '@/widgets/storage/CloudSyncControls';
 import {
   R2StorageAlertBanner,
   R2StorageHeaderPill,
@@ -87,9 +85,7 @@ function AdminWorkspace() {
   } = useProjectStore();
 
   const authUser = useAuthStore((s) => s.user);
-  const offlineCached = useAuthStore((s) => s.offlineCached);
   const logout = useAuthStore((s) => s.logout);
-  const isSyncing = useCloudSyncStore((s) => s.isSyncing);
   const conflictProjectId = useCloudSyncStore((s) => s.conflictProjectId);
   const [clientModalProjectId, setClientModalProjectId] = useState<string | null>(null);
   const activeRecord = useMemo(
@@ -442,47 +438,7 @@ function AdminWorkspace() {
               </button>
             )}
 
-            <span
-              title={
-                isSyncing
-                  ? 'Syncing changes to Cloudflare D1 & R2...'
-                  : offlineCached
-                    ? 'Offline cached admin session — changes queue locally'
-                    : activeRecord?.syncStatus === 'pending'
-                      ? 'Changes queued for cloud sync'
-                      : activeRecord?.syncStatus === 'conflict'
-                        ? 'Cloud sync conflict needs review'
-                        : 'Synced with Cloudflare D1'
-              }
-              className={`hidden md:inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-semibold ${
-                isSyncing
-                  ? 'border-sky-200 bg-sky-50 text-sky-700'
-                  : offlineCached || activeRecord?.syncStatus === 'pending'
-                    ? 'border-amber-200 bg-amber-50 text-amber-800'
-                    : activeRecord?.syncStatus === 'conflict'
-                      ? 'border-rose-300 bg-rose-50 text-rose-700'
-                      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              }`}
-            >
-              {isSyncing ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : offlineCached ? (
-                <CloudOff className="w-3 h-3" />
-              ) : (
-                <Cloud className="w-3 h-3" />
-              )}
-              <span>
-                {isSyncing
-                  ? 'Syncing'
-                  : offlineCached
-                    ? 'Offline'
-                    : activeRecord?.syncStatus === 'pending'
-                      ? 'Queued'
-                      : activeRecord?.syncStatus === 'conflict'
-                        ? 'Conflict'
-                        : 'Cloud OK'}
-              </span>
-            </span>
+            <CloudSyncControls />
 
             <button
               type="button"

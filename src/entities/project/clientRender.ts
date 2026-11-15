@@ -37,7 +37,6 @@ export function toClientRenderProjectState(
     verticalMast: dto.verticalMastSummary,
     haulingLogs: [],
     dailyLogs: [],
-    schedule: dto.schedule,
     inventory: [],
   };
 

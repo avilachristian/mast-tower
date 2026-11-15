@@ -1,20 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Building2,
-  Calendar,
-  Camera,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  Clock,
-  CloudSun,
   Compass,
-  HardHat,
-  Layers,
   Lock,
-  MapPin,
   RefreshCw,
-  Ruler,
   WifiOff,
   X,
 } from 'lucide-react';
@@ -27,7 +17,6 @@ import { STATUS_META } from '@/entities/project/mast2Baseline';
 import type {
   ClientDailyHighlightDto,
   ClientProjectShowcaseDto,
-  ScheduleActivityItem,
 } from '@/entities/project/types';
 import {
   ANCHOR_GUY_STAGE_META,
@@ -100,29 +89,6 @@ function getClientSectionStatusLabel(status: keyof typeof TOWER_SECTION_STATUS_M
     textClass: meta.textClass,
     color: meta.color,
   };
-}
-
-function getScheduleStatusBadge(status: ScheduleActivityItem['status']): {
-  label: string;
-  classes: string;
-} {
-  switch (status) {
-    case 'completed':
-      return {
-        label: 'Completed',
-        classes: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      };
-    case 'in_progress':
-      return {
-        label: 'In Progress',
-        classes: 'bg-sky-50 text-sky-700 border-sky-200',
-      };
-    default:
-      return {
-        label: 'Upcoming',
-        classes: 'bg-slate-100 text-slate-600 border-slate-200',
-      };
-  }
 }
 
 export function ClientShowcaseView({ slug }: { slug?: string }) {
@@ -327,18 +293,6 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     return Object.values(selectedGuyLayer.anchorIds);
   }, [selectedGuyLayer]);
 
-  const scheduleSummary = useMemo(() => {
-    const items = activeDto?.schedule ?? [];
-    if (items.length === 0) return { completed: 0, inProgress: 0, total: 0, avgPct: 0 };
-    const completed = items.filter((s) => s.status === 'completed').length;
-    const inProgress = items.filter((s) => s.status === 'in_progress').length;
-    const avgPct = Math.round(
-      items.reduce((sum, s) => sum + (Number.isFinite(s.progressPct) ? s.progressPct : 0), 0) /
-        items.length
-    );
-    return { completed, inProgress, total: items.length, avgPct };
-  }, [activeDto?.schedule]);
-
   // Combined friendly completion percentage for header badge
   const headlineProgressPct = useMemo(() => {
     if (!activeDto || !civilOverview || !vmOverview) return 0;
@@ -350,259 +304,325 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     );
   }, [activeDto, civilOverview, vmOverview]);
 
+  const safetyStatusIsAlert = (status: string) =>
+    /issue|non|action|pending|open|warning|unsafe|fail/i.test(status);
+
   return (
-    <div className="min-h-dvh flex flex-col bg-slate-50 text-slate-900">
-      {/* Top Client Showcase Header */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-sky-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Building2 className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full">
-                  Client Project Showcase
-                </span>
-                {activeDto?.referenceNo && (
-                  <span className="text-[11px] font-mono text-slate-500">
-                    Ref: {activeDto.referenceNo}
-                  </span>
-                )}
-              </div>
-              <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate mt-0.5">
-                {activeDto ? activeDto.projectName : 'Mast & Tower Live Progress Portal'}
-              </h1>
-            </div>
+    <div className="min-h-dvh flex flex-col bg-[#F7F6F2] text-neutral-900">
+      {/* Slim Offline / Stale Snapshot Banner (full bleed hairline bar, zero rounded boxes) */}
+      {(!isOnline || usingCachedSnapshot) && (
+        <div className="border-b border-amber-300 bg-amber-50 px-4 sm:px-8 py-2 text-xs text-amber-950 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 font-medium">
+            <WifiOff className="w-4 h-4 text-amber-700 shrink-0" />
+            <span>
+              {!isOnline
+                ? 'Offline mode — displaying the last synchronized project snapshot.'
+                : 'Live server unreachable — displaying the most recent saved snapshot.'}
+            </span>
           </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {projects.length > 1 && activeDto && (
-              <select
-                aria-label="Select Client Project"
-                value={activeDto.slug}
-                onChange={(e) => navigateTo(`/p/${encodeURIComponent(e.target.value)}`)}
-                className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 cursor-pointer"
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.slug}>
-                    {p.projectName} ({p.location || 'Site'})
-                  </option>
-                ))}
-              </select>
-            )}
-
-            <button
-              type="button"
-              onClick={() => void loadProjects(true)}
-              disabled={refreshing}
-              className="h-9 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-700 inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-              title="Refresh latest project updates"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigateTo('/admin')}
-              className="h-9 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>Admin Login</span>
-            </button>
-          </div>
+          {cachedAt && (
+            <span className="text-[11px] font-mono text-amber-800">
+              Cached: {new Date(cachedAt).toLocaleString()}
+            </span>
+          )}
         </div>
-      </header>
+      )}
 
-      {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-5 space-y-6">
-        {(!isOnline || usingCachedSnapshot) && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 font-medium">
-              <WifiOff className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>
-                {!isOnline
-                  ? 'You are currently offline — showing the last saved project snapshot.'
-                  : 'Server unreachable — showing the most recent offline snapshot.'}
-              </span>
+      {/* Minimal Header When Loading / Error / Empty */}
+      {(loading || error || !activeDto) && (
+        <div className="flex-1 flex flex-col">
+          <header className="border-b border-stone-300 bg-[#F2F0EA] px-6 sm:px-10 py-4 flex items-center justify-between gap-4">
+            <div className="text-xs font-mono uppercase tracking-widest text-neutral-700">
+              Client Project Showcase // Dossier Portal
             </div>
-            {cachedAt && (
-              <span className="text-[11px] text-amber-700 font-mono">
-                Cached: {new Date(cachedAt).toLocaleString()}
-              </span>
-            )}
-          </div>
-        )}
-
-        {loading && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center space-y-3 shadow-xs">
-            <div className="w-10 h-10 rounded-full border-2 border-sky-600 border-t-transparent animate-spin mx-auto" />
-            <div className="text-sm font-semibold text-slate-700">
-              Loading live client project progress...
-            </div>
-          </div>
-        )}
-
-        {!loading && error && (
-          <div className="rounded-2xl border border-rose-200 bg-white p-8 text-center space-y-3 shadow-xs">
-            <div className="text-base font-bold text-slate-900">Unable to Load Project Showcase</div>
-            <p className="text-sm text-slate-600 max-w-md mx-auto">{error}</p>
-            <div className="flex items-center justify-center gap-2 pt-2">
+            <div className="flex items-center gap-4 text-xs font-mono">
               <button
                 type="button"
                 onClick={() => void loadProjects(true)}
-                className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold cursor-pointer"
+                disabled={refreshing}
+                className="underline underline-offset-4 text-neutral-700 hover:text-neutral-950 inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                Try Again
+                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
               </button>
               <button
                 type="button"
                 onClick={() => navigateTo('/admin')}
-                className="px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
+                className="px-3.5 py-1.5 bg-neutral-950 hover:bg-neutral-800 text-white uppercase tracking-wider text-[11px] inline-flex items-center gap-1.5 cursor-pointer"
               >
-                Admin Login
+                <Lock className="w-3.5 h-3.5" />
+                <span>Admin</span>
               </button>
             </div>
-          </div>
-        )}
+          </header>
 
-        {!loading && !error && !activeDto && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center space-y-4 shadow-xs">
-            <div className="w-12 h-12 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center mx-auto">
-              <Compass className="w-6 h-6" />
-            </div>
-            <div className="space-y-1 max-w-md mx-auto">
-              <h2 className="text-lg font-bold text-slate-900">
-                No Client Projects Published Yet
-              </h2>
-              <p className="text-sm text-slate-500">
-                Project progress reports will appear here once an administrator enables client showcase visibility for a site.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigateTo('/admin')}
-              className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              Open Admin Workspace
-            </button>
-          </div>
-        )}
-
-        {!loading && activeDto && renderProject && civilOverview && vmOverview && (
-          <>
-            {/* Hero Overview Card */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs space-y-4">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-3">
-                    {logoItems.length > 0 && (
-                      <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
-                        {logoItems.map((logo, idx) => (
-                          <img
-                            key={`${logo.caption ?? 'logo'}-${idx}`}
-                            src={logo.dataUrl}
-                            alt={logo.caption || 'Company Logo'}
-                            className="h-7 w-auto object-contain"
-                          />
-                        ))}
-                      </div>
-                    )}
-                    <div>
-                      <h2 className="text-xl sm:text-2xl font-bold text-slate-900 leading-tight">
-                        {activeDto.projectName}
-                      </h2>
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 mt-1">
-                        {activeDto.location && (
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="w-3.5 h-3.5 text-sky-600" />
-                            {activeDto.location}
-                          </span>
-                        )}
-                        {activeDto.clientName && (
-                          <span className="inline-flex items-center gap-1">
-                            <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                            Client: <strong className="text-slate-800">{activeDto.clientName}</strong>
-                          </span>
-                        )}
-                        {activeDto.contractor && (
-                          <span className="inline-flex items-center gap-1">
-                            <HardHat className="w-3.5 h-3.5 text-slate-400" />
-                            Contractor: <strong className="text-slate-800">{activeDto.contractor}</strong>
-                          </span>
-                        )}
-                        <span className="inline-flex items-center gap-1">
-                          <Ruler className="w-3.5 h-3.5 text-slate-400" />
-                          {activeDto.towerHeightM}m Guyed Mast Structure
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Headline Progress Ring / Pill */}
-                <div className="flex items-center gap-4 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 shrink-0">
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      Overall Milestone Progress
-                    </div>
-                    <div className="text-2xl font-extrabold text-slate-900 tabular-nums">
-                      {headlineProgressPct}%
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      Updated {formatDateWithWeekday(activeDto.lastUpdated)}
-                    </div>
-                  </div>
-                  <div className="w-24 sm:w-28 space-y-1.5">
-                    <div className="h-2.5 rounded-full bg-slate-200 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-emerald-500 transition-all duration-300"
-                        style={{ width: `${Math.min(100, Math.max(0, headlineProgressPct))}%` }}
-                      />
-                    </div>
-                    <div className="text-[10px] font-semibold text-right text-emerald-700">
-                      Live Site Status
-                    </div>
-                  </div>
+          <main className="flex-1 max-w-3xl w-full mx-auto px-6 py-20 flex items-center justify-center">
+            {loading && (
+              <div className="text-center space-y-4">
+                <RefreshCw className="w-6 h-6 text-neutral-800 animate-spin mx-auto" />
+                <div className="text-xs font-mono uppercase tracking-widest text-neutral-600">
+                  Loading Client Project Dossier...
                 </div>
               </div>
+            )}
 
-              {activeDto.settings.welcomeNote?.trim() && (
-                <div className="rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3 text-sm text-slate-700 leading-relaxed">
-                  {activeDto.settings.welcomeNote}
+            {!loading && error && (
+              <div className="w-full border-t border-b border-stone-400 py-10 text-center space-y-4">
+                <div className="text-[11px] font-mono uppercase tracking-widest text-rose-700">
+                  Connection Notice
+                </div>
+                <h1 className="text-xl font-bold tracking-tight text-neutral-950">
+                  Unable to Load Project Showcase
+                </h1>
+                <p className="text-sm text-neutral-600 max-w-md mx-auto">{error}</p>
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => void loadProjects(true)}
+                    className="px-4 py-2 bg-neutral-950 hover:bg-neutral-800 text-white text-xs font-mono uppercase tracking-wider cursor-pointer"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigateTo('/admin')}
+                    className="px-4 py-2 border border-stone-400 hover:border-neutral-950 text-neutral-800 text-xs font-mono uppercase tracking-wider cursor-pointer"
+                  >
+                    Admin Login
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!loading && !error && !activeDto && (
+              <div className="w-full border-t border-b border-stone-400 py-12 text-center space-y-4">
+                <Compass className="w-6 h-6 text-neutral-800 mx-auto" />
+                <div className="space-y-1.5 max-w-md mx-auto">
+                  <div className="text-[11px] font-mono uppercase tracking-widest text-neutral-500">
+                    Index Empty
+                  </div>
+                  <h1 className="text-xl font-bold tracking-tight text-neutral-950">
+                    No Client Projects Published Yet
+                  </h1>
+                  <p className="text-sm text-neutral-600">
+                    Project dossiers will appear here once an administrator enables public Client Showcase visibility for a site.
+                  </p>
+                </div>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => navigateTo('/admin')}
+                    className="px-4 py-2 bg-neutral-950 hover:bg-neutral-800 text-white text-xs font-mono uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Open Admin Workspace</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </main>
+        </div>
+      )}
+
+      {/* Option 2 · Swiss Drafting Index Architectural Layout */}
+      {!loading && activeDto && renderProject && civilOverview && vmOverview && (
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 items-start">
+          {/* Sticky Left Architectural Dossier Rail */}
+          <aside className="lg:col-span-3 bg-[#F2F0EA] border-b lg:border-b-0 lg:border-r border-stone-300 lg:sticky lg:top-0 lg:h-dvh lg:overflow-y-auto p-6 sm:p-8 flex flex-col justify-between gap-8">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between gap-2 text-[11px] font-mono uppercase tracking-widest text-neutral-500">
+                <span className="truncate">
+                  Index · {activeDto.referenceNo || 'SITE'}
+                </span>
+                <span className="shrink-0 text-emerald-700 font-semibold">Live</span>
+              </div>
+
+              {projects.length > 1 && (
+                <div className="space-y-1">
+                  <label
+                    htmlFor="client-project-select"
+                    className="block text-[10px] font-mono uppercase tracking-wider text-neutral-500"
+                  >
+                    Active Dossier
+                  </label>
+                  <select
+                    id="client-project-select"
+                    aria-label="Select Client Project"
+                    value={activeDto.slug}
+                    onChange={(e) => navigateTo(`/p/${encodeURIComponent(e.target.value)}`)}
+                    className="w-full rounded-none border border-stone-400 bg-[#F7F6F2] px-2.5 py-1.5 text-xs font-medium text-neutral-900 focus:outline-none focus:border-neutral-950 cursor-pointer"
+                  >
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.slug}>
+                        {p.projectName} ({p.location || 'Site'})
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
 
-              {/* Friendly Client KPI Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {logoItems.length > 0 && (
+                <div className="flex items-center gap-3 flex-wrap pt-1">
+                  {logoItems.map((logo, idx) => (
+                    <img
+                      key={`${logo.caption ?? 'logo'}-${idx}`}
+                      src={logo.dataUrl}
+                      alt={logo.caption || 'Company Logo'}
+                      className="h-7 w-auto object-contain"
+                    />
+                  ))}
+                </div>
+              )}
+
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-neutral-950 leading-snug">
+                  {activeDto.projectName}
+                </h1>
+                {activeDto.location && (
+                  <p className="text-xs text-neutral-600 mt-1">{activeDto.location}</p>
+                )}
+              </div>
+
+              {/* Razor-thin Overall Completion Rule */}
+              <div className="space-y-1.5 pt-3 border-t border-stone-300">
+                <div className="flex justify-between text-xs font-mono">
+                  <span className="uppercase text-neutral-500">Completion</span>
+                  <span className="font-bold text-neutral-950 tabular-nums">
+                    {headlineProgressPct}%
+                  </span>
+                </div>
+                <div className="h-1 bg-stone-300">
+                  <div
+                    className="h-full bg-neutral-950 transition-all duration-300"
+                    style={{ width: `${Math.min(100, Math.max(0, headlineProgressPct))}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Specification Metadata List */}
+              <dl className="space-y-3 pt-3 border-t border-stone-300 text-xs">
+                {activeDto.clientName && (
+                  <div>
+                    <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                      Client
+                    </dt>
+                    <dd className="font-medium text-neutral-950 mt-0.5">{activeDto.clientName}</dd>
+                  </div>
+                )}
+                {activeDto.contractor && (
+                  <div>
+                    <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                      Contractor
+                    </dt>
+                    <dd className="font-medium text-neutral-950 mt-0.5">{activeDto.contractor}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                    Structure
+                  </dt>
+                  <dd className="font-medium text-neutral-950 mt-0.5">
+                    {activeDto.towerHeightM}m Guyed Lattice Mast
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                    Report Date
+                  </dt>
+                  <dd className="font-medium text-neutral-950 mt-0.5">
+                    {formatDateWithWeekday(activeDto.lastUpdated)}
+                  </dd>
+                </div>
+              </dl>
+
+              {/* Section Anchor Navigation */}
+              <nav className="space-y-1.5 pt-4 border-t border-stone-300 text-[11px] font-mono uppercase tracking-wider">
+                <a
+                  href="#section-summary"
+                  className="block text-neutral-900 font-bold hover:underline underline-offset-4"
+                >
+                  01 · Progress Summary
+                </a>
+                <a
+                  href="#section-drawings"
+                  className="block text-neutral-600 hover:text-neutral-950 hover:underline underline-offset-4"
+                >
+                  02 · Interactive Drawings
+                </a>
+                {activeDto.settings.showPhotos && (
+                  <a
+                    href="#section-logs"
+                    className="block text-neutral-600 hover:text-neutral-950 hover:underline underline-offset-4"
+                  >
+                    03 · Daily Site Logs ({activeDto.highlights.length})
+                  </a>
+                )}
+              </nav>
+            </div>
+
+            <div className="pt-4 border-t border-stone-300 flex items-center justify-between gap-2 text-[11px] font-mono">
+              <button
+                type="button"
+                onClick={() => void loadProjects(true)}
+                disabled={refreshing}
+                className="underline underline-offset-4 cursor-pointer text-neutral-700 hover:text-neutral-950 inline-flex items-center gap-1.5 disabled:opacity-50"
+                title="Refresh latest project updates"
+              >
+                <RefreshCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+                <span>Refresh</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateTo('/admin')}
+                className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-800 text-white uppercase tracking-wider inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Lock className="w-3 h-3" />
+                <span>Admin</span>
+              </button>
+            </div>
+          </aside>
+
+          {/* Right Continuous Stone Paper Canvas */}
+          <main className="lg:col-span-9 p-6 sm:p-10 lg:p-12 space-y-14 min-w-0">
+            {/* 01 · Project Overview & Bare Swiss KPI Metrics */}
+            <section id="section-summary" className="space-y-6 border-b border-stone-300 pb-10">
+              <div className="text-[11px] font-mono uppercase tracking-widest text-neutral-500">
+                01 · Project Summary
+              </div>
+
+              {activeDto.settings.welcomeNote?.trim() && (
+                <p className="text-sm sm:text-base text-neutral-700 leading-relaxed max-w-3xl">
+                  {activeDto.settings.welcomeNote}
+                </p>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 pt-5 border-t border-stone-300">
                 {activeDto.settings.phaseMode !== 'vertical_mast' && (
                   <>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
-                      <div className="text-xs font-medium text-slate-500">
-                        Foundation Civil Works
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                        Civil Works
                       </div>
-                      <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
+                      <div className="text-3xl font-bold tracking-tight text-neutral-950 mt-1 tabular-nums">
                         {civilOverview.metrics.overallProgressPct}%
                       </div>
-                      <div className="text-[11px] text-slate-600 mt-1">
-                        {civilOverview.metrics.completedCount} of{' '}
-                        {civilOverview.metrics.totalFoundations} pads fully backfilled
+                      <div className="text-xs text-neutral-600 mt-0.5">
+                        {civilOverview.metrics.completedCount} /{' '}
+                        {civilOverview.metrics.totalFoundations} pads backfilled
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
-                      <div className="text-xs font-medium text-slate-500">
-                        Concrete Foundations Poured
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                        Concrete Placed
                       </div>
-                      <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
-                        {civilOverview.metrics.pouredOrBeyondCount} /{' '}
-                        {civilOverview.metrics.totalFoundations}
+                      <div className="text-3xl font-bold tracking-tight text-neutral-950 mt-1 tabular-nums">
+                        {civilOverview.metrics.pouredConcreteCuM.toFixed(1)}m³
                       </div>
-                      <div className="text-[11px] text-slate-600 mt-1">
-                        {civilOverview.metrics.pouredConcreteCuM.toFixed(1)} of{' '}
-                        {civilOverview.metrics.totalConcreteCuM.toFixed(1)} m³ placed
+                      <div className="text-xs text-neutral-600 mt-0.5">
+                        {civilOverview.metrics.pouredOrBeyondCount}/
+                        {civilOverview.metrics.totalFoundations} pads ·{' '}
+                        {civilOverview.metrics.totalConcreteCuM.toFixed(1)} m³ target
                       </div>
                     </div>
                   </>
@@ -610,30 +630,29 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
 
                 {activeDto.settings.phaseMode !== 'foundation' && (
                   <>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
-                      <div className="text-xs font-medium text-slate-500">
-                        Vertical Mast Erection
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                        Mast Erected
                       </div>
-                      <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
-                        {vmOverview.metrics.erectedHeightM}m / {vmOverview.metrics.totalHeightM}m
+                      <div className="text-3xl font-bold tracking-tight text-neutral-950 mt-1 tabular-nums">
+                        {vmOverview.metrics.erectedHeightM}m
                       </div>
-                      <div className="text-[11px] text-slate-600 mt-1">
-                        {vmOverview.metrics.verifiedSections} of{' '}
-                        {vmOverview.metrics.totalSections} tower sections verified
+                      <div className="text-xs text-neutral-600 mt-0.5">
+                        {vmOverview.metrics.verifiedSections}/{vmOverview.metrics.totalSections}{' '}
+                        sections · {vmOverview.metrics.totalHeightM}m
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
-                      <div className="text-xs font-medium text-slate-500">
-                        Guy Cable Tensioning
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                        Guy Strands
                       </div>
-                      <div className="text-2xl font-bold text-slate-900 mt-1 tabular-nums">
-                        {vmOverview.metrics.tensionedGuyLayers} /{' '}
-                        {vmOverview.metrics.totalGuyLayers}
+                      <div className="text-3xl font-bold tracking-tight text-neutral-950 mt-1 tabular-nums">
+                        {vmOverview.metrics.tensionedStrands}/{vmOverview.metrics.totalStrands}
                       </div>
-                      <div className="text-[11px] text-slate-600 mt-1">
-                        {vmOverview.metrics.tensionedStrands} of{' '}
-                        {vmOverview.metrics.totalStrands} guy strands tensioned
+                      <div className="text-xs text-neutral-600 mt-0.5">
+                        {vmOverview.metrics.tensionedGuyLayers}/{vmOverview.metrics.totalGuyLayers}{' '}
+                        levels tensioned
                       </div>
                     </div>
                   </>
@@ -641,28 +660,27 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
               </div>
             </section>
 
-            {/* Interactive Read-Only 2D Diagrams */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* 02 · Interactive 2D Engineering Drawings */}
+            <section id="section-drawings" className="space-y-6 border-b border-stone-300 pb-12">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-900 pb-2">
                 <div>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
-                    <Layers className="w-5 h-5 text-sky-600" />
-                    Interactive 2D Site &amp; Tower Diagrams
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Click any foundation pad, tower section, or guy cable layer in the diagrams below to inspect current status.
+                  <h2 className="text-sm font-mono uppercase tracking-widest font-bold text-neutral-950">
+                    02 · Interactive 2D Engineering Drawings
+                  </h2>
+                  <p className="text-xs text-neutral-600 mt-0.5">
+                    Select any foundation pad, mast section, or guy cable level below to inspect live telemetry.
                   </p>
                 </div>
 
                 {activeDto.settings.phaseMode === 'both' && (
-                  <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setDiagramMode('foundation')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                      className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider cursor-pointer transition-colors ${
                         diagramMode === 'foundation'
-                          ? 'bg-white text-slate-900 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'bg-neutral-950 text-white'
+                          : 'border border-stone-300 text-neutral-700 hover:text-neutral-950 hover:border-neutral-950'
                       }`}
                     >
                       Foundation &amp; Anchors
@@ -670,61 +688,63 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                     <button
                       type="button"
                       onClick={() => setDiagramMode('vertical_mast')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                      className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider cursor-pointer transition-colors ${
                         diagramMode === 'vertical_mast'
-                          ? 'bg-white text-slate-900 shadow-xs'
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'bg-neutral-950 text-white'
+                          : 'border border-stone-300 text-neutral-700 hover:text-neutral-950 hover:border-neutral-950'
                       }`}
                     >
-                      Tower Erection &amp; Guying
+                      Mast &amp; Guying
                     </button>
                   </div>
                 )}
               </div>
 
               {diagramMode === 'foundation' ? (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                  <div className="lg:col-span-8">
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
+                  <div className="xl:col-span-8">
                     <GroundAnchorPlan2D
+                      frameless
                       foundations={renderProject.foundations}
                       selectedId={selectedFoundation?.id}
                       onSelect={setSelectedFoundationId}
-                      title="2D Foundation & Anchor Layout Plan (Read-Only)"
+                      title="2D Foundation & Anchor Layout Plan"
                       subtitle="Tap any foundation pad to view completion stage and milestone dates"
                     />
                   </div>
 
-                  <div className="lg:col-span-4 space-y-4">
-                    {/* Selected Pad Info */}
+                  <div className="xl:col-span-4 space-y-6">
                     {selectedFoundation && (
-                      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
-                        <div className="flex items-start justify-between gap-2">
+                      <div className="border-t border-stone-900 pt-3 space-y-4">
+                        <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                            <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
                               Selected Pad · Sector {selectedFoundation.sector}
                             </div>
-                            <h4 className="text-base font-bold text-slate-900">
+                            <h3 className="text-base font-bold text-neutral-950 mt-0.5">
                               {selectedFoundation.code} — {selectedFoundation.name}
-                            </h4>
-                            <p className="text-xs text-slate-500">
-                              Distance from tower center: {selectedFoundation.radiusM}m
+                            </h3>
+                            <p className="text-xs text-neutral-600 mt-0.5">
+                              Radius from mast center: {selectedFoundation.radiusM}m
                             </p>
                           </div>
                           <span
-                            className={`px-2.5 py-1 rounded-full border text-[11px] font-bold shrink-0 ${STATUS_META[selectedFoundation.status].bgClass} ${STATUS_META[selectedFoundation.status].textClass}`}
+                            className={`text-[11px] font-mono font-bold uppercase shrink-0 ${STATUS_META[selectedFoundation.status].textClass}`}
                           >
                             {STATUS_META[selectedFoundation.status].shortLabel}
                           </span>
                         </div>
 
-                        <div className="space-y-1">
-                          <div className="flex justify-between text-xs font-medium text-slate-600">
-                            <span>Stage Progress</span>
-                            <span>{STATUS_META[selectedFoundation.status].pct}%</span>
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between text-xs font-mono text-neutral-600">
+                            <span>STAGE PROGRESS</span>
+                            <span className="font-bold text-neutral-950 tabular-nums">
+                              {STATUS_META[selectedFoundation.status].pct}%
+                            </span>
                           </div>
-                          <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                          <div className="h-1 bg-stone-200">
                             <div
-                              className="h-full rounded-full transition-all"
+                              className="h-full transition-all"
                               style={{
                                 width: `${STATUS_META[selectedFoundation.status].pct}%`,
                                 backgroundColor: STATUS_META[selectedFoundation.status].color,
@@ -733,49 +753,48 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                          <div className="rounded-lg bg-white border border-slate-200 p-2.5">
-                            <div className="text-[10px] font-semibold uppercase text-slate-400">
-                              Concrete Pour Date
-                            </div>
-                            <div className="font-semibold text-slate-800 mt-0.5">
+                        <dl className="grid grid-cols-2 gap-4 pt-3 border-t border-stone-200 text-xs">
+                          <div>
+                            <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                              Concrete Pour
+                            </dt>
+                            <dd className="font-semibold text-neutral-900 mt-0.5">
                               {selectedFoundation.pourDate
                                 ? formatDateWithWeekday(selectedFoundation.pourDate)
                                 : 'Scheduled'}
-                            </div>
+                            </dd>
                           </div>
-                          <div className="rounded-lg bg-white border border-slate-200 p-2.5">
-                            <div className="text-[10px] font-semibold uppercase text-slate-400">
-                              Completion Date
-                            </div>
-                            <div className="font-semibold text-slate-800 mt-0.5">
+                          <div>
+                            <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                              Completion
+                            </dt>
+                            <dd className="font-semibold text-neutral-900 mt-0.5">
                               {selectedFoundation.completedDate
                                 ? formatDateWithWeekday(selectedFoundation.completedDate)
                                 : 'Pending'}
-                            </div>
+                            </dd>
                           </div>
-                        </div>
+                        </dl>
                       </div>
                     )}
 
-                    {/* Sector Summary Card */}
-                    <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2.5">
-                      <h4 className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                    <div className="border-t border-stone-300 pt-4 space-y-2.5">
+                      <h3 className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
                         Progress by Sector
-                      </h4>
-                      <div className="space-y-2">
+                      </h3>
+                      <div className="divide-y divide-stone-200">
                         {civilOverview.sectorSummaries.map((sector) => (
-                          <div key={sector.sector} className="space-y-1">
+                          <div key={sector.sector} className="py-2 space-y-1.5">
                             <div className="flex items-center justify-between text-xs">
-                              <span className="font-semibold text-slate-700">{sector.label}</span>
-                              <span className="text-slate-500 tabular-nums">
-                                {sector.completedCount}/{sector.foundationCount} done ·{' '}
-                                <strong className="text-slate-800">{sector.avgProgressPct}%</strong>
+                              <span className="font-medium text-neutral-800">{sector.label}</span>
+                              <span className="font-mono text-neutral-600 tabular-nums">
+                                {sector.completedCount}/{sector.foundationCount} ·{' '}
+                                <strong className="text-neutral-950">{sector.avgProgressPct}%</strong>
                               </span>
                             </div>
-                            <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                            <div className="h-0.5 bg-stone-200">
                               <div
-                                className="h-full rounded-full bg-sky-500"
+                                className="h-full bg-neutral-900"
                                 style={{ width: `${sector.avgProgressPct}%` }}
                               />
                             </div>
@@ -786,9 +805,10 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                  <div className="lg:col-span-5">
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
+                  <div className="xl:col-span-5">
                     <VerticalMastElevation2D
+                      frameless
                       verticalMast={vmOverview.vm}
                       selectedTarget={selectedMastTarget}
                       onSelectTarget={(target) => {
@@ -804,8 +824,9 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                     />
                   </div>
 
-                  <div className="lg:col-span-7 space-y-4">
+                  <div className="xl:col-span-7 space-y-8">
                     <GroundAnchorPlan2D
+                      frameless
                       foundations={renderProject.foundations}
                       anchorGuyStates={vmOverview.anchorGuyStates}
                       selectedId={selectedGuyAnchorId}
@@ -813,19 +834,19 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                       onSelect={setSelectedGuyAnchorId}
                       calloutTitle="GUY ANCHOR"
                       title="Ground Anchor Guying Connectivity Plan"
-                      subtitle="Colors show how many guy cable levels are anchored at each pad"
+                      subtitle="Colors indicate guy cable levels anchored at each pad"
                     />
 
-                    {/* Selected Mast Section / Guy Layer / Anchor Card */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Selected Mast / Guy Layer / Anchor Telemetry Ledger */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-stone-300">
                       {selectedTowerSection && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2">
+                        <div className="border-t border-stone-900 pt-3 space-y-2">
                           <div className="flex items-start justify-between gap-2">
                             <div>
-                              <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                              <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
                                 Tower Section Selected
                               </div>
-                              <div className="text-sm font-bold text-slate-900">
+                              <div className="text-sm font-bold text-neutral-950 mt-0.5">
                                 {selectedTowerSection.id} · {selectedTowerSection.elevationFromM}m –{' '}
                                 {selectedTowerSection.elevationToM}m
                               </div>
@@ -834,17 +855,17 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                               const st = getClientSectionStatusLabel(selectedTowerSection.status);
                               return (
                                 <span
-                                  className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${st.bgClass} ${st.textClass}`}
+                                  className={`text-[10px] font-mono font-bold uppercase shrink-0 ${st.textClass}`}
                                 >
                                   {st.label}
                                 </span>
                               );
                             })()}
                           </div>
-                          <div className="text-xs text-slate-600 flex flex-wrap gap-3">
+                          <div className="text-xs text-neutral-600 flex flex-wrap gap-x-4 gap-y-1 pt-1 border-t border-stone-200">
                             <span>
                               Installed:{' '}
-                              <strong>
+                              <strong className="text-neutral-900">
                                 {selectedTowerSection.installedDate
                                   ? formatDateWithWeekday(selectedTowerSection.installedDate)
                                   : 'Scheduled'}
@@ -853,7 +874,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                             {selectedTowerSection.verifiedDate && (
                               <span>
                                 Verified:{' '}
-                                <strong>
+                                <strong className="text-neutral-900">
                                   {formatDateWithWeekday(selectedTowerSection.verifiedDate)}
                                 </strong>
                               </span>
@@ -863,38 +884,35 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                       )}
 
                       {selectedGuyLayer && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-2">
+                        <div className="border-t border-stone-900 pt-3 space-y-2">
                           <div className="flex items-start justify-between gap-2">
                             <div>
-                              <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                              <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
                                 Guy Cable Layer Selected
                               </div>
-                              <div className="text-sm font-bold text-slate-900">
+                              <div className="text-sm font-bold text-neutral-950 mt-0.5">
                                 {selectedGuyLayer.id} · Elev. {selectedGuyLayer.elevationM}m
                               </div>
-                              <div className="text-[11px] text-slate-500">
+                              <div className="text-[11px] text-neutral-600">
                                 {selectedGuyLayer.anchorRingLabel} ({selectedGuyLayer.anchorRadiusM}m radius)
                               </div>
                             </div>
                             <span
-                              className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${GUY_LAYER_STATUS_META[selectedGuyLayer.status].bgClass} ${GUY_LAYER_STATUS_META[selectedGuyLayer.status].textClass}`}
+                              className={`text-[10px] font-mono font-bold uppercase shrink-0 ${GUY_LAYER_STATUS_META[selectedGuyLayer.status].textClass}`}
                             >
                               {GUY_LAYER_STATUS_META[selectedGuyLayer.status].shortLabel}
                             </span>
                           </div>
-                          <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                          <div className="grid grid-cols-3 gap-2 text-[11px] pt-2 border-t border-stone-200">
                             {(['I', 'II', 'III'] as const).map((sec) => {
                               const secProg = selectedGuyLayer.sectors[sec];
                               const anchorCode = selectedGuyLayer.anchorIds[sec];
                               return (
-                                <div
-                                  key={sec}
-                                  className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-center"
-                                >
-                                  <div className="font-bold text-slate-700">
+                                <div key={sec}>
+                                  <div className="font-mono font-bold text-neutral-900">
                                     Sec {sec} ({anchorCode})
                                   </div>
-                                  <div className="text-[10px] text-slate-500">
+                                  <div className="text-[10px] text-neutral-600">
                                     {secProg.tensioned
                                       ? 'Tensioned'
                                       : secProg.terminated
@@ -911,26 +929,29 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                       )}
 
                       {selectedGuyAnchor && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-sm font-bold text-slate-900">
-                              Anchor Pad {selectedGuyAnchor.code} (Sector {selectedGuyAnchor.sector})
+                        <div className="sm:col-span-2 pt-3 border-t border-stone-200 flex flex-wrap items-baseline justify-between gap-2">
+                          <div>
+                            <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                              Anchor Pad Selected
                             </div>
-                            {vmOverview.anchorGuyStates[selectedGuyAnchor.id] && (
-                              <span className="text-[11px] font-semibold text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-full">
-                                {
-                                  ANCHOR_GUY_STAGE_META[
-                                    vmOverview.anchorGuyStates[selectedGuyAnchor.id].stage
-                                  ].shortLabel
-                                }
-                              </span>
-                            )}
+                            <div className="text-sm font-bold text-neutral-950 mt-0.5">
+                              {selectedGuyAnchor.code} (Sector {selectedGuyAnchor.sector})
+                            </div>
+                            <div className="text-xs text-neutral-600 mt-0.5">
+                              {vmOverview.anchorGuyStates[selectedGuyAnchor.id]?.totalGuys
+                                ? `${vmOverview.anchorGuyStates[selectedGuyAnchor.id].anchoredCount} anchored / ${vmOverview.anchorGuyStates[selectedGuyAnchor.id].tensionedCount} tensioned of ${vmOverview.anchorGuyStates[selectedGuyAnchor.id].totalGuys} guy cables`
+                                : 'Center Mast Base Pedestal'}
+                            </div>
                           </div>
-                          <div className="text-xs text-slate-600">
-                            {vmOverview.anchorGuyStates[selectedGuyAnchor.id]?.totalGuys
-                              ? `${vmOverview.anchorGuyStates[selectedGuyAnchor.id].anchoredCount} anchored / ${vmOverview.anchorGuyStates[selectedGuyAnchor.id].tensionedCount} tensioned of ${vmOverview.anchorGuyStates[selectedGuyAnchor.id].totalGuys} guy cables`
-                              : 'Center Mast Base Pedestal'}
-                          </div>
+                          {vmOverview.anchorGuyStates[selectedGuyAnchor.id] && (
+                            <span className="text-[11px] font-mono font-bold uppercase text-sky-700">
+                              {
+                                ANCHOR_GUY_STAGE_META[
+                                  vmOverview.anchorGuyStates[selectedGuyAnchor.id].stage
+                                ].shortLabel
+                              }
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -939,218 +960,305 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
               )}
             </section>
 
-            {/* Project Schedule Milestones */}
-            {activeDto.settings.showSchedule && activeDto.schedule.length > 0 && (
-              <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
-                      <Calendar className="w-5 h-5 text-sky-600" />
-                      Project Milestone Timeline
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Simplified construction sequence from mobilization to final tower commissioning
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold">
-                      {scheduleSummary.completed} / {scheduleSummary.total} Phases Complete
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {activeDto.schedule.map((item) => {
-                    const badge = getScheduleStatusBadge(item.status);
-                    const pct = Math.min(100, Math.max(0, Math.round(item.progressPct ?? 0)));
-                    return (
-                      <div
-                        key={item.id}
-                        className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5 flex flex-col justify-between gap-2.5"
-                      >
-                        <div className="space-y-1.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="text-[11px] font-bold text-slate-500">
-                              Phase {item.stepNo} · {item.indicativeTiming}
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 rounded-full border text-[10px] font-bold shrink-0 ${badge.classes}`}
-                            >
-                              {badge.label}
-                            </span>
-                          </div>
-                          <h4 className="text-sm font-bold text-slate-900">{item.title}</h4>
-                          <p className="text-xs text-slate-600 line-clamp-2">{item.workDetails}</p>
-                        </div>
-
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between text-[11px] text-slate-500">
-                            <span className="inline-flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              Target: {item.plannedDurationDays} days
-                            </span>
-                            <span className="font-bold text-slate-700 tabular-nums">{pct}%</span>
-                          </div>
-                          <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                item.status === 'completed'
-                                  ? 'bg-emerald-500'
-                                  : item.status === 'in_progress'
-                                    ? 'bg-sky-500'
-                                    : 'bg-slate-400'
-                              }`}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-
-            {/* Field Highlights & Photo Gallery */}
+            {/* 03 · Recent Site Updates & Photo Highlights */}
             {activeDto.settings.showPhotos && (
-              <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-xs space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+              <section id="section-logs" className="space-y-8">
+                <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-neutral-900 pb-2">
                   <div>
-                    <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
-                      <Camera className="w-5 h-5 text-sky-600" />
-                      Recent Site Updates &amp; Photo Highlights
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Latest field progress summaries and documented site photos
+                    <h2 className="text-sm font-mono uppercase tracking-widest font-bold text-neutral-950">
+                      03 · Recent Site Updates &amp; Photo Highlights
+                    </h2>
+                    <p className="text-xs text-neutral-600 mt-0.5">
+                      Daily field engineering records, safety compliance logs, and site photography
                     </p>
                   </div>
-                  {galleryPhotos.length > 0 && (
-                    <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
-                      {galleryPhotos.length} Site {galleryPhotos.length === 1 ? 'Photo' : 'Photos'}
-                    </span>
-                  )}
+                  <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500">
+                    {activeDto.highlights.length}{' '}
+                    {activeDto.highlights.length === 1 ? 'Entry' : 'Entries'} ·{' '}
+                    {galleryPhotos.length} {galleryPhotos.length === 1 ? 'Photo' : 'Photos'}
+                  </span>
                 </div>
 
                 {activeDto.highlights.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
+                  <div className="py-10 border-b border-stone-200 text-xs font-mono text-neutral-500">
                     Site photos and daily progress highlights will appear here once field logs are recorded.
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {activeDto.highlights.map((highlight: ClientDailyHighlightDto) => (
-                      <article
-                        key={highlight.id}
-                        className="rounded-xl border border-slate-200 bg-slate-50/40 p-4 space-y-3"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="px-2.5 py-0.5 rounded-full bg-slate-900 text-white text-[11px] font-bold">
-                              Day {highlight.dayNumber}
-                            </span>
-                            <span className="text-xs font-bold text-slate-900">
-                              {formatDateWithWeekday(highlight.date)}
+                  <div className="divide-y divide-stone-300">
+                    {activeDto.highlights.map((highlight: ClientDailyHighlightDto, index: number) => {
+                      const safetyLogs = highlight.safetyLogs ?? [];
+                      const equipment = highlight.equipment ?? [];
+                      const delays = highlight.delays ?? [];
+                      const foundationsWorked = highlight.foundationsWorked ?? [];
+                      const totalWorkers = highlight.totalWorkers ?? 0;
+                      const preparedBy = highlight.preparedBy?.trim() || '';
+                      const safetyOfficer = highlight.safetyOfficer?.trim() || '';
+                      const weatherLabel =
+                        WEATHER_BADGE_MAP[highlight.weather] ?? highlight.weather;
+                      const hasSafetyAlert = safetyLogs.some((item) =>
+                        safetyStatusIsAlert(item.status)
+                      );
+
+                      return (
+                        <article
+                          key={highlight.id}
+                          className={`${index === 0 ? 'pb-10' : 'py-10'} space-y-5`}
+                        >
+                          {/* Log Entry Day Header */}
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            <div className="flex items-baseline gap-3">
+                              <span className="text-xl font-bold tracking-tight text-neutral-950 font-mono">
+                                DAY {String(highlight.dayNumber).padStart(2, '0')}
+                              </span>
+                              <span className="text-sm font-medium text-neutral-700">
+                                {formatDateWithWeekday(highlight.date)}
+                              </span>
+                            </div>
+                            <span className="text-xs font-mono uppercase tracking-wider text-neutral-600">
+                              {weatherLabel}
                             </span>
                           </div>
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full border border-slate-200 bg-white text-[11px] font-medium text-slate-700">
-                            <CloudSun className="w-3.5 h-3.5 text-amber-500" />
-                            {WEATHER_BADGE_MAP[highlight.weather] ?? highlight.weather}
-                          </span>
-                        </div>
 
-                        {highlight.activitiesSummary && (
-                          <p className="text-xs sm:text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                            {highlight.activitiesSummary}
-                          </p>
-                        )}
+                          {/* Narrative Summary */}
+                          {highlight.activitiesSummary && (
+                            <p className="text-sm sm:text-[15px] text-neutral-800 leading-relaxed max-w-3xl whitespace-pre-line">
+                              {highlight.activitiesSummary}
+                            </p>
+                          )}
 
-                        {highlight.photos.length > 0 && (
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-                            {highlight.photos.map((photo) => {
-                              const idx = galleryPhotos.findIndex(
-                                (item) => item.id === `${highlight.id}-${photo.id}`
-                              );
-                              return (
-                                <button
-                                  key={photo.id}
-                                  type="button"
-                                  onClick={() => idx >= 0 && setLightboxIndex(idx)}
-                                  className="group relative rounded-xl overflow-hidden border border-slate-200 bg-white text-left cursor-pointer hover:ring-2 hover:ring-sky-500 transition"
-                                >
-                                  <div className="aspect-[4/3] bg-slate-100 overflow-hidden">
-                                    <img
-                                      src={photo.url}
-                                      alt={photo.description || 'Site progress photo'}
-                                      loading="lazy"
-                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                    />
+                          {/* 4-Column Borderless Specification Ledger */}
+                          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 pt-4 border-t border-stone-200 text-xs">
+                            <div>
+                              <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                                Engineer / Prepared By
+                              </dt>
+                              <dd className="font-semibold text-neutral-950 mt-1">
+                                {preparedBy || 'Field Engineering Team'}
+                              </dd>
+                            </div>
+
+                            <div>
+                              <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                                Workers On Site
+                              </dt>
+                              <dd className="font-semibold text-neutral-950 mt-1 tabular-nums">
+                                {totalWorkers > 0 ? `${totalWorkers} Personnel` : '—'}
+                              </dd>
+                            </div>
+
+                            <div>
+                              <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                                Safety Officer &amp; Logs
+                              </dt>
+                              <dd
+                                className={`font-semibold mt-1 ${
+                                  safetyLogs.length > 0
+                                    ? hasSafetyAlert
+                                      ? 'text-amber-700'
+                                      : 'text-emerald-700'
+                                    : 'text-neutral-700'
+                                }`}
+                              >
+                                {safetyLogs.length > 0
+                                  ? `${safetyLogs.length} ${safetyLogs.length === 1 ? 'Entry' : 'Entries'}${
+                                      safetyOfficer ? ` · ${safetyOfficer}` : ''
+                                    }`
+                                  : safetyOfficer || 'Standard Site PPE'}
+                              </dd>
+                            </div>
+
+                            <div>
+                              <dt className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">
+                                Work Areas / Weather
+                              </dt>
+                              <dd className="font-medium text-neutral-900 mt-1">
+                                {foundationsWorked.length > 0
+                                  ? foundationsWorked.join(', ')
+                                  : 'General Site'}{' '}
+                                · {weatherLabel}
+                              </dd>
+                            </div>
+                          </dl>
+
+                          {/* Safety Observations & Equipment Deployed Strip */}
+                          {(safetyLogs.length > 0 ||
+                            equipment.length > 0 ||
+                            Boolean(highlight.weatherNotes?.trim())) && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-3 border-t border-stone-200/80 text-xs">
+                              {safetyLogs.length > 0 && (
+                                <div>
+                                  <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 mb-2">
+                                    Safety Log Entries
                                   </div>
-                                  {photo.description && (
-                                    <div className="p-2 text-[11px] text-slate-700 line-clamp-2">
-                                      {photo.description}
-                                    </div>
+                                  <ul className="divide-y divide-stone-200">
+                                    {safetyLogs.map((entry) => (
+                                      <li
+                                        key={entry.id}
+                                        className="flex items-baseline justify-between gap-3 py-1.5"
+                                      >
+                                        <span className="text-neutral-800">
+                                          {entry.timeOrActivity && (
+                                            <span className="font-medium text-neutral-950">
+                                              {entry.timeOrActivity}
+                                              {entry.hazardOrFinding || entry.actionTaken
+                                                ? ' — '
+                                                : ''}
+                                            </span>
+                                          )}
+                                          {entry.hazardOrFinding}
+                                          {entry.actionTaken && (
+                                            <span className="text-neutral-500">
+                                              {entry.hazardOrFinding ? ` (${entry.actionTaken})` : entry.actionTaken}
+                                            </span>
+                                          )}
+                                        </span>
+                                        <span
+                                          className={`font-mono text-[10px] uppercase shrink-0 ${
+                                            safetyStatusIsAlert(entry.status)
+                                              ? 'text-amber-700 font-bold'
+                                              : 'text-emerald-700'
+                                          }`}
+                                        >
+                                          {entry.status || 'Compliant'}
+                                        </span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+
+                              {(equipment.length > 0 || Boolean(highlight.weatherNotes?.trim())) && (
+                                <div>
+                                  <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 mb-2">
+                                    Equipment Deployed &amp; Weather Note
+                                  </div>
+                                  {equipment.length > 0 && (
+                                    <p className="text-neutral-800 leading-relaxed">
+                                      {equipment
+                                        .map(
+                                          (eq) =>
+                                            `${eq.qty}× ${eq.name}${
+                                              eq.status && eq.status !== 'Operational'
+                                                ? ` (${eq.status})`
+                                                : ''
+                                            }`
+                                        )
+                                        .join(' · ')}
+                                    </p>
                                   )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </article>
-                    ))}
+                                  {highlight.weatherNotes?.trim() && (
+                                    <p className="text-neutral-600 mt-1.5 font-mono text-[11px]">
+                                      Weather note: {highlight.weatherNotes}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Conditional Issue / Delay Notice (left hairline rule only, no enclosing box) */}
+                          {delays.length > 0 && (
+                            <div className="pl-4 border-l-2 border-amber-600 py-1 text-xs space-y-1">
+                              <div className="text-[10px] font-mono uppercase tracking-wider text-amber-800 font-bold">
+                                Issue / Delay Recorded
+                              </div>
+                              {delays.map((delay) => (
+                                <div key={delay.id} className="text-neutral-900">
+                                  {delay.description}
+                                  {delay.impact && (
+                                    <span className="text-neutral-600 font-mono">
+                                      {' '}
+                                      ({delay.impact})
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Flush Sharp-Corner Photo Plates */}
+                          {highlight.photos.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+                              {highlight.photos.map((photo) => {
+                                const idx = galleryPhotos.findIndex(
+                                  (item) => item.id === `${highlight.id}-${photo.id}`
+                                );
+                                return (
+                                  <button
+                                    key={photo.id}
+                                    type="button"
+                                    onClick={() => idx >= 0 && setLightboxIndex(idx)}
+                                    className="group text-left cursor-pointer focus:outline-none"
+                                  >
+                                    <div className="aspect-[4/3] overflow-hidden bg-stone-200">
+                                      <img
+                                        src={photo.url}
+                                        alt={photo.description || 'Site progress photo'}
+                                        loading="lazy"
+                                        className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                                      />
+                                    </div>
+                                    {photo.description && (
+                                      <div className="pt-2 text-xs text-neutral-600 leading-snug group-hover:text-neutral-950 transition-colors line-clamp-2">
+                                        {photo.description}
+                                      </div>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
                   </div>
                 )}
               </section>
             )}
-          </>
-        )}
-      </main>
 
-      {/* Subtle Client Footer */}
-      <footer className="border-t border-slate-200 bg-white py-4 px-4 text-center text-[11px] text-slate-500">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-          <span className="inline-flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-            Read-Only Client Showcase Portal
-          </span>
-          <span>
-            {activeDto
-              ? `${activeDto.projectName} · Last updated ${formatDateWithWeekday(activeDto.lastUpdated)}`
-              : 'Mast & Tower Progress Reporter'}
-          </span>
+            {/* Architectural Portal Footer */}
+            <footer className="pt-8 border-t border-stone-300 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono uppercase tracking-wider text-neutral-500">
+              <span>Read-Only Client Showcase Portal</span>
+              <span>
+                {activeDto.projectName} · Updated {formatDateWithWeekday(activeDto.lastUpdated)}
+              </span>
+            </footer>
+          </main>
         </div>
-      </footer>
+      )}
 
-      {/* Lightbox Modal */}
+      {/* Architectural Fullscreen Photo Lightbox (Sharp Geometry) */}
       {lightboxIndex !== null && galleryPhotos[lightboxIndex] && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-neutral-950/90 flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
           onClick={() => setLightboxIndex(null)}
         >
           <div
-            className="relative max-w-4xl w-full bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl"
+            className="relative max-w-5xl w-full bg-neutral-950 border border-neutral-800"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 text-white">
-              <div className="text-xs font-semibold">
-                Day {galleryPhotos[lightboxIndex].dayNumber} ·{' '}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-800 text-neutral-200 font-mono text-xs uppercase tracking-wider">
+              <div>
+                Day {String(galleryPhotos[lightboxIndex].dayNumber).padStart(2, '0')} ·{' '}
                 {formatDateWithWeekday(galleryPhotos[lightboxIndex].date)}
               </div>
               <button
                 type="button"
                 onClick={() => setLightboxIndex(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                className="p-1.5 border border-neutral-700 hover:border-white text-neutral-300 hover:text-white cursor-pointer"
                 aria-label="Close photo"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="relative bg-black flex items-center justify-center max-h-[70dvh]">
+            <div className="relative bg-black flex items-center justify-center max-h-[72dvh]">
               <img
                 src={galleryPhotos[lightboxIndex].url}
                 alt={galleryPhotos[lightboxIndex].description}
-                className="max-h-[70dvh] w-auto object-contain"
+                className="max-h-[72dvh] w-auto object-contain"
               />
               {galleryPhotos.length > 1 && (
                 <>
@@ -1161,7 +1269,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                         (lightboxIndex - 1 + galleryPhotos.length) % galleryPhotos.length
                       )
                     }
-                    className="absolute left-3 p-2 rounded-full bg-slate-900/75 text-white hover:bg-slate-900 cursor-pointer"
+                    className="absolute left-3 p-2.5 bg-neutral-950/85 border border-neutral-700 text-white hover:bg-neutral-900 cursor-pointer"
                     aria-label="Previous photo"
                   >
                     <ChevronLeft className="w-5 h-5" />
@@ -1169,7 +1277,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                   <button
                     type="button"
                     onClick={() => setLightboxIndex((lightboxIndex + 1) % galleryPhotos.length)}
-                    className="absolute right-3 p-2 rounded-full bg-slate-900/75 text-white hover:bg-slate-900 cursor-pointer"
+                    className="absolute right-3 p-2.5 bg-neutral-950/85 border border-neutral-700 text-white hover:bg-neutral-900 cursor-pointer"
                     aria-label="Next photo"
                   >
                     <ChevronRight className="w-5 h-5" />
@@ -1178,7 +1286,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
               )}
             </div>
 
-            <div className="px-4 py-3 text-xs sm:text-sm text-slate-200 bg-slate-900">
+            <div className="px-4 py-3 text-xs sm:text-sm text-neutral-300 bg-neutral-950 border-t border-neutral-800">
               {galleryPhotos[lightboxIndex].description}
             </div>
           </div>

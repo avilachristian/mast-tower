@@ -105,6 +105,7 @@ export function GroundAnchorPlan2D({
   compact = false,
   fillParent = false,
   hideHeader = false,
+  frameless = false,
 }: {
   foundations: FoundationRecord[];
   /** When provided (Vertical Mast Tower Phase), switches colors, badges, and legend to guy cable count/anchorage stages. */
@@ -119,6 +120,7 @@ export function GroundAnchorPlan2D({
   compact?: boolean;
   fillParent?: boolean;
   hideHeader?: boolean;
+  frameless?: boolean;
 }) {
   const isGuyingMode = Boolean(anchorGuyStates);
   const highlightedSet = new Set(highlightedIds ?? []);
@@ -173,11 +175,19 @@ export function GroundAnchorPlan2D({
       className={
         fillParent
           ? 'w-full h-full flex flex-col bg-white overflow-hidden'
-          : 'rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden'
+          : frameless
+            ? 'w-full bg-white'
+            : 'rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden'
       }
     >
       {!hideHeader && (
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/70 shrink-0">
+        <div
+          className={
+            frameless
+              ? 'flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-stone-200 bg-white shrink-0'
+              : 'flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/70 shrink-0'
+          }
+        >
         <div>
           <h2 className="text-sm font-bold text-slate-900">
             {title}
@@ -205,10 +215,14 @@ export function GroundAnchorPlan2D({
                 return (
                   <span
                     key={gs}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200"
+                    className={
+                      frameless
+                        ? 'inline-flex items-center gap-1.5 px-1.5 py-0.5 font-mono text-[10px] text-neutral-700'
+                        : 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200'
+                    }
                   >
                     <span
-                      className="w-2 h-2 rounded-full"
+                      className={frameless ? 'w-2 h-2' : 'w-2 h-2 rounded-full'}
                       style={{ backgroundColor: ANCHOR_GUY_STAGE_META[gs].color }}
                     />
                     {ANCHOR_GUY_STAGE_META[gs].shortLabel}: <strong>{count}</strong>
@@ -232,10 +246,14 @@ export function GroundAnchorPlan2D({
                 return (
                   <span
                     key={st}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200"
+                    className={
+                      frameless
+                        ? 'inline-flex items-center gap-1.5 px-1.5 py-0.5 font-mono text-[10px] text-neutral-700'
+                        : 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full border bg-white text-slate-700 border-slate-200'
+                    }
                   >
                     <span
-                      className="w-2 h-2 rounded-full"
+                      className={frameless ? 'w-2 h-2' : 'w-2 h-2 rounded-full'}
                       style={{ backgroundColor: STATUS_META[st].color }}
                     />
                     {STATUS_META[st].shortLabel}: <strong>{count}</strong>
@@ -272,7 +290,7 @@ export function GroundAnchorPlan2D({
             </pattern>
           </defs>
 
-          <rect x="30" y="8" width="700" height="672" fill="url(#cad-grid)" rx="8" />
+          <rect x="30" y="8" width="700" height="672" fill="url(#cad-grid)" rx={frameless ? 0 : 8} />
 
           {/* Distance Circles (18m, 36m, 54m, 72m) */}
           {[18, 36, 54, 72].map((rM) => (
@@ -807,7 +825,7 @@ export function GroundAnchorPlan2D({
                     y={boxY}
                     width={boxW}
                     height={boxH}
-                    rx="5"
+                    rx={frameless ? 0 : 5}
                     fill="#0284c7"
                     stroke="#0f172a"
                     strokeWidth="1.3"
