@@ -255,6 +255,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
       slug: 'proj-concurrent',
       phaseMode: 'foundation',
       showPhotos: true,
+      showReports: true,
     };
 
     useProjectStore.setState({
@@ -293,6 +294,8 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
                 payload.clientSettings.phaseMode ?? rec.clientSettings!.phaseMode,
               showPhotos:
                 payload.clientSettings.showPhotos ?? rec.clientSettings!.showPhotos,
+              showReports:
+                payload.clientSettings.showReports ?? rec.clientSettings!.showReports,
             }
             : rec.clientSettings,
           state: payload.state,
@@ -313,6 +316,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
       slug: 'proj-concurrent',
       phaseMode: 'vertical_mast',
       showPhotos: true,
+      showReports: true,
     });
     const p2 = syncSingleProjectToCloud('proj-concurrent');
 
@@ -357,6 +361,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
       slug: 'proj-mid-edit',
       phaseMode: 'vertical_mast',
       showPhotos: true,
+      showReports: true,
     };
 
     useProjectStore.setState({
@@ -378,6 +383,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
           slug: 'proj-mid-edit',
           phaseMode: 'foundation',
           showPhotos: false,
+          showReports: false,
         },
       },
       '2026-11-15T06:00:00.000Z'
@@ -402,6 +408,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
       slug: 'proj-pub-dirty',
       phaseMode: 'both',
       showPhotos: true,
+      showReports: true,
     };
     const privateDirty = makeRecord('proj-priv-dirty', 'pending');
     privateDirty.clientSettings = {
@@ -410,6 +417,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
       slug: 'proj-priv-dirty',
       phaseMode: 'foundation',
       showPhotos: true,
+      showReports: true,
     };
 
     useProjectStore.setState({

@@ -58,6 +58,7 @@ export function ClientVisibilityModal({
   const [welcomeNote, setWelcomeNote] = useState('');
   const [phaseMode, setPhaseMode] = useState<ClientShowcasePhaseMode>('both');
   const [showPhotos, setShowPhotos] = useState(true);
+  const [showReports, setShowReports] = useState(true);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -68,6 +69,7 @@ export function ClientVisibilityModal({
     setWelcomeNote(resolved.welcomeNote || '');
     setPhaseMode(resolved.phaseMode);
     setShowPhotos(resolved.showPhotos);
+    setShowReports(resolved.showReports);
     setCopied(false);
   }, [open, projectId]);
 
@@ -99,6 +101,7 @@ export function ClientVisibilityModal({
     welcomeNote: welcomeNote.trim() || undefined,
     phaseMode,
     showPhotos,
+    showReports,
   });
 
   const handleSave = async (e: React.FormEvent) => {
@@ -328,6 +331,15 @@ export function ClientVisibilityModal({
                     className="rounded border-slate-300 text-sky-600"
                   />
                   <span>Show Field Highlights &amp; Site Photo Gallery</span>
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={showReports}
+                    onChange={(e) => setShowReports(e.target.checked)}
+                    className="rounded border-slate-300 text-sky-600"
+                  />
+                  <span>Allow Client Progress &amp; Daily Log Reports (PDF)</span>
                 </label>
               </div>
             </div>

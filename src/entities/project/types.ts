@@ -601,6 +601,7 @@ export interface ClientShowcaseSettings {
   welcomeNote?: string;
   phaseMode: ClientShowcasePhaseMode;
   showPhotos: boolean;
+  showReports: boolean;
 }
 
 export type ProjectSyncStatus = 'synced' | 'pending' | 'conflict' | 'local_only';

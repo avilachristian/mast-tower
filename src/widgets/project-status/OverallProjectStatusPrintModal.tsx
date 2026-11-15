@@ -8,10 +8,12 @@ export function OverallProjectStatusPrintModal({
   open,
   onClose,
   project,
+  clientSafe = false,
 }: {
   open: boolean;
   onClose: () => void;
   project: MastProjectState;
+  clientSafe?: boolean;
 }) {
   const { dialogMaxWidthClass, sheetWidthPx } = usePrintPageSetup(open);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -50,7 +52,7 @@ export function OverallProjectStatusPrintModal({
             style={{ width: `${sheetWidthPx}px`, minWidth: `${sheetWidthPx}px` }}
             className="report-modal-scroll-area report-printable-card pdf-desktop-layout mx-auto bg-white shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none"
           >
-            <OverallProjectStatusSheet project={project} />
+            <OverallProjectStatusSheet project={project} clientSafe={clientSafe} />
           </div>
         </div>
       </div>

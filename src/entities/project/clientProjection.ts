@@ -61,6 +61,7 @@ export const DEFAULT_CLIENT_SHOWCASE_SETTINGS: ClientShowcaseSettings = {
   featured: false,
   phaseMode: 'both',
   showPhotos: true,
+  showReports: true,
 };
 
 export function slugifyProjectSlug(value: string, fallbackId = 'project'): string {
@@ -98,6 +99,7 @@ export function resolveClientShowcaseSettings(
         ? raw.phaseMode
         : 'both',
     showPhotos: raw?.showPhotos ?? true,
+    showReports: raw?.showReports ?? true,
   };
 }
 
@@ -188,7 +190,8 @@ function sanitizeVerticalMastForClient(
  */
 function projectClientDailyHighlight(
   log: DailyActivityLogEntry,
-  fallbackEngineer: string
+  fallbackEngineer: string,
+  includePhotos: boolean
 ): ClientDailyHighlightDto {
   const equipment =
     log.equipmentItems && log.equipmentItems.length > 0
@@ -269,14 +272,16 @@ function projectClientDailyHighlight(
     safetyLogs,
     equipment,
     delays,
-    photos: (log.documentationItems ?? [])
-      .filter((item) => Boolean(item.photoDataUrl))
-      .map((item) => ({
-        id: item.id,
-        url: item.photoDataUrl!,
-        description:
-          item.description?.trim() || item.photoName || 'Site progress photo',
-      })),
+    photos: includePhotos
+      ? (log.documentationItems ?? [])
+          .filter((item) => Boolean(item.photoDataUrl))
+          .map((item) => ({
+            id: item.id,
+            url: item.photoDataUrl!,
+            description:
+              item.description?.trim() || item.photoName || 'Site progress photo',
+          }))
+      : [],
   };
 }
 
@@ -302,18 +307,25 @@ export function buildClientShowcaseDto(
   const fallbackEngineer =
     state.reportDetails?.preparedBy?.trim() || state.preparedBy?.trim() || '';
 
-  const highlights: ClientDailyHighlightDto[] = settings.showPhotos
-    ? sortedLogs
-        .map((log) => projectClientDailyHighlight(log, fallbackEngineer))
-        .filter(
-          (h) =>
-            h.photos.length > 0 ||
-            h.activitiesSummary.length > 0 ||
-            h.totalWorkers > 0 ||
-            h.safetyLogs.length > 0 ||
-            h.delays.length > 0
-        )
-    : [];
+  const highlights: ClientDailyHighlightDto[] =
+    settings.showPhotos || settings.showReports
+      ? sortedLogs
+          .map((log) =>
+            projectClientDailyHighlight(
+              log,
+              fallbackEngineer,
+              settings.showPhotos
+            )
+          )
+          .filter(
+            (h) =>
+              h.photos.length > 0 ||
+              h.activitiesSummary.length > 0 ||
+              h.totalWorkers > 0 ||
+              h.safetyLogs.length > 0 ||
+              h.delays.length > 0
+          )
+      : [];
 
   return {
     id: record.id,

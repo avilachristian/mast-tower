@@ -13,9 +13,11 @@ import {
 export function OverallProjectStatusSheet({
   project,
   onSelectFoundation,
+  clientSafe = false,
 }: {
   project: MastProjectState;
   onSelectFoundation?: (id: string) => void;
+  clientSafe?: boolean;
 }) {
   const overview = buildOverallProjectStatusReportData(project);
   const { metrics, stageCounts, sectorSummaries, foundationRows } = overview;
@@ -184,10 +186,12 @@ export function OverallProjectStatusSheet({
                 <th className="px-2 py-1.5 border-r border-slate-900 text-center w-16">
                   Progress
                 </th>
-                <th className="px-2 py-1.5 border-r border-slate-900 w-36">
+                <th
+                  className={`px-2 py-1.5 ${clientSafe ? '' : 'border-r border-slate-900'} w-36`}
+                >
                   Pour / Done Date
                 </th>
-                <th className="px-2 py-1.5">Remarks / Notes</th>
+                {!clientSafe && <th className="px-2 py-1.5">Remarks / Notes</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-300 text-[11px]">
@@ -238,12 +242,16 @@ export function OverallProjectStatusSheet({
                     <td className="px-2 py-1.5 border-r border-slate-900 text-center font-bold tabular-nums text-slate-900">
                       {row.progressPct}%
                     </td>
-                    <td className="px-2 py-1.5 border-r border-slate-900 text-[10px] text-slate-700">
+                    <td
+                      className={`px-2 py-1.5 ${clientSafe ? '' : 'border-r border-slate-900'} text-[10px] text-slate-700`}
+                    >
                       {dateDisplay}
                     </td>
-                    <td className="px-2 py-1.5 text-[10.5px] text-slate-700">
-                      {row.notes.trim() || '—'}
-                    </td>
+                    {!clientSafe && (
+                      <td className="px-2 py-1.5 text-[10.5px] text-slate-700">
+                        {row.notes.trim() || '—'}
+                      </td>
+                    )}
                   </tr>
                 );
               })}

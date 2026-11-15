@@ -11,7 +11,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Compass,
+  FileText,
   Lock,
+  Printer,
   RefreshCw,
   WifiOff,
   X,
@@ -38,7 +40,10 @@ import { navigateTo } from '@/shared/lib/router';
 import type { MastSelectionTarget } from '@/shared/state/uiStore';
 import { idbGet, idbSet } from '@/shared/storage/indexedDb';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
+import { OverallVerticalMastStatusPrintModal } from '@/widgets/mast-tower/OverallVerticalMastStatusPrintModal';
 import { VerticalMastElevation2D } from '@/widgets/mast-tower/VerticalMastElevation2D';
+import { OverallProjectStatusPrintModal } from '@/widgets/project-status/OverallProjectStatusPrintModal';
+import { ClientDailyLogPrintModal } from './ClientDailyLogPrintModal';
 import type { Tower3DSelectionTarget } from './tower3dGeometry';
 
 const LazyMastTower3DShowcase = lazy(() =>
@@ -130,6 +135,11 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     foundationId: 'PF-0',
   });
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [progressReportTarget, setProgressReportTarget] = useState<
+    'foundation' | 'vertical_mast' | null
+  >(null);
+  const [dailyLogPrintOpen, setDailyLogPrintOpen] = useState(false);
+  const [dailyLogInitialId, setDailyLogInitialId] = useState<string | null>(null);
 
   useEffect(() => {
     const onOnline = () => setIsOnline(true);
@@ -255,6 +265,9 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
       setSelectedGuyAnchorId(undefined);
       setSelected3DTarget({ kind: 'foundation', foundationId: firstFoundation });
       setLightboxIndex(null);
+      setProgressReportTarget(null);
+      setDailyLogPrintOpen(false);
+      setDailyLogInitialId(null);
     } else if (phaseChanged) {
       setDiagramMode((current) =>
         current === '3d_model' ? '3d_model' : resolveDefaultMode(activeDto)
@@ -266,6 +279,11 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
       phaseMode: activeDto.settings.phaseMode,
     };
   }, [activeDto]);
+
+  const openDailyLogReport = (highlightId?: string) => {
+    setDailyLogInitialId(highlightId ?? activeDto?.highlights[0]?.id ?? null);
+    setDailyLogPrintOpen(true);
+  };
 
   const renderProject = useMemo(
     () => (activeDto ? toClientRenderProjectState(activeDto) : null),
@@ -652,6 +670,46 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                   </a>
                 )}
               </nav>
+
+              {activeDto.settings.showReports && (
+                <div className="pt-4 border-t border-stone-300 space-y-2">
+                  <div className="text-[10px] font-mono uppercase tracking-widest text-neutral-500">
+                    Reports (PDF / Print)
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {activeDto.settings.phaseMode !== 'vertical_mast' && (
+                      <button
+                        type="button"
+                        onClick={() => setProgressReportTarget('foundation')}
+                        className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 border border-stone-300 bg-white hover:border-neutral-950 hover:bg-neutral-950 hover:text-white text-[11px] font-mono uppercase tracking-wider text-neutral-800 transition-colors cursor-pointer"
+                      >
+                        <span>Foundation Report</span>
+                        <Printer className="w-3 h-3 shrink-0" />
+                      </button>
+                    )}
+                    {activeDto.settings.phaseMode !== 'foundation' && (
+                      <button
+                        type="button"
+                        onClick={() => setProgressReportTarget('vertical_mast')}
+                        className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 border border-stone-300 bg-white hover:border-neutral-950 hover:bg-neutral-950 hover:text-white text-[11px] font-mono uppercase tracking-wider text-neutral-800 transition-colors cursor-pointer"
+                      >
+                        <span>Mast Erection Report</span>
+                        <Printer className="w-3 h-3 shrink-0" />
+                      </button>
+                    )}
+                    {activeDto.highlights.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openDailyLogReport()}
+                        className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 border border-stone-300 bg-white hover:border-neutral-950 hover:bg-neutral-950 hover:text-white text-[11px] font-mono uppercase tracking-wider text-neutral-800 transition-colors cursor-pointer"
+                      >
+                        <span>Daily Log ({activeDto.highlights.length})</span>
+                        <FileText className="w-3 h-3 shrink-0" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="pt-4 border-t border-stone-300 flex items-center justify-between gap-2 text-[11px] font-mono">
@@ -680,8 +738,44 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
           <main className="lg:col-span-9 p-6 sm:p-10 lg:p-12 space-y-14 min-w-0">
             {/* 01 · Project Overview & Bare Swiss KPI Metrics */}
             <section id="section-summary" className="space-y-6 border-b border-stone-300 pb-10">
-              <div className="text-[11px] font-mono uppercase tracking-widest text-neutral-500">
-                01 · Project Summary
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-[11px] font-mono uppercase tracking-widest text-neutral-500">
+                  01 · Project Summary
+                </div>
+                {activeDto.settings.showReports && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {activeDto.settings.phaseMode !== 'vertical_mast' && (
+                      <button
+                        type="button"
+                        onClick={() => setProgressReportTarget('foundation')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-neutral-900 bg-white hover:bg-neutral-950 hover:text-white text-[11px] font-mono uppercase tracking-wider text-neutral-950 transition-colors cursor-pointer"
+                      >
+                        <Printer className="w-3 h-3 shrink-0" />
+                        <span>Foundation Report</span>
+                      </button>
+                    )}
+                    {activeDto.settings.phaseMode !== 'foundation' && (
+                      <button
+                        type="button"
+                        onClick={() => setProgressReportTarget('vertical_mast')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-neutral-900 bg-white hover:bg-neutral-950 hover:text-white text-[11px] font-mono uppercase tracking-wider text-neutral-950 transition-colors cursor-pointer"
+                      >
+                        <Printer className="w-3 h-3 shrink-0" />
+                        <span>Mast Erection Report</span>
+                      </button>
+                    )}
+                    {activeDto.highlights.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openDailyLogReport()}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-stone-400 bg-white hover:border-neutral-950 hover:bg-neutral-950 hover:text-white text-[11px] font-mono uppercase tracking-wider text-neutral-800 transition-colors cursor-pointer"
+                      >
+                        <FileText className="w-3 h-3 shrink-0" />
+                        <span>Daily Log Report</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {activeDto.settings.welcomeNote?.trim() && (
@@ -1230,11 +1324,23 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                       Daily field engineering records, safety compliance logs, and site photography
                     </p>
                   </div>
-                  <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500">
-                    {activeDto.highlights.length}{' '}
-                    {activeDto.highlights.length === 1 ? 'Entry' : 'Entries'} ·{' '}
-                    {galleryPhotos.length} {galleryPhotos.length === 1 ? 'Photo' : 'Photos'}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-500">
+                      {activeDto.highlights.length}{' '}
+                      {activeDto.highlights.length === 1 ? 'Entry' : 'Entries'} ·{' '}
+                      {galleryPhotos.length} {galleryPhotos.length === 1 ? 'Photo' : 'Photos'}
+                    </span>
+                    {activeDto.settings.showReports && activeDto.highlights.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => openDailyLogReport()}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-stone-400 bg-white hover:border-neutral-950 hover:bg-neutral-950 hover:text-white text-[10px] font-mono uppercase tracking-wider text-neutral-800 transition-colors cursor-pointer"
+                      >
+                        <Printer className="w-3 h-3 shrink-0" />
+                        <span>Daily Log PDF</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {activeDto.highlights.length === 0 ? (
@@ -1272,9 +1378,22 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                                 {formatDateWithWeekday(highlight.date)}
                               </span>
                             </div>
-                            <span className="text-xs font-mono uppercase tracking-wider text-neutral-600">
-                              {weatherLabel}
-                            </span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-mono uppercase tracking-wider text-neutral-600">
+                                {weatherLabel}
+                              </span>
+                              {activeDto.settings.showReports && (
+                                <button
+                                  type="button"
+                                  onClick={() => openDailyLogReport(highlight.id)}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 border border-stone-300 bg-white hover:border-neutral-950 hover:bg-neutral-950 hover:text-white text-[10px] font-mono uppercase tracking-wider text-neutral-700 transition-colors cursor-pointer"
+                                  title={`Print / Save PDF for Day ${highlight.dayNumber}`}
+                                >
+                                  <Printer className="w-2.5 h-2.5 shrink-0" />
+                                  <span>Day {String(highlight.dayNumber).padStart(2, '0')} PDF</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           {/* Narrative Summary */}
@@ -1483,6 +1602,37 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
             </footer>
           </main>
         </div>
+      )}
+
+      {/* Client-Safe Print / PDF Report Modals (Controlled by Admin showReports setting) */}
+      {activeDto && renderProject && activeDto.settings.showReports && (
+        <>
+          <OverallProjectStatusPrintModal
+            open={
+              progressReportTarget === 'foundation' &&
+              activeDto.settings.phaseMode !== 'vertical_mast'
+            }
+            onClose={() => setProgressReportTarget(null)}
+            project={renderProject}
+            clientSafe
+          />
+          <OverallVerticalMastStatusPrintModal
+            open={
+              progressReportTarget === 'vertical_mast' &&
+              activeDto.settings.phaseMode !== 'foundation'
+            }
+            onClose={() => setProgressReportTarget(null)}
+            project={renderProject}
+            clientSafe
+          />
+          <ClientDailyLogPrintModal
+            open={dailyLogPrintOpen}
+            onClose={() => setDailyLogPrintOpen(false)}
+            dto={activeDto}
+            renderProject={renderProject}
+            initialHighlightId={dailyLogInitialId}
+          />
+        </>
       )}
 
       {/* Architectural Fullscreen Photo Lightbox (Sharp Geometry) */}

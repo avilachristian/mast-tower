@@ -18,9 +18,11 @@ import { VerticalMastElevation2D } from './VerticalMastElevation2D';
 export function OverallVerticalMastStatusSheet({
   project,
   onSelectTarget,
+  clientSafe = false,
 }: {
   project: MastProjectState;
   onSelectTarget?: (target: MastSelectionTarget) => void;
+  clientSafe?: boolean;
 }) {
   const {
     vm,
@@ -221,7 +223,7 @@ export function OverallVerticalMastStatusSheet({
                 <th className="px-2 py-1.5 border-r border-slate-900 text-center">Sector II</th>
                 <th className="px-2 py-1.5 border-r border-slate-900 text-center">Sector III</th>
                 <th className="px-2 py-1.5 border-r border-slate-900">Overall Status</th>
-                <th className="px-2 py-1.5">Date / Remarks</th>
+                <th className="px-2 py-1.5">{clientSafe ? 'Progress Date' : 'Date / Remarks'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-300 text-[10.5px]">
@@ -306,7 +308,9 @@ export function OverallVerticalMastStatusSheet({
                     <th className="px-1.5 py-1 border-r border-slate-900 w-20">Elev (m)</th>
                     <th className="px-1.5 py-1 border-r border-slate-900">Stage</th>
                     <th className="px-1.5 py-1 border-r border-slate-900 w-16 text-center">Plumb</th>
-                    <th className="px-1.5 py-1">Fixture / Notes</th>
+                    <th className="px-1.5 py-1">
+                      {clientSafe ? 'Fixtures / Guy Layers' : 'Fixture / Notes'}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-300 text-[10px]">

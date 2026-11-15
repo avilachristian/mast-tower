@@ -58,7 +58,7 @@ describe('Tower 3D Geometry & Legend Color Mapping', () => {
       createdAt: '2026-11-15T00:00:00Z',
       updatedAt: '2026-11-15T00:00:00Z',
       version: 1,
-      clientSettings: { enabled: true, featured: true, phaseMode: 'both', showPhotos: false },
+      clientSettings: { enabled: true, featured: true, phaseMode: 'both', showPhotos: false, showReports: false },
       state: baseState,
     };
 

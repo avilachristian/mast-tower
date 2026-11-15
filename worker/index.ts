@@ -65,6 +65,7 @@ function rowToSavedProjectRecord(row: ProjectRow): SavedProjectRecord {
       welcomeNote: rawSettings.welcomeNote,
       phaseMode: rawSettings.phaseMode ?? 'both',
       showPhotos: rawSettings.showPhotos ?? true,
+      showReports: rawSettings.showReports ?? true,
     },
   });
 
@@ -529,6 +530,7 @@ export function createWorkerApp() {
           featured: false,
           phaseMode: 'both',
           showPhotos: true,
+          showReports: true,
         }),
         ...(body.clientSettings ?? {}),
       },
@@ -629,6 +631,7 @@ export function createWorkerApp() {
           featured: false,
           phaseMode: 'both',
           showPhotos: true,
+          showReports: true,
         }),
         ...patch,
       },

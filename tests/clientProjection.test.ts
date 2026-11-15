@@ -173,6 +173,7 @@ describe('Client Showcase Sanitized Projection', () => {
         welcomeNote: 'Welcome to our live progress portal.',
         phaseMode: 'both',
         showPhotos: true,
+        showReports: true,
       },
       state,
     };
@@ -235,9 +236,36 @@ describe('Client Showcase Sanitized Projection', () => {
     expect(serialized).not.toContain('45678.9');
   });
 
-  it('respects phaseMode and showPhotos visibility toggles', () => {
+  it('respects phaseMode, showPhotos, and showReports visibility toggles', () => {
     const state = createSampleMast2Project();
-    const dto = buildClientShowcaseDto({
+    state.dailyLogs = [
+      {
+        id: 'dl-vis-1',
+        date: '2026-01-12',
+        dayNumber: 1,
+        weather: 'Sunny',
+        activitiesSummary: 'Excavation works.',
+        foundationsWorked: ['PF-0'],
+        workers: [],
+        totalWorkers: 6,
+        totalManHours: 48,
+        cementUsedBags: 0,
+        sandUsedBags: 0,
+        gravelUsedBags: 0,
+        documentationItems: [
+          {
+            id: 'doc-vis-1',
+            photoDataUrl: '/api/images/projects/p1/daily_log/exc.jpg',
+            photoName: 'exc.jpg',
+            description: 'Excavation check',
+          },
+        ],
+        issuesOrDelays: '',
+      },
+    ];
+
+    // Both showPhotos & showReports off -> no daily logs exposed
+    const dtoBothOff = buildClientShowcaseDto({
       id: 'proj-beta',
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-02T00:00:00Z',
@@ -246,21 +274,41 @@ describe('Client Showcase Sanitized Projection', () => {
         featured: false,
         phaseMode: 'foundation',
         showPhotos: false,
+        showReports: false,
       },
       state,
     });
 
-    expect(dto.verticalMastSummary).toBeUndefined();
-    expect(dto.highlights).toEqual([]);
+    expect(dtoBothOff.verticalMastSummary).toBeUndefined();
+    expect(dtoBothOff.highlights).toEqual([]);
+
+    // showReports on while showPhotos off -> text log kept for PDF report, photos stripped
+    const dtoReportsOnly = buildClientShowcaseDto({
+      id: 'proj-beta',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-02T00:00:00Z',
+      clientSettings: {
+        enabled: true,
+        featured: false,
+        phaseMode: 'foundation',
+        showPhotos: false,
+        showReports: true,
+      },
+      state,
+    });
+    expect(dtoReportsOnly.highlights).toHaveLength(1);
+    expect(dtoReportsOnly.highlights[0].activitiesSummary).toBe('Excavation works.');
+    expect(dtoReportsOnly.highlights[0].photos).toEqual([]);
+
     expect(slugifyProjectSlug('Site #01 — Cebu North!', 'fallback')).toBe(
       'site-01-cebu-north'
     );
-    expect(
-      resolveClientShowcaseSettings({
-        id: 'proj-beta',
-        state,
-      }).phaseMode
-    ).toBe('both');
+    const defaults = resolveClientShowcaseSettings({
+      id: 'proj-beta',
+      state,
+    });
+    expect(defaults.phaseMode).toBe('both');
+    expect(defaults.showReports).toBe(true);
   });
 
   it('strips legacy unused schedule and schedulePhaseId data when loading saved workspaces', () => {

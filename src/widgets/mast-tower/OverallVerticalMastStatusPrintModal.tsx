@@ -8,10 +8,12 @@ export function OverallVerticalMastStatusPrintModal({
   open,
   onClose,
   project,
+  clientSafe = false,
 }: {
   open: boolean;
   onClose: () => void;
   project: MastProjectState;
+  clientSafe?: boolean;
 }) {
   const { dialogMaxWidthClass, sheetWidthPx } = usePrintPageSetup(open);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -56,7 +58,7 @@ export function OverallVerticalMastStatusPrintModal({
             style={{ width: `${sheetWidthPx}px`, minWidth: `${sheetWidthPx}px` }}
             className="report-modal-scroll-area report-printable-card pdf-desktop-layout mx-auto bg-white shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none"
           >
-            <OverallVerticalMastStatusSheet project={project} />
+            <OverallVerticalMastStatusSheet project={project} clientSafe={clientSafe} />
           </div>
         </div>
       </div>
