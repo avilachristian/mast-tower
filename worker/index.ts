@@ -733,18 +733,67 @@ export function createWorkerApp(options?: WorkerAppOptions) {
   app.use('/api/admin/*', requireAdmin);
 
   app.get('/api/admin/projects', async (c) => {
+    const summaryMode =
+      c.req.query('summary') === '1' || c.req.query('summary') === 'true';
+    const storage = await getR2StorageStatus(c.env);
+
+    if (summaryMode) {
+      const rows = await c.env.DB.prepare(
+        'SELECT id, slug, name, project_type, client_visible, client_featured, client_settings_json, version, created_at, updated_at FROM projects ORDER BY updated_at DESC'
+      ).all<Omit<ProjectRow, 'state_json' | 'client_dto_json'>>();
+
+      const projectSummaries = (rows.results ?? []).map((row) => {
+        const rawSettings = parseJsonSafe<Partial<ClientShowcaseSettings>>(
+          row.client_settings_json,
+          {}
+        );
+        return {
+          id: row.id,
+          name: row.name,
+          slug: row.slug ?? rawSettings.slug ?? '',
+          projectType: row.project_type ?? 'foundation',
+          clientVisible: Boolean(row.client_visible),
+          clientFeatured: Boolean(row.client_featured),
+          version: row.version,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        };
+      });
+
+      return c.json(
+        { projects: projectSummaries, storage },
+        200,
+        { 'Cache-Control': 'no-store' }
+      );
+    }
+
     const rows = await c.env.DB.prepare(
       'SELECT * FROM projects ORDER BY updated_at DESC'
     ).all<ProjectRow>();
 
     const projects = (rows.results ?? []).map(rowToSavedProjectRecord);
-    const storage = await getR2StorageStatus(c.env);
 
     return c.json(
       { projects, storage },
       200,
       { 'Cache-Control': 'no-store' }
     );
+  });
+
+  app.get('/api/admin/projects/:id', async (c) => {
+    const id = c.req.param('id');
+    const row = await c.env.DB.prepare(
+      'SELECT * FROM projects WHERE id = ?'
+    )
+      .bind(id)
+      .first<ProjectRow>();
+
+    if (!row) {
+      return c.json({ error: 'Project not found.', code: 'PROJECT_NOT_FOUND' }, 404);
+    }
+
+    const project = rowToSavedProjectRecord(row);
+    return c.json({ project }, 200, { 'Cache-Control': 'no-store' });
   });
 
   app.post('/api/admin/projects', async (c) => {

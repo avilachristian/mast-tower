@@ -1,6 +1,12 @@
 export const LEGACY_STORAGE_KEY = 'mast2-tower-report-generator-v1';
 export const WORKSPACE_STORAGE_KEY = 'mast2-tower-projects-workspace-v1';
+export const WORKSPACE_INDEX_STORAGE_KEY = 'mast2-tower-projects-index-v1';
+export const PROJECT_STORAGE_KEY_PREFIX = 'mast2-project-';
 export const FIRST_LAUNCH_COMPLETED_KEY = 'mast2-launcher-completed-v1';
+
+export function getProjectStorageKey(projectId: string): string {
+  return `${PROJECT_STORAGE_KEY_PREFIX}${projectId}`;
+}
 
 const DB_NAME = 'mast-tower-report-db';
 const DB_VERSION = 1;

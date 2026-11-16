@@ -44,10 +44,13 @@ import { todayLocalIso } from '@/shared/lib/dateUtils';
 import { replaceInlineImageUrlsInState } from '@/shared/lib/inlineImageRefs';
 import {
   createCoalescedIdbWriter,
+  getProjectStorageKey,
+  idbDelete,
   idbGet,
   idbSet,
   isIndexedDbAvailable,
   LEGACY_STORAGE_KEY,
+  WORKSPACE_INDEX_STORAGE_KEY,
   WORKSPACE_STORAGE_KEY,
 } from '@/shared/storage/indexedDb';
 import {
@@ -227,19 +230,52 @@ function createFallbackWorkspace(): WorkspacePayload {
   return { activeProjectId: fallback.id, projects: [fallback] };
 }
 
-const workspaceIdbWriter = createCoalescedIdbWriter<WorkspacePayload>(
-  WORKSPACE_STORAGE_KEY,
+export interface WorkspaceIndexPayload {
+  activeProjectId: string;
+  projectIds: string[];
+}
+
+const projectWriters = new Map<
+  string,
+  ReturnType<typeof createCoalescedIdbWriter<SavedProjectRecord>>
+>();
+
+function getProjectWriter(projectId: string) {
+  let writer = projectWriters.get(projectId);
+  if (!writer) {
+    writer = createCoalescedIdbWriter<SavedProjectRecord>(
+      getProjectStorageKey(projectId),
+      { debounceMs: 450 }
+    );
+    projectWriters.set(projectId, writer);
+  }
+  return writer;
+}
+
+const workspaceIndexWriter = createCoalescedIdbWriter<WorkspaceIndexPayload>(
+  WORKSPACE_INDEX_STORAGE_KEY,
   { debounceMs: 450 }
 );
+
+async function flushAllWorkspaceWriters() {
+  await Promise.all([
+    workspaceIndexWriter.flush(),
+    ...Array.from(projectWriters.values()).map((w) => w.flush()),
+  ]);
+}
+
 let workspaceFlushListenersRegistered = false;
 if (typeof window !== 'undefined' && !workspaceFlushListenersRegistered) {
   workspaceFlushListenersRegistered = true;
   window.addEventListener('pagehide', () => {
-    void workspaceIdbWriter.flush();
+    void flushAllWorkspaceWriters();
+  });
+  window.addEventListener('beforeunload', () => {
+    void flushAllWorkspaceWriters();
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      void workspaceIdbWriter.flush();
+      void flushAllWorkspaceWriters();
     }
   });
 }
@@ -262,9 +298,30 @@ export function registerProjectSyncHooks(hooks: ProjectSyncHooks): void {
   activeSyncHooks = hooks;
 }
 
-function persistWorkspace(activeProjectId: string, projects: SavedProjectRecord[]) {
+function persistWorkspace(
+  activeProjectId: string,
+  projects: SavedProjectRecord[],
+  modifiedProjectId?: string | 'none'
+) {
   if (!isIndexedDbAvailable()) return;
-  workspaceIdbWriter.enqueue({ activeProjectId, projects });
+  workspaceIndexWriter.enqueue({
+    activeProjectId,
+    projectIds: projects.map((p) => p.id),
+  });
+
+  if (modifiedProjectId === 'none') {
+    return;
+  }
+  if (modifiedProjectId) {
+    const target = projects.find((p) => p.id === modifiedProjectId);
+    if (target) {
+      getProjectWriter(target.id).enqueue(target);
+    }
+  } else {
+    for (const p of projects) {
+      getProjectWriter(p.id).enqueue(p);
+    }
+  }
 }
 
 function commitActiveProject(
@@ -294,7 +351,7 @@ function commitActiveProject(
       },
       ...s.projects,
     ];
-  persistWorkspace(s.activeProjectId, projects);
+  persistWorkspace(s.activeProjectId, projects, s.activeProjectId);
   activeSyncHooks.onProjectMutated?.(s.activeProjectId);
   return { project: nextProject, projects };
 }
@@ -918,8 +975,42 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
           let loaded: WorkspacePayload | null = null;
           if (isIndexedDbAvailable()) {
-            const idbRaw = await idbGet<WorkspacePayload>(WORKSPACE_STORAGE_KEY);
-            loaded = parseWorkspacePayload(idbRaw);
+            // 1. Try granular workspace index first
+            const index = await idbGet<WorkspaceIndexPayload>(WORKSPACE_INDEX_STORAGE_KEY);
+            if (index && Array.isArray(index.projectIds) && index.projectIds.length > 0) {
+              const records = await Promise.all(
+                index.projectIds.map((pid) => idbGet<SavedProjectRecord>(getProjectStorageKey(pid)))
+              );
+              const validProjects = records
+                .filter((p): p is SavedProjectRecord =>
+                  Boolean(p && p.id && p.state && Array.isArray(p.state.foundations) && p.state.foundations.length === 13)
+                )
+                .map(normalizeProjectRecord);
+
+              if (validProjects.length > 0) {
+                loaded = {
+                  activeProjectId: index.activeProjectId || validProjects[0].id,
+                  projects: validProjects,
+                };
+              }
+            }
+
+            // 2. If no granular index, check old monolithic IDB key
+            if (!loaded) {
+              const idbRaw = await idbGet<WorkspacePayload>(WORKSPACE_STORAGE_KEY);
+              loaded = parseWorkspacePayload(idbRaw);
+              if (loaded && loaded.projects.length > 0) {
+                // Automatically migrate monolithic IDB record to granular keys
+                for (const p of loaded.projects) {
+                  await idbSet(getProjectStorageKey(p.id), p);
+                }
+                await idbSet(WORKSPACE_INDEX_STORAGE_KEY, {
+                  activeProjectId: loaded.activeProjectId,
+                  projectIds: loaded.projects.map((p) => p.id),
+                });
+                void idbDelete(WORKSPACE_STORAGE_KEY);
+              }
+            }
           }
 
           if (!loaded) {
@@ -933,8 +1024,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
               loaded = null;
             }
 
-            if (loaded && isIndexedDbAvailable()) {
-              await idbSet(WORKSPACE_STORAGE_KEY, loaded);
+            if (loaded && loaded.projects.length > 0 && isIndexedDbAvailable()) {
+              // Automatically migrate localStorage to granular IDB
+              for (const p of loaded.projects) {
+                await idbSet(getProjectStorageKey(p.id), p);
+              }
+              await idbSet(WORKSPACE_INDEX_STORAGE_KEY, {
+                activeProjectId: loaded.activeProjectId,
+                projectIds: loaded.projects.map((p) => p.id),
+              });
               try {
                 window.localStorage.removeItem(WORKSPACE_STORAGE_KEY);
                 window.localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -1043,7 +1141,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => {
         const target = s.projects.find((p) => p.id === projectId);
         if (!target) return s;
-        persistWorkspace(target.id, s.projects);
+        persistWorkspace(target.id, s.projects, 'none');
         return {
           activeProjectId: target.id,
           project: target.state,
@@ -1086,6 +1184,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     deleteProject: (projectId) => {
+      void idbDelete(getProjectStorageKey(projectId));
+      projectWriters.delete(projectId);
       set((s) => {
         const remaining = s.projects.filter((p) => p.id !== projectId);
         if (remaining.length === 0) {
@@ -1093,7 +1193,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
             ...buildSavedRecord(createCleanBaselineProject()),
             syncStatus: 'local_only',
           };
-          persistWorkspace(fresh.id, [fresh]);
+          persistWorkspace(fresh.id, [fresh], fresh.id);
           return {
             projects: [fresh],
             activeProjectId: fresh.id,
@@ -1105,7 +1205,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           s.activeProjectId === projectId
             ? remaining[0]
             : remaining.find((p) => p.id === s.activeProjectId) ?? remaining[0];
-        persistWorkspace(nextActive.id, remaining);
+        persistWorkspace(nextActive.id, remaining, 'none');
         return {
           projects: remaining,
           activeProjectId: nextActive.id,
@@ -2676,7 +2776,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           }
           return p;
         });
-        persistWorkspace(s.activeProjectId, projects);
+        persistWorkspace(s.activeProjectId, projects, projectId);
         return { projects };
       });
       if (resolvedNext && !options?.skipAutoSync) {
@@ -2710,7 +2810,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           };
         });
         if (!anyChanged) return s;
-        persistWorkspace(s.activeProjectId, projects);
+        persistWorkspace(s.activeProjectId, projects, projectId);
         return {
           projects,
           ...(nextActiveState ? { project: nextActiveState } : {}),
@@ -2783,7 +2883,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
             };
 
         const projects = s.projects.map((p) => (p.id === projectId ? nextRecord : p));
-        persistWorkspace(s.activeProjectId, projects);
+        persistWorkspace(s.activeProjectId, projects, projectId);
         const isActive = s.activeProjectId === projectId;
         return {
           projects,
@@ -2796,7 +2896,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const projects = s.projects.map((p) =>
           p.id === projectId ? { ...p, syncStatus } : p
         );
-        persistWorkspace(s.activeProjectId, projects);
+        persistWorkspace(s.activeProjectId, projects, projectId);
         return { projects };
       }),
   };

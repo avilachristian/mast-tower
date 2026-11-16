@@ -281,6 +281,9 @@ function createMockD1() {
       if (row) row.client_dto_json = dtoJson;
       return { rows: [] };
     }
+    if (sql.startsWith('SELECT id, slug, name, project_type, client_visible, client_featured, client_settings_json, version, created_at, updated_at FROM projects ORDER BY updated_at DESC')) {
+      return { rows: Array.from(projects.values()) };
+    }
     if (sql.startsWith('SELECT * FROM projects ORDER BY updated_at DESC')) {
       return { rows: Array.from(projects.values()) };
     }
@@ -769,6 +772,34 @@ describe('Cloudflare Worker API Integration', () => {
     expect(
       adminListJson.projects.find((p) => p.id === 'proj-1')?.clientSettings?.show3DModel
     ).toBe(false);
+
+    // Verify GET /api/admin/projects?summary=1 (B3)
+    const summaryRes = await app.request(
+      '/api/admin/projects?summary=1',
+      { headers: { Cookie: cookie } },
+      env
+    );
+    expect(summaryRes.status).toBe(200);
+    const summaryJson = (await summaryRes.json()) as {
+      projects: Array<{ id: string; name: string; version: number; state?: unknown }>;
+    };
+    expect(summaryJson.projects.length).toBeGreaterThan(0);
+    const p1Summary = summaryJson.projects.find((p) => p.id === 'proj-1');
+    expect(p1Summary).toBeDefined();
+    expect(p1Summary?.state).toBeUndefined();
+
+    // Verify GET /api/admin/projects/:id (B3)
+    const singleRes = await app.request(
+      '/api/admin/projects/proj-1',
+      { headers: { Cookie: cookie } },
+      env
+    );
+    expect(singleRes.status).toBe(200);
+    const singleJson = (await singleRes.json()) as {
+      project: { id: string; state: { foundations: unknown[] } };
+    };
+    expect(singleJson.project.id).toBe('proj-1');
+    expect(singleJson.project.state.foundations).toBeDefined();
   });
 
   it('enforces R2 warning at <= 1 GB equiv, blocks uploads at < 100 MB equiv, serves images, and cleans orphaned media', async () => {

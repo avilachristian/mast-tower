@@ -1043,6 +1043,24 @@ export function recalculateDailyLogCarryOver(
       });
     }
 
+    const rowsUnchanged =
+      currRows.length === nextRows.length &&
+      currRows.every((row, idx) => {
+        const next = nextRows[idx];
+        return (
+          row.name === next.name &&
+          row.onSiteQty === next.onSiteQty &&
+          row.deliveredQty === next.deliveredQty &&
+          row.usedTodayQty === next.usedTodayQty &&
+          row.remainingQty === next.remainingQty
+        );
+      });
+
+    if (rowsUnchanged) {
+      // Carried-over quantities match what this log already had; downstream logs are already consistent
+      break;
+    }
+
     const updatedCurr: DailyActivityLogEntry = {
       ...curr,
       materialsOnSite: nextRows,

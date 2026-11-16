@@ -13,6 +13,18 @@ export interface AdminUserDto {
   displayName: string;
 }
 
+export interface SavedProjectSummary {
+  id: string;
+  name: string;
+  slug: string;
+  projectType: string;
+  clientVisible: boolean;
+  clientFeatured: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -125,6 +137,16 @@ export const apiClient = {
   listAdminProjects: () =>
     requestJson<{ projects: SavedProjectRecord[]; storage: R2StorageStatus }>(
       '/api/admin/projects'
+    ),
+
+  listAdminProjectSummaries: () =>
+    requestJson<{ projects: SavedProjectSummary[]; storage: R2StorageStatus }>(
+      '/api/admin/projects?summary=1'
+    ),
+
+  getAdminProject: (id: string) =>
+    requestJson<{ project: SavedProjectRecord }>(
+      `/api/admin/projects/${encodeURIComponent(id)}`
     ),
 
   createAdminProject: (payload: {
