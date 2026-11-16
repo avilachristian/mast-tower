@@ -45,8 +45,7 @@ export function InspectionReportSheet({
   const inspectionDate = meta.inspectionDate?.trim() || project.lastUpdated;
   const inspectorName =
     meta.inspectorName?.trim() || reportDetails.preparedBy || project.preparedBy;
-  const contractorRep =
-    meta.contractorRep?.trim() || reportDetails.contractor || project.contractor;
+  const verifiedBy = meta.contractorRep?.trim() || '';
   const overallStatus = deriveOverallInspectionStatus(
     meta.overallStatus,
     reportableInspections
@@ -69,7 +68,7 @@ export function InspectionReportSheet({
         defaultTitle="FOUNDATION INSPECTION CHECKLIST REPORT"
         fallbackProjectName={project.projectName}
         fallbackLocation={project.location}
-        fallbackContractor={contractorRep}
+        fallbackContractor={project.contractor}
         fallbackDate={inspectionDate}
       />
 
@@ -167,10 +166,12 @@ export function InspectionReportSheet({
                 <span className="font-bold text-slate-600">Inspected By:</span>{' '}
                 <span className="font-semibold text-slate-900">{inspectorName}</span>
               </div>
-              <div>
-                <span className="font-bold text-slate-600">Contractor Rep:</span>{' '}
-                <span className="font-semibold text-slate-900">{contractorRep}</span>
-              </div>
+              {verifiedBy && (
+                <div>
+                  <span className="font-bold text-slate-600">Verified By:</span>{' '}
+                  <span className="font-semibold text-slate-900">{verifiedBy}</span>
+                </div>
+              )}
               <div>
                 <span className="font-bold text-slate-600">Checklist Summary:</span>{' '}
                 <span className="font-semibold text-slate-900">
@@ -350,7 +351,13 @@ export function InspectionReportSheet({
         </div>
 
         {/* Sign-off Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x pdf-desktop:divide-y-0 pdf-desktop:divide-x print:divide-y-0 print:divide-x divide-slate-900 text-[11px]">
+        <div
+          className={`grid grid-cols-1 ${
+            verifiedBy
+              ? 'sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3'
+              : 'sm:grid-cols-2 pdf-desktop:grid-cols-2 print:grid-cols-2'
+          } divide-y sm:divide-y-0 sm:divide-x pdf-desktop:divide-y-0 pdf-desktop:divide-x print:divide-y-0 print:divide-x divide-slate-900 text-[11px]`}
+        >
           <div className="p-2.5">
             <div className="text-[10px] font-bold uppercase text-slate-500">
               Inspected By (Site Engineer)
@@ -359,14 +366,16 @@ export function InspectionReportSheet({
               {inspectorName}
             </div>
           </div>
-          <div className="p-2.5">
-            <div className="text-[10px] font-bold uppercase text-slate-500">
-              Witnessed By (Contractor)
+          {verifiedBy && (
+            <div className="p-2.5">
+              <div className="text-[10px] font-bold uppercase text-slate-500">
+                Verified By
+              </div>
+              <div className="mt-4 pt-1 border-t border-slate-400 font-semibold text-slate-900">
+                {verifiedBy}
+              </div>
             </div>
-            <div className="mt-4 pt-1 border-t border-slate-400 font-semibold text-slate-900">
-              {contractorRep}
-            </div>
-          </div>
+          )}
           <div className="p-2.5">
             <div className="text-[10px] font-bold uppercase text-slate-500">Date Inspected</div>
             <div className="mt-4 pt-1 border-t border-slate-400 font-semibold text-slate-900">

@@ -330,7 +330,7 @@ export function VerticalMastInspectionView() {
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-600 mb-1">
-                    Contractor Representative
+                    Verified by
                   </label>
                   <input
                     type="text"
@@ -340,7 +340,7 @@ export function VerticalMastInspectionView() {
                         contractorRep: e.target.value,
                       })
                     }
-                    placeholder="Site lead / Foreman"
+                    placeholder="Optional verifier name"
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
                   />
                 </div>

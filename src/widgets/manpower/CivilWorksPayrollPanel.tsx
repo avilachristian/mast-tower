@@ -91,6 +91,7 @@ export function CivilWorksPayrollPanel({
   const [customTitle, setCustomTitle] = useState('');
   const [payrollNotes, setPayrollNotes] = useState('');
   const [includeZeroDays, setIncludeZeroDays] = useState(false);
+  const [deductionsByMember, setDeductionsByMember] = useState<Record<string, number>>({});
 
   const activeCivilMembers = useMemo(
     () =>
@@ -140,6 +141,7 @@ export function CivilWorksPayrollPanel({
 
   useEffect(() => {
     setCustomTitle('');
+    setDeductionsByMember({});
   }, [periodType, periodBounds.startDate, periodBounds.endDate]);
 
   const preview = useMemo(
@@ -148,9 +150,16 @@ export function CivilWorksPayrollPanel({
         civilMembers,
         attendanceRecords,
         periodBounds.startDate,
-        periodBounds.endDate
+        periodBounds.endDate,
+        deductionsByMember
       ),
-    [civilMembers, attendanceRecords, periodBounds.startDate, periodBounds.endDate]
+    [
+      civilMembers,
+      attendanceRecords,
+      periodBounds.startDate,
+      periodBounds.endDate,
+      deductionsByMember,
+    ]
   );
 
   const displayedRows = useMemo(
@@ -165,6 +174,12 @@ export function CivilWorksPayrollPanel({
     status: 'generated' | 'paid'
   ): Omit<CivilWorksPayrollSnapshot, 'id' | 'createdAt'> => {
     const items = preview.rows.filter((r) => r.daysPresent > 0);
+    const totalGrossPayPhp = items.reduce((s, r) => s + r.grossPayPhp, 0);
+    const totalDeductionPhp = items.reduce((s, r) => s + (r.deductionPhp ?? 0), 0);
+    const totalNetPayPhp = items.reduce(
+      (s, r) => s + (r.netPayPhp ?? r.grossPayPhp),
+      0
+    );
     return {
       periodType,
       startDate: periodBounds.startDate,
@@ -172,7 +187,10 @@ export function CivilWorksPayrollPanel({
       title: customTitle.trim() || periodBounds.label,
       items,
       totalDaysWorked: items.reduce((s, r) => s + r.daysPresent, 0),
-      totalAmountPhp: items.reduce((s, r) => s + r.grossPayPhp, 0),
+      totalGrossPayPhp,
+      totalDeductionPhp,
+      totalNetPayPhp,
+      totalAmountPhp: totalNetPayPhp,
       status,
       paidDate: status === 'paid' ? todayStr : undefined,
       notes: payrollNotes.trim() || undefined,
@@ -559,6 +577,12 @@ export function CivilWorksPayrollPanel({
               <strong className="text-emerald-700 text-sm">
                 ₱{preview.totalAmountPhp.toLocaleString()}
               </strong>
+              {preview.totalDeductionPhp > 0 && (
+                <span className="text-slate-500 ml-1">
+                  (Gross ₱{preview.totalGrossPayPhp.toLocaleString()} − Ded. ₱
+                  {preview.totalDeductionPhp.toLocaleString()})
+                </span>
+              )}
             </span>
           </div>
 
@@ -589,6 +613,8 @@ export function CivilWorksPayrollPanel({
                   <th className="px-2 py-2 font-bold text-center">Days Present</th>
                   <th className="px-3 py-2 font-bold hidden sm:table-cell">Dates</th>
                   <th className="px-3 py-2 font-bold text-right">Gross Pay</th>
+                  <th className="px-2 py-2 font-bold text-right w-28">Deduction (₱)</th>
+                  <th className="px-3 py-2 font-bold text-right">Net Pay</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -609,8 +635,30 @@ export function CivilWorksPayrollPanel({
                         ? row.datesPresent.map((d) => d.slice(5)).join(', ')
                         : '—'}
                     </td>
-                    <td className="px-3 py-2 text-right font-extrabold text-slate-900">
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800">
                       ₱{row.grossPayPhp.toLocaleString()}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        aria-label={`Deduction for ${row.name}`}
+                        value={deductionsByMember[row.memberId] ?? ''}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const val = raw === '' ? 0 : Math.max(0, Number(raw) || 0);
+                          setDeductionsByMember((prev) => ({
+                            ...prev,
+                            [row.memberId]: val,
+                          }));
+                        }}
+                        placeholder="0"
+                        className="w-24 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs font-semibold text-slate-900 focus:border-sky-500 focus:outline-none tabular-nums"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right font-extrabold text-slate-900 tabular-nums">
+                      ₱{(row.netPayPhp ?? row.grossPayPhp).toLocaleString()}
                     </td>
                   </tr>
                 ))}
@@ -709,6 +757,12 @@ export function CivilWorksPayrollPanel({
                     <strong className="text-emerald-700">
                       ₱{rec.totalAmountPhp.toLocaleString()}
                     </strong>
+                    {(rec.totalDeductionPhp ?? 0) > 0 && (
+                      <span className="text-slate-400">
+                        {' '}
+                        (Ded. ₱{(rec.totalDeductionPhp ?? 0).toLocaleString()})
+                      </span>
+                    )}
                   </div>
                 </div>
 

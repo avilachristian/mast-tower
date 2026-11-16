@@ -3,6 +3,7 @@ import {
   HAULING_CREDIT_BLOCK_KG,
   HAULING_RATE_PER_BLOCK_PHP,
   computeHaulerCreditLedgers,
+  resolveHaulingRateConfig,
 } from './haulingInventory';
 import type {
   CivilWorksAttendanceRecord,
@@ -12,6 +13,7 @@ import type {
   HaulerPayrollLineItem,
   HaulerPayrollSnapshot,
   HaulingLogEntry,
+  HaulingRateConfig,
   ManpowerMember,
   MastProjectState,
   PayrollPeriodType,
@@ -73,6 +75,116 @@ export function addDaysIso(dateStr: string, deltaDays: number): string {
   if (!parsed) return dateStr;
   parsed.setUTCDate(parsed.getUTCDate() + deltaDays);
   return formatUtcIsoDate(parsed);
+}
+
+export type CivilAttendanceCode = 'P' | 'A' | 'NW';
+
+export interface PayrollAttendanceDayCol {
+  date: string;
+  dayNum: string;
+  weekdayShort: string;
+  monthDayLabel: string;
+}
+
+export interface PayrollAttendanceBucketCol {
+  label: string;
+  rangeLabel: string;
+  dates: string[];
+}
+
+export function enumerateIsoDates(startDate: string, endDate: string): string[] {
+  const start = parseIsoDateUtc(startDate);
+  const end = parseIsoDateUtc(endDate);
+  if (!start || !end || start > end) return [];
+  const dates: string[] = [];
+  const cursor = new Date(start.getTime());
+  while (cursor <= end && dates.length < 400) {
+    dates.push(formatUtcIsoDate(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+export function buildAttendanceDayColumns(
+  startDate: string,
+  endDate: string
+): PayrollAttendanceDayCol[] {
+  return enumerateIsoDates(startDate, endDate).map((iso) => {
+    const dt = parseIsoDateUtc(iso)!;
+    const dayNum = String(dt.getUTCDate());
+    const weekdayShort = dt
+      .toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' })
+      .toUpperCase();
+    const monthShort = dt.toLocaleDateString('en-US', {
+      month: 'short',
+      timeZone: 'UTC',
+    });
+    return {
+      date: iso,
+      dayNum,
+      weekdayShort,
+      monthDayLabel: `${monthShort} ${dayNum}`,
+    };
+  });
+}
+
+export function buildWeeklyBucketsForRange(
+  startDate: string,
+  endDate: string
+): PayrollAttendanceBucketCol[] {
+  const allDates = enumerateIsoDates(startDate, endDate);
+  const buckets: PayrollAttendanceBucketCol[] = [];
+  for (let idx = 0; idx < allDates.length; idx += 7) {
+    const slice = allDates.slice(idx, idx + 7);
+    const first = parseIsoDateUtc(slice[0])!;
+    const last = parseIsoDateUtc(slice[slice.length - 1])!;
+    const sameMonth =
+      first.getUTCFullYear() === last.getUTCFullYear() &&
+      first.getUTCMonth() === last.getUTCMonth();
+    const rangeLabel = sameMonth
+      ? slice.length === 1
+        ? `${first.getUTCDate()}`
+        : `${first.getUTCDate()}–${last.getUTCDate()}`
+      : `${first.getUTCMonth() + 1}/${first.getUTCDate()}–${last.getUTCMonth() + 1}/${last.getUTCDate()}`;
+    buckets.push({
+      label: `Week ${buckets.length + 1}`,
+      rangeLabel,
+      dates: slice,
+    });
+  }
+  return buckets;
+}
+
+export function buildMonthBucketsForRange(
+  startDate: string,
+  endDate: string
+): PayrollAttendanceBucketCol[] {
+  const allDates = enumerateIsoDates(startDate, endDate);
+  const byMonth = new Map<string, string[]>();
+  for (const iso of allDates) {
+    const key = iso.slice(0, 7);
+    if (!byMonth.has(key)) byMonth.set(key, []);
+    byMonth.get(key)!.push(iso);
+  }
+  return Array.from(byMonth.entries()).map(([key, dates]) => {
+    const dt = parseIsoDateUtc(`${key}-01`)!;
+    const label = dt.toLocaleDateString('en-US', {
+      month: 'short',
+      timeZone: 'UTC',
+    });
+    const rangeLabel = String(dt.getUTCFullYear());
+    return { label, rangeLabel, dates };
+  });
+}
+
+export function resolveCivilAttendanceCode(
+  date: string,
+  memberDates: ReadonlySet<string>,
+  siteActiveDates: ReadonlySet<string>
+): CivilAttendanceCode {
+  if (memberDates.has(date)) return 'P';
+  if (siteActiveDates.has(date)) return 'A';
+  return 'NW';
 }
 
 /**
@@ -215,6 +327,9 @@ export interface CivilWorksPayrollPreview {
   rows: CivilWorksPayrollLineItem[];
   totalWorkersWithAttendance: number;
   totalDaysWorked: number;
+  totalGrossPayPhp: number;
+  totalDeductionPhp: number;
+  totalNetPayPhp: number;
   totalAmountPhp: number;
 }
 
@@ -222,7 +337,8 @@ export function computeCivilWorksPayrollPreview(
   roster: ManpowerMember[],
   attendanceRecords: CivilWorksAttendanceRecord[] = [],
   startDate: string,
-  endDate: string
+  endDate: string,
+  deductionsByMember: Record<string, number> = {}
 ): CivilWorksPayrollPreview {
   const civilMembers = roster.filter((m) => m.category === 'civil_works');
   const recordsInRange = attendanceRecords
@@ -247,6 +363,12 @@ export function computeCivilWorksPayrollPreview(
       );
       const daysPresent = datesPresent.length;
       const dailyRatePhp = Math.max(0, Number(m.dailyRatePhp) || 0);
+      const grossPayPhp = round2(daysPresent * dailyRatePhp);
+      const deductionPhp = Math.max(
+        0,
+        round2(Number(deductionsByMember[m.id]) || 0)
+      );
+      const netPayPhp = round2(grossPayPhp - deductionPhp);
       return {
         memberId: m.id,
         name: m.name,
@@ -254,14 +376,24 @@ export function computeCivilWorksPayrollPreview(
         dailyRatePhp,
         daysPresent,
         datesPresent,
-        grossPayPhp: round2(daysPresent * dailyRatePhp),
+        grossPayPhp,
+        deductionPhp,
+        netPayPhp,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const totalWorkersWithAttendance = rows.filter((r) => r.daysPresent > 0).length;
   const totalDaysWorked = rows.reduce((sum, r) => sum + r.daysPresent, 0);
-  const totalAmountPhp = round2(rows.reduce((sum, r) => sum + r.grossPayPhp, 0));
+  const totalGrossPayPhp = round2(
+    rows.reduce((sum, r) => sum + r.grossPayPhp, 0)
+  );
+  const totalDeductionPhp = round2(
+    rows.reduce((sum, r) => sum + (r.deductionPhp ?? 0), 0)
+  );
+  const totalNetPayPhp = round2(
+    rows.reduce((sum, r) => sum + (r.netPayPhp ?? r.grossPayPhp), 0)
+  );
 
   return {
     startDate,
@@ -269,7 +401,10 @@ export function computeCivilWorksPayrollPreview(
     rows,
     totalWorkersWithAttendance,
     totalDaysWorked,
-    totalAmountPhp,
+    totalGrossPayPhp,
+    totalDeductionPhp,
+    totalNetPayPhp,
+    totalAmountPhp: totalNetPayPhp,
   };
 }
 
@@ -289,11 +424,12 @@ export interface HaulerPayrollPreview {
   totalEarnedPhp: number;
   totalSuggestedPayoutPhp: number;
   totalOverallBalanceDuePhp: number;
+  rateConfig: HaulingRateConfig;
 }
 
 /**
  * Computes Individual Hauler payroll for `[startDate, endDate]` while preserving
- * strict chronological 120 kg carried-excess continuity from project start.
+ * strict chronological carried-excess continuity from project start.
  */
 export function computeHaulerPayrollPreview(
   haulingLogs: HaulingLogEntry[],
@@ -301,9 +437,16 @@ export function computeHaulerPayrollPreview(
   roster: ManpowerMember[] = [],
   startDate: string,
   endDate: string,
-  periodType: PayrollPeriodType = 'weekly'
+  periodType: PayrollPeriodType = 'weekly',
+  rateConfig?: Partial<HaulingRateConfig>
 ): HaulerPayrollPreview {
-  const overall = computeHaulerCreditLedgers(haulingLogs, payouts);
+  const resolvedRate = resolveHaulingRateConfig(rateConfig);
+  const overall = computeHaulerCreditLedgers(
+    haulingLogs,
+    payouts,
+    undefined,
+    resolvedRate
+  );
   const overallLedgerByKey = new Map(
     overall.ledgers.map((l) => [normalizeNameKey(l.haulerName), l])
   );
@@ -404,7 +547,7 @@ export function computeHaulerPayrollPreview(
       const hauledKg = pStat?.hauledKg ?? 0;
       const creditsEarned = pStat?.creditsEarned ?? 0;
       const grossEarnedPhp = round2(
-        creditsEarned * HAULING_RATE_PER_BLOCK_PHP
+        creditsEarned * resolvedRate.ratePerBlockPhp
       );
       const alreadyPaidInRangePhp = paidInRangeByKey.get(key) ?? 0;
       const overallEarnedPhp = overallRow?.grossEarnedPhp ?? 0;
@@ -465,16 +608,37 @@ export function computeHaulerPayrollPreview(
     totalOverallBalanceDuePhp: round2(
       rows.reduce((s, r) => s + r.overallBalanceDuePhp, 0)
     ),
+    rateConfig: resolvedRate,
   };
 }
 
 export function formatCivilPayrollPlainText(
   snapshot: Pick<
     CivilWorksPayrollSnapshot,
-    'title' | 'periodType' | 'startDate' | 'endDate' | 'status' | 'paidDate' | 'items' | 'totalDaysWorked' | 'totalAmountPhp' | 'notes'
+    | 'title'
+    | 'periodType'
+    | 'startDate'
+    | 'endDate'
+    | 'status'
+    | 'paidDate'
+    | 'items'
+    | 'totalDaysWorked'
+    | 'totalAmountPhp'
+    | 'totalGrossPayPhp'
+    | 'totalDeductionPhp'
+    | 'totalNetPayPhp'
+    | 'notes'
   >,
   project: Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy'>
 ): string {
+  const totalDeduction =
+    snapshot.totalDeductionPhp ??
+    round2(snapshot.items.reduce((s, i) => s + (i.deductionPhp ?? 0), 0));
+  const totalGross =
+    snapshot.totalGrossPayPhp ??
+    round2(snapshot.items.reduce((s, i) => s + i.grossPayPhp, 0));
+  const totalNet = snapshot.totalNetPayPhp ?? snapshot.totalAmountPhp;
+
   const lines: string[] = [
     `CIVIL WORKS PAYROLL — ${snapshot.title}`,
     `Project: ${project.projectName}`,
@@ -490,17 +654,24 @@ export function formatCivilPayrollPlainText(
     lines.push('- No worker attendance recorded in this period.');
   } else {
     for (const item of snapshot.items) {
+      const ded = item.deductionPhp ?? 0;
+      const net = item.netPayPhp ?? round2(item.grossPayPhp - ded);
+      const paySuffix =
+        ded > 0
+          ? `Gross PHP ${item.grossPayPhp.toLocaleString()} - Ded. PHP ${ded.toLocaleString()} = Net PHP ${net.toLocaleString()}`
+          : `PHP ${item.grossPayPhp.toLocaleString()}`;
       lines.push(
-        `- ${item.name} (${item.position}): ${item.daysPresent} day${item.daysPresent === 1 ? '' : 's'} × PHP ${item.dailyRatePhp.toLocaleString()} = PHP ${item.grossPayPhp.toLocaleString()}`
+        `- ${item.name} (${item.position}): ${item.daysPresent} day${item.daysPresent === 1 ? '' : 's'} × PHP ${item.dailyRatePhp.toLocaleString()} = ${paySuffix}`
       );
     }
   }
 
-  lines.push(
-    '',
-    `TOTAL MAN-DAYS: ${snapshot.totalDaysWorked}`,
-    `TOTAL PAYROLL: PHP ${snapshot.totalAmountPhp.toLocaleString()}`
-  );
+  lines.push('', `TOTAL MAN-DAYS: ${snapshot.totalDaysWorked}`);
+  if (totalDeduction > 0) {
+    lines.push(`TOTAL GROSS PAY: PHP ${totalGross.toLocaleString()}`);
+    lines.push(`TOTAL DEDUCTIONS: PHP ${totalDeduction.toLocaleString()}`);
+  }
+  lines.push(`TOTAL PAYROLL: PHP ${totalNet.toLocaleString()}`);
   if (snapshot.notes?.trim()) {
     lines.push(`Notes: ${snapshot.notes.trim()}`);
   }
@@ -510,13 +681,28 @@ export function formatCivilPayrollPlainText(
 export function formatHaulerPayrollPlainText(
   snapshot: Pick<
     HaulerPayrollSnapshot,
-    'title' | 'periodType' | 'startDate' | 'endDate' | 'status' | 'paidDate' | 'items' | 'totalHauledKg' | 'totalCredits' | 'totalEarnedPhp' | 'totalPayoutPhp' | 'notes'
+    | 'title'
+    | 'periodType'
+    | 'startDate'
+    | 'endDate'
+    | 'status'
+    | 'paidDate'
+    | 'items'
+    | 'totalHauledKg'
+    | 'totalCredits'
+    | 'totalEarnedPhp'
+    | 'totalPayoutPhp'
+    | 'creditBlockKg'
+    | 'ratePerBlockPhp'
+    | 'notes'
   >,
   project: Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy'>
 ): string {
+  const creditBlockKg = snapshot.creditBlockKg ?? HAULING_CREDIT_BLOCK_KG;
+  const ratePerBlockPhp = snapshot.ratePerBlockPhp ?? HAULING_RATE_PER_BLOCK_PHP;
   const lines: string[] = [
     `INDIVIDUAL HAULER PAYROLL — ${snapshot.title}`,
-    `Rate: PHP ${HAULING_RATE_PER_BLOCK_PHP.toLocaleString()} per ${HAULING_CREDIT_BLOCK_KG} kg credit (excess carried over)`,
+    `Rate: PHP ${ratePerBlockPhp.toLocaleString()} per ${creditBlockKg} kg credit (excess carried over)`,
     `Project: ${project.projectName}`,
     `Location: ${project.location}`,
     `Period: ${snapshot.startDate}${snapshot.startDate !== snapshot.endDate ? ` to ${snapshot.endDate}` : ''} (${snapshot.periodType.toUpperCase()})`,

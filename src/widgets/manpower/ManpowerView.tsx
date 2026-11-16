@@ -10,7 +10,10 @@ import {
   UserCheck,
   Users,
 } from 'lucide-react';
-import { computeHaulerCreditLedgers } from '@/entities/project/haulingInventory';
+import {
+  computeHaulerCreditLedgers,
+  resolveHaulingRateConfig,
+} from '@/entities/project/haulingInventory';
 import { resolveManpowerRoster } from '@/entities/project/manpowerPayroll';
 import type { ManpowerCategory, ManpowerMember } from '@/entities/project/types';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
@@ -53,13 +56,20 @@ export function ManpowerView() {
     [roster]
   );
 
+  const rateConfig = useMemo(
+    () => resolveHaulingRateConfig(project),
+    [project]
+  );
+
   const haulerStats = useMemo(
     () =>
       computeHaulerCreditLedgers(
         project.haulingLogs,
-        project.haulerPayouts ?? []
+        project.haulerPayouts ?? [],
+        undefined,
+        rateConfig
       ),
-    [project.haulingLogs, project.haulerPayouts]
+    [project.haulingLogs, project.haulerPayouts, rateConfig]
   );
 
   const haulerLedgerByName = useMemo(() => {
@@ -193,7 +203,7 @@ export function ManpowerView() {
             {haulerMembers.filter((m) => m.active).length} active
           </div>
           <div className="text-[11px] text-amber-700">
-            Paid ₱1,100 per 120 kg block
+            Paid ₱{rateConfig.ratePerBlockPhp.toLocaleString()} per {rateConfig.creditBlockKg} kg block
           </div>
         </div>
 
@@ -328,7 +338,7 @@ export function ManpowerView() {
                 No workers or haulers match this filter
               </div>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Add Civil Works workers with their Position &amp; Daily Rate, or Individual Haulers paid per 120 kg block.
+                Add Civil Works workers with their Position &amp; Daily Rate, or Individual Haulers paid per {rateConfig.creditBlockKg} kg block.
               </p>
               <div className="flex items-center justify-center gap-2 pt-1">
                 <button
@@ -391,7 +401,7 @@ export function ManpowerView() {
                             </span>
                             <span className="text-xs font-bold text-slate-700">
                               {member.category === 'hauler'
-                                ? '₱1,100 / 120 kg'
+                                ? `₱${rateConfig.ratePerBlockPhp.toLocaleString()} / ${rateConfig.creditBlockKg} kg`
                                 : `₱${member.dailyRatePhp.toLocaleString()} / day`}
                             </span>
                           </div>
@@ -480,7 +490,7 @@ export function ManpowerView() {
                           </td>
                           <td className="px-3 py-2.5 text-right font-bold text-slate-900">
                             {member.category === 'hauler'
-                              ? '₱1,100 / 120 kg'
+                              ? `₱${rateConfig.ratePerBlockPhp.toLocaleString()} / ${rateConfig.creditBlockKg} kg`
                               : `₱${member.dailyRatePhp.toLocaleString()} / day`}
                           </td>
                           <td className="px-3 py-2.5">

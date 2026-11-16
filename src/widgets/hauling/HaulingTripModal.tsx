@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Plus, Scale, Trash2, Truck, X } from 'lucide-react';
 import {
-  HAULING_CREDIT_BLOCK_KG,
-  HAULING_RATE_PER_BLOCK_PHP,
   computeHaulerCreditLedgers,
   resolveCentralMaterials,
+  resolveHaulingRateConfig,
   suggestHaulingMaterialCategory,
   type HaulingTripSummary,
 } from '@/entities/project/haulingInventory';
@@ -137,6 +136,11 @@ export function HaulingTripModal({
     sameDayTripSlots.has(1) && sameDayTripSlots.has(2);
   const slotAlreadyUsed = sameDayTripSlots.has(tripNumber);
 
+  const rateConfig = useMemo(
+    () => resolveHaulingRateConfig(project),
+    [project]
+  );
+
   // Compute live prior excess for this hauler (excluding edited trip)
   const priorExcessKg = useMemo(() => {
     const trimmed = haulerName.trim().toLowerCase();
@@ -145,13 +149,21 @@ export function HaulingTripModal({
     const { ledgers } = computeHaulerCreditLedgers(
       remainingLogs,
       project.haulerPayouts ?? [],
-      centralMaterials
+      centralMaterials,
+      rateConfig
     );
     const match = ledgers.find(
       (r) => r.haulerName.trim().toLowerCase() === trimmed
     );
     return match?.currentExcessKg ?? 0;
-  }, [haulerName, project.haulingLogs, project.haulerPayouts, editingIds, centralMaterials]);
+  }, [
+    haulerName,
+    project.haulingLogs,
+    project.haulerPayouts,
+    editingIds,
+    centralMaterials,
+    rateConfig,
+  ]);
 
   const tripTotalKg = useMemo(
     () =>
@@ -164,10 +176,14 @@ export function HaulingTripModal({
   );
 
   const previewEffectiveKg = Number((priorExcessKg + tripTotalKg).toFixed(2));
-  const previewCredits = Math.floor(previewEffectiveKg / HAULING_CREDIT_BLOCK_KG);
-  const previewPayoutPhp = previewCredits * HAULING_RATE_PER_BLOCK_PHP;
+  const previewCredits = Math.floor(
+    previewEffectiveKg / rateConfig.creditBlockKg
+  );
+  const previewPayoutPhp = Number(
+    (previewCredits * rateConfig.ratePerBlockPhp).toFixed(2)
+  );
   const previewExcessAfter = Number(
-    (previewEffectiveKg - previewCredits * HAULING_CREDIT_BLOCK_KG).toFixed(2)
+    (previewEffectiveKg - previewCredits * rateConfig.creditBlockKg).toFixed(2)
   );
 
   if (!open) return null;
@@ -290,7 +306,7 @@ export function HaulingTripModal({
                 {editingTrip ? 'Edit Hauling Trip' : 'Log Horse Hauling Trip'}
               </h2>
               <p className="text-[11px] text-slate-500">
-                ₱1,100 per completed 120 kg · mixed materials supported
+                ₱{rateConfig.ratePerBlockPhp.toLocaleString()} per completed {rateConfig.creditBlockKg} kg · mixed materials supported
               </p>
             </div>
           </div>
@@ -617,11 +633,14 @@ export function HaulingTripModal({
             />
           </div>
 
-          {/* Live 120kg = ₱1,100 Credit & Excess Calculation */}
+          {/* Live Hauler Credit & Excess Calculation */}
           <div className="rounded-xl border border-sky-200 bg-sky-50/80 p-3 space-y-2">
             <div className="flex items-center gap-1.5 text-xs font-bold text-sky-900">
               <Scale className="w-4 h-4 text-sky-600" />
-              <span>Live Credit Preview (₱1,100 / 120 kg)</span>
+              <span>
+                Live Credit Preview (₱{rateConfig.ratePerBlockPhp.toLocaleString()} /{' '}
+                {rateConfig.creditBlockKg} kg)
+              </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
               <div className="rounded-lg bg-white border border-sky-100 p-2">
@@ -645,7 +664,7 @@ export function HaulingTripModal({
                   Trip Credit
                 </div>
                 <div className="text-sm font-bold text-emerald-900">
-                  {previewCredits} × ₱1,100
+                  {previewCredits} × ₱{rateConfig.ratePerBlockPhp.toLocaleString()}
                 </div>
                 <div className="text-[10px] font-semibold text-emerald-700">
                   = ₱{previewPayoutPhp.toLocaleString()}
@@ -659,7 +678,7 @@ export function HaulingTripModal({
                   {previewExcessAfter} kg
                 </div>
                 <div className="text-[10px] text-amber-700">
-                  {Number((HAULING_CREDIT_BLOCK_KG - previewExcessAfter).toFixed(2))} kg to next
+                  {Number(Math.max(0, rateConfig.creditBlockKg - previewExcessAfter).toFixed(2))} kg to next
                 </div>
               </div>
             </div>

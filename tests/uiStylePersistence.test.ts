@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_UI_STYLE_STORAGE_KEY,
+  PAYROLL_SHOW_SIGNATURE_STORAGE_KEY,
   persistAdminUiStyle,
+  persistPayrollShowSignature,
   readSavedAdminUiStyle,
+  readSavedPayrollShowSignature,
   useUiStore,
 } from '../src/shared/state/uiStore';
 
@@ -55,5 +58,22 @@ describe('Admin UI Style Persistence', () => {
     useUiStore.getState().setAdminUiStyle('classic');
     expect(useUiStore.getState().adminUiStyle).toBe('classic');
     expect(localStorage.getItem(ADMIN_UI_STYLE_STORAGE_KEY)).toBe('classic');
+  });
+
+  it('persists payroll signature column visibility preference across reloads', () => {
+    const localStorage = createMemoryStorage();
+    vi.stubGlobal('window', { localStorage });
+
+    expect(readSavedPayrollShowSignature(null)).toBe(true);
+    expect(readSavedPayrollShowSignature(localStorage)).toBe(true);
+
+    useUiStore.getState().setPayrollShowSignature(false);
+    expect(useUiStore.getState().payrollShowSignature).toBe(false);
+    expect(localStorage.getItem(PAYROLL_SHOW_SIGNATURE_STORAGE_KEY)).toBe('0');
+    expect(readSavedPayrollShowSignature(localStorage)).toBe(false);
+
+    persistPayrollShowSignature(true, localStorage);
+    expect(readSavedPayrollShowSignature(localStorage)).toBe(true);
+    useUiStore.getState().setPayrollShowSignature(true);
   });
 });

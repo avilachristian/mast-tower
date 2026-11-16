@@ -61,8 +61,7 @@ export function VerticalMastInspectionSheet({
 
   const inspectorName =
     meta.inspectorName?.trim() || reportDetails.preparedBy || project.preparedBy;
-  const contractorRep =
-    meta.contractorRep?.trim() || reportDetails.contractor || project.contractor;
+  const verifiedBy = meta.contractorRep?.trim() || '';
 
   const stageLabel = isSection
     ? TOWER_SECTION_STATUS_META[section!.status].label
@@ -99,7 +98,7 @@ export function VerticalMastInspectionSheet({
         }`}
         fallbackProjectName={project.projectName}
         fallbackLocation={project.location}
-        fallbackContractor={contractorRep}
+        fallbackContractor={project.contractor}
         fallbackDate={inspectionDate}
       />
 
@@ -216,14 +215,14 @@ export function VerticalMastInspectionSheet({
                   {inspectorName || '—'}
                 </span>
               </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase text-slate-500">
-                  Contractor Rep:{' '}
-                </span>
-                <span className="font-semibold text-slate-900">
-                  {contractorRep || '—'}
-                </span>
-              </div>
+              {verifiedBy && (
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-slate-500">
+                    Verified By:{' '}
+                  </span>
+                  <span className="font-semibold text-slate-900">{verifiedBy}</span>
+                </div>
+              )}
             </div>
           </div>
 

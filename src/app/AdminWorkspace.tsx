@@ -25,6 +25,9 @@ import {
   X,
 } from 'lucide-react';
 import {
+  resolveHaulingRateConfig,
+} from '@/entities/project/haulingInventory';
+import {
   computeCivilWorksPayrollPreview,
   computeHaulerPayrollPreview,
   getPayrollPeriodBounds,
@@ -337,6 +340,9 @@ export function AdminWorkspace() {
           title: bounds.label,
           items: preview.rows.filter((r) => r.daysPresent > 0),
           totalDaysWorked: preview.totalDaysWorked,
+          totalGrossPayPhp: preview.totalGrossPayPhp,
+          totalDeductionPhp: preview.totalDeductionPhp,
+          totalNetPayPhp: preview.totalNetPayPhp,
           totalAmountPhp: preview.totalAmountPhp,
           status: 'generated',
           createdAt: new Date().toISOString(),
@@ -357,13 +363,15 @@ export function AdminWorkspace() {
     ];
     const todayIso = new Date().toISOString().slice(0, 10);
     const bounds = getPayrollPeriodBounds('overall', todayIso, dates);
+    const rateConfig = resolveHaulingRateConfig(project);
     const preview = computeHaulerPayrollPreview(
       project.haulingLogs,
       project.haulerPayouts ?? [],
       manpowerRoster,
       bounds.startDate,
       bounds.endDate,
-      'overall'
+      'overall',
+      rateConfig
     );
     return {
       kind: 'hauler',
@@ -378,6 +386,8 @@ export function AdminWorkspace() {
         totalCredits: preview.totalCredits,
         totalEarnedPhp: preview.totalEarnedPhp,
         totalPayoutPhp: preview.totalSuggestedPayoutPhp,
+        creditBlockKg: rateConfig.creditBlockKg,
+        ratePerBlockPhp: rateConfig.ratePerBlockPhp,
         status: 'generated',
         createdAt: new Date().toISOString(),
       },

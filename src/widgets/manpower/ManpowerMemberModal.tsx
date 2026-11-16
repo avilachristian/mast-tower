@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Info, UserPlus, X } from 'lucide-react';
+import { resolveHaulingRateConfig } from '@/entities/project/haulingInventory';
 import {
   CIVIL_WORK_POSITIONS,
   MANPOWER_POSITIONS,
@@ -10,6 +11,7 @@ import type {
   ManpowerMember,
   WorkerRole,
 } from '@/entities/project/types';
+import { useProjectStore } from '@/shared/state/projectStore';
 
 interface ManpowerMemberModalProps {
   open: boolean;
@@ -26,6 +28,7 @@ export function ManpowerMemberModal({
   onClose,
   onSave,
 }: ManpowerMemberModalProps) {
+  const rateConfig = useProjectStore((s) => resolveHaulingRateConfig(s.project));
   const [category, setCategory] = useState<ManpowerCategory>(defaultCategory);
   const [name, setName] = useState('');
   const [position, setPosition] = useState<WorkerRole>('Laborer');
@@ -142,7 +145,7 @@ export function ManpowerMemberModal({
               </h3>
               <p className="text-[11px] text-slate-500">
                 {category === 'hauler'
-                  ? 'Individual hauler paid per 120 kg block'
+                  ? `Individual hauler paid per ${rateConfig.creditBlockKg} kg block`
                   : 'Civil works crew paid by daily rate'}
               </p>
             </div>
@@ -250,7 +253,10 @@ export function ManpowerMemberModal({
                 </label>
                 <div className="min-h-10 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-900 flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span>₱1,100 per 120 kg</span>
+                  <span>
+                    ₱{rateConfig.ratePerBlockPhp.toLocaleString()} per{' '}
+                    {rateConfig.creditBlockKg} kg
+                  </span>
                 </div>
               </div>
             )}

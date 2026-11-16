@@ -247,6 +247,8 @@ export interface CivilWorksPayrollLineItem {
   daysPresent: number;
   datesPresent: string[];
   grossPayPhp: number;
+  deductionPhp?: number;
+  netPayPhp?: number;
 }
 
 export interface CivilWorksPayrollSnapshot {
@@ -259,6 +261,9 @@ export interface CivilWorksPayrollSnapshot {
   items: CivilWorksPayrollLineItem[];
   totalDaysWorked: number;
   totalAmountPhp: number;
+  totalGrossPayPhp?: number;
+  totalDeductionPhp?: number;
+  totalNetPayPhp?: number;
   status: 'generated' | 'paid';
   paidDate?: string;
   notes?: string;
@@ -291,9 +296,16 @@ export interface HaulerPayrollSnapshot {
   totalCredits: number;
   totalEarnedPhp: number;
   totalPayoutPhp: number;
+  creditBlockKg?: number;
+  ratePerBlockPhp?: number;
   status: 'generated' | 'paid';
   paidDate?: string;
   notes?: string;
+}
+
+export interface HaulingRateConfig {
+  creditBlockKg: number;
+  ratePerBlockPhp: number;
 }
 
 export type WorkerRole =
@@ -582,6 +594,7 @@ export interface MastProjectState {
   verticalMast?: VerticalMastState;
   haulingLogs: HaulingLogEntry[];
   centralMaterials?: CentralMaterialItem[];
+  haulingRateConfig?: HaulingRateConfig;
   haulerRoster?: string[];
   haulerPayouts?: HaulerPayoutRecord[];
   manpowerRoster?: ManpowerMember[];

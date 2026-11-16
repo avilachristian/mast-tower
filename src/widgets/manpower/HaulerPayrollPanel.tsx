@@ -14,10 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { formatDateWithWeekday } from '@/entities/project/calculations';
-import {
-  HAULING_CREDIT_BLOCK_KG,
-  HAULING_RATE_PER_BLOCK_PHP,
-} from '@/entities/project/haulingInventory';
+import { resolveHaulingRateConfig } from '@/entities/project/haulingInventory';
 import {
   addDaysIso,
   computeHaulerPayrollPreview,
@@ -35,6 +32,7 @@ import type {
 } from '@/entities/project/types';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
+import { HaulingRateConfigControl } from '@/widgets/hauling/HaulingRateConfigControl';
 import type { PayrollSheetData } from './PayrollPrintModal';
 
 const PERIOD_OPTIONS: { id: PayrollPeriodType; label: string }[] = [
@@ -119,6 +117,11 @@ export function HaulerPayrollPanel({
     [periodType, anchorDate, availableHaulingDates]
   );
 
+  const rateConfig = useMemo(
+    () => resolveHaulingRateConfig(project),
+    [project]
+  );
+
   const preview = useMemo(
     () =>
       computeHaulerPayrollPreview(
@@ -127,7 +130,8 @@ export function HaulerPayrollPanel({
         roster,
         periodBounds.startDate,
         periodBounds.endDate,
-        periodType
+        periodType,
+        rateConfig
       ),
     [
       project.haulingLogs,
@@ -136,6 +140,7 @@ export function HaulerPayrollPanel({
       periodBounds.startDate,
       periodBounds.endDate,
       periodType,
+      rateConfig,
     ]
   );
 
@@ -230,6 +235,8 @@ export function HaulerPayrollPanel({
         effectiveItems.reduce((s, r) => s + r.grossEarnedPhp, 0) * 100
       ) / 100,
     totalPayoutPhp: totalBatchPayoutPhp,
+    creditBlockKg: rateConfig.creditBlockKg,
+    ratePerBlockPhp: rateConfig.ratePerBlockPhp,
     status,
     paidDate: status === 'paid' ? todayStr : undefined,
     notes: payrollNotes.trim() || undefined,
@@ -359,11 +366,14 @@ export function HaulerPayrollPanel({
           <div>
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
               <FileText className="w-4 h-4 text-amber-600" />
-              <span>Individual Hauler Payroll ({HAULING_RATE_PER_BLOCK_PHP.toLocaleString()} PHP / {HAULING_CREDIT_BLOCK_KG} kg)</span>
+              <span>Individual Hauler Payroll ({rateConfig.ratePerBlockPhp.toLocaleString()} PHP / {formatNum(rateConfig.creditBlockKg)} kg)</span>
             </h3>
             <p className="text-[11px] text-slate-500">
-              Each hauler is paid individually per completed {HAULING_CREDIT_BLOCK_KG} kg block with carried excess. Tick haulers to include and generate Daily, Weekly, Monthly, or Overall payroll.
+              Each hauler is paid individually per completed {formatNum(rateConfig.creditBlockKg)} kg block with carried excess. Tick haulers to include and generate Daily, Weekly, Monthly, or Overall payroll.
             </p>
+            <div className="mt-1.5">
+              <HaulingRateConfigControl project={project} />
+            </div>
           </div>
 
           <div className="grid grid-cols-4 sm:inline-flex rounded-lg bg-slate-100 p-1 gap-1">
@@ -488,9 +498,12 @@ export function HaulerPayrollPanel({
                   payoutOverrides[row.haulerName] ?? String(row.payoutReleasedPhp);
                 const pct = Math.min(
                   100,
-                  Math.round(
-                    (row.currentOverallExcessKg / HAULING_CREDIT_BLOCK_KG) * 100
-                  )
+                  rateConfig.creditBlockKg > 0
+                    ? Math.round(
+                        (row.currentOverallExcessKg / rateConfig.creditBlockKg) *
+                          100
+                      )
+                    : 0
                 );
                 return (
                   <div
@@ -744,7 +757,7 @@ export function HaulerPayrollPanel({
             step="any"
             value={directAmount}
             onChange={(e) => setDirectAmount(e.target.value)}
-            placeholder="1100"
+            placeholder={String(rateConfig.ratePerBlockPhp)}
             required
             className="w-full min-h-9 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-900"
           />

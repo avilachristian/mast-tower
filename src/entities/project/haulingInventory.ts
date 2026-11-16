@@ -6,6 +6,7 @@ import type {
   HaulerPayoutRecord,
   HaulingLogEntry,
   HaulingMaterialCategory,
+  HaulingRateConfig,
   MastProjectState,
   ProjectType,
 } from './types';
@@ -13,6 +14,30 @@ import type {
 export const HAULING_CREDIT_BLOCK_KG = 120;
 export const HAULING_RATE_PER_BLOCK_PHP = 1100;
 export const MAX_TRIPS_PER_HAULER_PER_DAY = 2;
+
+export function resolveHaulingRateConfig(
+  source?:
+    | Pick<MastProjectState, 'haulingRateConfig'>
+    | Partial<HaulingRateConfig>
+    | null
+): HaulingRateConfig {
+  const raw =
+    source && 'haulingRateConfig' in source
+      ? source.haulingRateConfig
+      : (source as Partial<HaulingRateConfig> | null | undefined);
+  const parsedKg = Number(raw?.creditBlockKg);
+  const parsedRate = Number(raw?.ratePerBlockPhp);
+  return {
+    creditBlockKg:
+      Number.isFinite(parsedKg) && parsedKg > 0
+        ? Math.round(parsedKg * 100) / 100
+        : HAULING_CREDIT_BLOCK_KG,
+    ratePerBlockPhp:
+      Number.isFinite(parsedRate) && parsedRate >= 0
+        ? Math.round(parsedRate * 100) / 100
+        : HAULING_RATE_PER_BLOCK_PHP,
+  };
+}
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -274,7 +299,8 @@ export interface HaulerCreditLedgerRow {
 export function computeHaulerCreditLedgers(
   logs: HaulingLogEntry[],
   payouts: HaulerPayoutRecord[] = [],
-  centralMaterials: CentralMaterialItem[] = createDefaultCentralMaterials()
+  centralMaterials: CentralMaterialItem[] = createDefaultCentralMaterials(),
+  rateConfig?: Partial<HaulingRateConfig>
 ): {
   tripsChronological: HaulingTripSummary[];
   tripsNewestFirst: HaulingTripSummary[];
@@ -285,7 +311,11 @@ export function computeHaulerCreditLedgers(
   totalPaidPhp: number;
   totalBalanceDuePhp: number;
   totalActiveExcessKg: number;
+  rateConfig: HaulingRateConfig;
 } {
+  const resolvedRate = resolveHaulingRateConfig(rateConfig);
+  const creditBlockKg = resolvedRate.creditBlockKg;
+  const ratePerBlockPhp = resolvedRate.ratePerBlockPhp;
   const tripGroups = new Map<
     string,
     {
@@ -348,9 +378,9 @@ export function computeHaulerCreditLedgers(
     const totalKg = round2(group.items.reduce((sum, i) => sum + (Number(i.totalKg) || 0), 0));
     const priorExcessKg = excessByHauler.get(hKey) ?? 0;
     const effectiveKg = round2(totalKg + priorExcessKg);
-    const creditsEarned = Math.floor(effectiveKg / HAULING_CREDIT_BLOCK_KG);
-    const payoutEarnedPhp = creditsEarned * HAULING_RATE_PER_BLOCK_PHP;
-    const excessAfterKg = round2(effectiveKg - creditsEarned * HAULING_CREDIT_BLOCK_KG);
+    const creditsEarned = Math.floor(effectiveKg / creditBlockKg);
+    const payoutEarnedPhp = round2(creditsEarned * ratePerBlockPhp);
+    const excessAfterKg = round2(effectiveKg - creditsEarned * creditBlockKg);
 
     excessByHauler.set(hKey, excessAfterKg);
 
@@ -435,7 +465,7 @@ export function computeHaulerCreditLedgers(
         totalHauledKg: st.totalHauledKg,
         totalCredits: st.totalCredits,
         currentExcessKg: st.currentExcessKg,
-        kgToNextCredit: round2(HAULING_CREDIT_BLOCK_KG - st.currentExcessKg),
+        kgToNextCredit: round2(creditBlockKg - st.currentExcessKg),
         grossEarnedPhp: st.grossEarnedPhp,
         totalPaidPhp,
         balanceDuePhp: round2(st.grossEarnedPhp - totalPaidPhp),
@@ -446,7 +476,7 @@ export function computeHaulerCreditLedgers(
   const tripsNewestFirst = [...tripsChronological].reverse();
   const totalHauledKg = round2(ledgers.reduce((s, r) => s + r.totalHauledKg, 0));
   const totalCredits = ledgers.reduce((s, r) => s + r.totalCredits, 0);
-  const totalEarnedPhp = ledgers.reduce((s, r) => s + r.grossEarnedPhp, 0);
+  const totalEarnedPhp = round2(ledgers.reduce((s, r) => s + r.grossEarnedPhp, 0));
   const totalPaidPhp = round2(ledgers.reduce((s, r) => s + r.totalPaidPhp, 0));
   const totalBalanceDuePhp = round2(totalEarnedPhp - totalPaidPhp);
   const totalActiveExcessKg = round2(ledgers.reduce((s, r) => s + r.currentExcessKg, 0));
@@ -461,6 +491,7 @@ export function computeHaulerCreditLedgers(
     totalPaidPhp,
     totalBalanceDuePhp,
     totalActiveExcessKg,
+    rateConfig: resolvedRate,
   };
 }
 

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  HAULING_CREDIT_BLOCK_KG,
+  HAULING_RATE_PER_BLOCK_PHP,
+  computeHaulerCreditLedgers,
+  resolveHaulingRateConfig,
+} from '@/entities/project/haulingInventory';
+import {
   CIVIL_WORK_POSITIONS,
   MANPOWER_POSITIONS,
   computeCivilWorksPayrollPreview,
@@ -281,6 +287,22 @@ describe('Manpower roster and Civil Works / Individual Hauler payroll', () => {
     expect(preview.totalDaysWorked).toBe(3);
     expect(preview.totalAmountPhp).toBe(2 * 850 + 1 * 600);
 
+    // Deductions reduce netPayPhp and totalNetPayPhp while preserving grossPayPhp
+    const withDeduction = computeCivilWorksPayrollPreview(
+      resolveManpowerRoster(state),
+      state.civilAttendance ?? [],
+      bounds.startDate,
+      bounds.endDate,
+      { [masonId]: 500 }
+    );
+    expect(withDeduction.totalGrossPayPhp).toBe(2300);
+    expect(withDeduction.totalDeductionPhp).toBe(500);
+    expect(withDeduction.totalNetPayPhp).toBe(1800);
+    expect(withDeduction.totalAmountPhp).toBe(1800);
+    expect(
+      withDeduction.rows.find((r) => r.memberId === masonId)?.netPayPhp
+    ).toBe(1200);
+
     const items = preview.rows.filter((r) => r.daysPresent > 0);
     const snapId = useProjectStore.getState().createCivilPayrollSnapshot({
       periodType: 'weekly',
@@ -448,5 +470,138 @@ describe('Manpower roster and Civil Works / Individual Hauler payroll', () => {
         (m) => m.id === marioMember!.id
       )
     ).toBe(false);
+  });
+
+  it('supports configurable hauler block weight and pay per block across store, ledger, preview, and snapshot history', () => {
+    const clean = createCleanBaselineProject();
+    useProjectStore.setState({ project: clean });
+
+    // Fallback / validation behavior
+    expect(resolveHaulingRateConfig(undefined)).toEqual({
+      creditBlockKg: HAULING_CREDIT_BLOCK_KG,
+      ratePerBlockPhp: HAULING_RATE_PER_BLOCK_PHP,
+    });
+    expect(
+      resolveHaulingRateConfig({ creditBlockKg: 0, ratePerBlockPhp: -50 })
+    ).toEqual({
+      creditBlockKg: HAULING_CREDIT_BLOCK_KG,
+      ratePerBlockPhp: HAULING_RATE_PER_BLOCK_PHP,
+    });
+
+    // Update project hauler rate to 1,500 PHP per 100 kg
+    useProjectStore.getState().updateHaulingRateConfig({
+      creditBlockKg: 100,
+      ratePerBlockPhp: 1500,
+    });
+    expect(useProjectStore.getState().project.haulingRateConfig).toEqual({
+      creditBlockKg: 100,
+      ratePerBlockPhp: 1500,
+    });
+
+    // Trip 1: 80 kg -> 0 credits, 80 kg carried excess
+    useProjectStore.getState().addHaulingTrip({
+      date: '2026-11-10',
+      haulerName: 'Pedro Cruz',
+      tripNumber: 1,
+      items: [
+        {
+          material: 'cement',
+          itemLabel: 'Portland Cement',
+          unitLabel: 'bags',
+          quantity: 2,
+          totalKg: 80,
+        },
+      ],
+    });
+    // Trip 2: 170 kg -> 80 + 170 = 250 kg -> 2 credits (₱3,000), 50 kg excess
+    useProjectStore.getState().addHaulingTrip({
+      date: '2026-11-11',
+      haulerName: 'Pedro Cruz',
+      tripNumber: 1,
+      items: [
+        {
+          material: 'cement',
+          itemLabel: 'Portland Cement',
+          unitLabel: 'bags',
+          quantity: 4.25,
+          totalKg: 170,
+        },
+      ],
+    });
+
+    const project = useProjectStore.getState().project;
+    const activeRate = resolveHaulingRateConfig(project);
+    const ledgerRes = computeHaulerCreditLedgers(
+      project.haulingLogs,
+      project.haulerPayouts ?? [],
+      undefined,
+      activeRate
+    );
+    expect(ledgerRes.rateConfig).toEqual({
+      creditBlockKg: 100,
+      ratePerBlockPhp: 1500,
+    });
+    expect(ledgerRes.totalEarnedPhp).toBe(3000);
+    expect(ledgerRes.ledgers).toHaveLength(1);
+    expect(ledgerRes.ledgers[0]).toMatchObject({
+      haulerName: 'Pedro Cruz',
+      totalHauledKg: 250,
+      totalCredits: 2,
+      grossEarnedPhp: 3000,
+      currentExcessKg: 50,
+      kgToNextCredit: 50,
+    });
+
+    const bounds = getPayrollPeriodBounds('weekly', '2026-11-11');
+    const preview = computeHaulerPayrollPreview(
+      project.haulingLogs,
+      project.haulerPayouts ?? [],
+      resolveManpowerRoster(project),
+      bounds.startDate,
+      bounds.endDate,
+      'weekly',
+      activeRate
+    );
+    expect(preview.rateConfig).toEqual({
+      creditBlockKg: 100,
+      ratePerBlockPhp: 1500,
+    });
+    expect(preview.totalEarnedPhp).toBe(3000);
+    expect(preview.rows[0]).toMatchObject({
+      haulerName: 'Pedro Cruz',
+      hauledKg: 250,
+      creditsEarned: 2,
+      endingExcessKg: 50,
+      grossEarnedPhp: 3000,
+      payoutReleasedPhp: 3000,
+    });
+
+    const snapId = useProjectStore.getState().createHaulerPayrollSnapshot({
+      periodType: 'weekly',
+      startDate: bounds.startDate,
+      endDate: bounds.endDate,
+      title: 'Week Nov 9-15 (Custom Rate)',
+      items: preview.rows,
+      totalHauledKg: preview.totalHauledKg,
+      totalCredits: preview.totalCredits,
+      totalEarnedPhp: preview.totalEarnedPhp,
+      totalPayoutPhp: preview.totalSuggestedPayoutPhp,
+      creditBlockKg: activeRate.creditBlockKg,
+      ratePerBlockPhp: activeRate.ratePerBlockPhp,
+      status: 'generated',
+    });
+
+    // Changing project rate afterward must not overwrite the historical snapshot rate text
+    useProjectStore.getState().updateHaulingRateConfig({
+      creditBlockKg: 150,
+      ratePerBlockPhp: 1800,
+    });
+    const updatedProject = useProjectStore.getState().project;
+    const savedSnapshot = updatedProject.haulerPayrollHistory?.find(
+      (s) => s.id === snapId
+    );
+    const plainText = formatHaulerPayrollPlainText(savedSnapshot!, updatedProject);
+    expect(plainText).toContain('Rate: PHP 1,500 per 100 kg');
+    expect(plainText).toContain('TOTAL PAYOUT AMOUNT: PHP 3,000');
   });
 });

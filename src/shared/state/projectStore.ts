@@ -6,6 +6,7 @@ import {
 import {
   createDefaultCentralMaterials,
   resolveCentralMaterials,
+  resolveHaulingRateConfig,
   syncDailyLogMaterialsWithHauling,
 } from '@/entities/project/haulingInventory';
 import { resolveManpowerRoster } from '@/entities/project/manpowerPayroll';
@@ -75,6 +76,7 @@ import type {
   HaulerPayrollSnapshot,
   HaulingLogEntry,
   HaulingMaterialCategory,
+  HaulingRateConfig,
   ManpowerMember,
   MastProjectState,
   ProjectSyncStatus,
@@ -735,6 +737,7 @@ interface ProjectStore {
     paidDate?: string
   ) => void;
   deleteHaulerPayrollSnapshot: (id: string) => void;
+  updateHaulingRateConfig: (patch: Partial<HaulingRateConfig>) => void;
   syncDailyLogDeliveriesFromHauling: (logId: string) => void;
   addDailyLog: (entry: Omit<DailyActivityLogEntry, 'id' | 'totalWorkers' | 'totalManHours'>) => void;
   updateDailyLog: (id: string, patch: Partial<Omit<DailyActivityLogEntry, 'id'>>) => void;
@@ -1875,6 +1878,20 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           ),
         }),
       })),
+
+    updateHaulingRateConfig: (patch) =>
+      set((s) => {
+        const current = resolveHaulingRateConfig(s.project);
+        const next = resolveHaulingRateConfig({
+          creditBlockKg: patch.creditBlockKg ?? current.creditBlockKg,
+          ratePerBlockPhp: patch.ratePerBlockPhp ?? current.ratePerBlockPhp,
+        });
+        return commitActiveProject(s, {
+          ...s.project,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+          haulingRateConfig: next,
+        });
+      }),
 
     syncDailyLogDeliveriesFromHauling: (logId) =>
       set((s) => {

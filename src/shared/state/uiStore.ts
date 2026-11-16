@@ -37,6 +37,7 @@ export type MastVerticalScale = 1 | 1.5 | 2 | 3;
 export type AdminUiStyle = 'classic' | 'swiss';
 
 export const ADMIN_UI_STYLE_STORAGE_KEY = 'mast2-admin-ui-style-v1';
+export const PAYROLL_SHOW_SIGNATURE_STORAGE_KEY = 'mast2-payroll-show-signature-v1';
 
 export function readSavedAdminUiStyle(
   storage?: Pick<Storage, 'getItem'> | null
@@ -58,6 +59,31 @@ export function persistAdminUiStyle(
   if (!storage) return;
   try {
     storage.setItem(ADMIN_UI_STYLE_STORAGE_KEY, style);
+  } catch {
+    // Ignore storage quota or private-mode errors
+  }
+}
+
+export function readSavedPayrollShowSignature(
+  storage?: Pick<Storage, 'getItem'> | null
+): boolean {
+  if (!storage) return true;
+  try {
+    const val = storage.getItem(PAYROLL_SHOW_SIGNATURE_STORAGE_KEY);
+    if (val === '0' || val === 'false') return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+export function persistPayrollShowSignature(
+  show: boolean,
+  storage?: Pick<Storage, 'setItem'> | null
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(PAYROLL_SHOW_SIGNATURE_STORAGE_KEY, show ? '1' : '0');
   } catch {
     // Ignore storage quota or private-mode errors
   }
@@ -106,6 +132,7 @@ interface UiState {
   mastOrderViolation: VerticalMastOrderViolation | null;
   foundationOrderViolation: FoundationChecklistViolation | null;
   adminUiStyle: AdminUiStyle;
+  payrollShowSignature: boolean;
 
   setActiveAppTab: (tab: ActiveAppTab) => void;
   setManpowerSubTab: (subTab: ManpowerSubTab) => void;
@@ -126,6 +153,7 @@ interface UiState {
     violation: FoundationChecklistViolation | null
   ) => void;
   setAdminUiStyle: (style: AdminUiStyle) => void;
+  setPayrollShowSignature: (show: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -147,6 +175,9 @@ export const useUiStore = create<UiState>((set) => ({
   mastOrderViolation: null,
   foundationOrderViolation: null,
   adminUiStyle: readSavedAdminUiStyle(
+    typeof window !== 'undefined' ? window.localStorage : null
+  ),
+  payrollShowSignature: readSavedPayrollShowSignature(
     typeof window !== 'undefined' ? window.localStorage : null
   ),
 
@@ -226,6 +257,13 @@ export const useUiStore = create<UiState>((set) => ({
       typeof window !== 'undefined' ? window.localStorage : null
     );
     set({ adminUiStyle });
+  },
+  setPayrollShowSignature: (payrollShowSignature) => {
+    persistPayrollShowSignature(
+      payrollShowSignature,
+      typeof window !== 'undefined' ? window.localStorage : null
+    );
+    set({ payrollShowSignature });
   },
 }));
 

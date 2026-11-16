@@ -286,16 +286,16 @@ export function FoundationInspectionView({
                     </label>
 
                     <label className="block">
-                      <span className="font-semibold text-slate-700">Contractor Witness</span>
+                      <span className="font-semibold text-slate-700">Verified by</span>
                       <input
                         type="text"
-                        value={meta.contractorRep ?? project.contractor}
+                        value={meta.contractorRep ?? ''}
                         onChange={(e) =>
                           updateFoundationInspectionMeta(selectedFoundation.id, {
                             contractorRep: e.target.value,
                           })
                         }
-                        placeholder={project.contractor}
+                        placeholder="Optional verifier name"
                         className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-slate-800 focus:border-sky-500 focus:outline-none"
                       />
                     </label>

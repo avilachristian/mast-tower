@@ -13,11 +13,10 @@ import {
 } from 'lucide-react';
 import { formatDateWithWeekday } from '@/entities/project/calculations';
 import {
-  HAULING_CREDIT_BLOCK_KG,
-  HAULING_RATE_PER_BLOCK_PHP,
   computeCentralMaterialStatuses,
   computeHaulerCreditLedgers,
   resolveCentralMaterials,
+  resolveHaulingRateConfig,
   suggestHaulingMaterialCategory,
   type HaulingTripSummary,
 } from '@/entities/project/haulingInventory';
@@ -26,6 +25,7 @@ import type { CentralMaterialItem } from '@/entities/project/types';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore, type HaulingTripInput } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
+import { HaulingRateConfigControl } from './HaulingRateConfigControl';
 import { HaulingTripModal } from './HaulingTripModal';
 
 type SubTab = 'inventory' | 'hauling_log';
@@ -96,6 +96,11 @@ export function HaulingInventoryView() {
     });
   }, [inventoryRows, phaseFilter, activePhase, searchQuery]);
 
+  const rateConfig = useMemo(
+    () => resolveHaulingRateConfig(project),
+    [project]
+  );
+
   const {
     tripsNewestFirst,
     ledgers,
@@ -109,9 +114,10 @@ export function HaulingInventoryView() {
       computeHaulerCreditLedgers(
         project.haulingLogs,
         project.haulerPayouts ?? [],
-        centralMaterials
+        centralMaterials,
+        rateConfig
       ),
-    [project.haulingLogs, project.haulerPayouts, centralMaterials]
+    [project.haulingLogs, project.haulerPayouts, centralMaterials, rateConfig]
   );
 
   const knownHaulers = useMemo(
@@ -182,7 +188,7 @@ export function HaulingInventoryView() {
       tone: 'danger',
       title: 'Delete Hauling Trip?',
       message: `Delete ${trip.haulerName} — Trip ${trip.tripNumber} (${formatDateWithWeekday(trip.date)})?`,
-      detail: `${formatNum(trip.totalKg)} kg across ${trip.items.length} material item${trip.items.length === 1 ? '' : 's'} will be removed and hauler 120 kg credits/carried excess will recalculate automatically.`,
+      detail: `${formatNum(trip.totalKg)} kg across ${trip.items.length} material item${trip.items.length === 1 ? '' : 's'} will be removed and hauler ${formatNum(rateConfig.creditBlockKg)} kg credits/carried excess will recalculate automatically.`,
       confirmLabel: 'Delete Trip',
     });
     if (ok) {
@@ -226,8 +232,11 @@ export function HaulingInventoryView() {
             <span>Stock Yard, On-Site Inventory &amp; Horse Hauling</span>
           </h2>
           <p className="text-xs text-slate-500">
-            Centralized material stock linked to Daily Logs · Rate: ₱{HAULING_RATE_PER_BLOCK_PHP.toLocaleString()} per completed {HAULING_CREDIT_BLOCK_KG} kg (excess carries over)
+            Centralized material stock linked to Daily Logs · Rate: ₱{rateConfig.ratePerBlockPhp.toLocaleString()} per completed {formatNum(rateConfig.creditBlockKg)} kg (excess carries over)
           </p>
+          <div className="mt-1.5">
+            <HaulingRateConfigControl project={project} />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -273,7 +282,7 @@ export function HaulingInventoryView() {
             ₱{totalEarnedPhp.toLocaleString()}
           </div>
           <div className="text-[11px] text-emerald-700">
-            {totalCredits} × 120kg · Due: ₱{totalBalanceDuePhp.toLocaleString()}
+            {totalCredits} × {formatNum(rateConfig.creditBlockKg)}kg · Due: ₱{totalBalanceDuePhp.toLocaleString()}
           </div>
         </div>
 
@@ -828,7 +837,7 @@ export function HaulingInventoryView() {
                 No hauling trips logged yet
               </div>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Log each horse hauler&apos;s Trip 1 or Trip 2 with material weight (kg) and quantity (pcs/bags). Credits of ₱1,100 unlock automatically per completed 120 kg, carrying any excess forward.
+                Log each horse hauler&apos;s Trip 1 or Trip 2 with material weight (kg) and quantity (pcs/bags). Credits of ₱{rateConfig.ratePerBlockPhp.toLocaleString()} unlock automatically per completed {formatNum(rateConfig.creditBlockKg)} kg, carrying any excess forward.
               </p>
               <button
                 type="button"
@@ -923,7 +932,7 @@ export function HaulingInventoryView() {
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">
-                            ₱0 (below 120 kg)
+                            ₱0 (below {formatNum(rateConfig.creditBlockKg)} kg)
                           </span>
                         )}
                         <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 font-semibold">
@@ -946,7 +955,7 @@ export function HaulingInventoryView() {
                       <th className="px-3 py-2.5 font-bold">Materials Hauled (Qty &amp; kg)</th>
                       <th className="px-2 py-2.5 font-bold text-right w-24">Trip kg</th>
                       <th className="px-2 py-2.5 font-bold text-right w-24">Prior Excess</th>
-                      <th className="px-2 py-2.5 font-bold text-right w-32">Credit (120kg)</th>
+                      <th className="px-2 py-2.5 font-bold text-right w-32">Credit ({formatNum(rateConfig.creditBlockKg)}kg)</th>
                       <th className="px-2 py-2.5 font-bold text-right w-28">New Excess</th>
                       <th className="px-2 py-2.5 text-right w-20">Actions</th>
                     </tr>
@@ -1000,7 +1009,7 @@ export function HaulingInventoryView() {
                         <td className="px-2 py-2.5 text-right whitespace-nowrap">
                           {trip.creditsEarned > 0 ? (
                             <span className="inline-block px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold">
-                              {trip.creditsEarned} × ₱1,100
+                              {trip.creditsEarned} × ₱{rateConfig.ratePerBlockPhp.toLocaleString()}
                             </span>
                           ) : (
                             <span className="text-slate-400">—</span>
