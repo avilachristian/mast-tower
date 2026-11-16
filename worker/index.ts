@@ -624,6 +624,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
     if (!headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/octet-stream');
     }
+    headers.set('X-Content-Type-Options', 'nosniff');
     headers.set('ETag', object.httpEtag);
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
 
@@ -679,10 +680,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       );
     }
 
-    const clientIp =
-      c.req.header('CF-Connecting-IP') ||
-      c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ||
-      'unknown';
+    const clientIp = c.req.header('CF-Connecting-IP')?.trim() || 'unknown';
     const userIpKey = `${clientIp}:${username.toLowerCase()}`;
     const ipOnlyKey = `ip:${clientIp}`;
 

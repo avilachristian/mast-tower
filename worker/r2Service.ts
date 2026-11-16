@@ -30,8 +30,51 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/jpg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
-  'image/svg+xml': 'svg',
 };
+
+/**
+ * Validates image binary signatures (magic bytes) to prevent arbitrary file uploads.
+ * Permitted: JPEG (FF D8 FF), PNG (89 50 4E 47 0D 0A 1A 0A), WebP (RIFF....WEBP).
+ * SVG is blocked per security policy.
+ */
+export function validateImageMagicBytes(bytes: Uint8Array): { valid: boolean; detectedMime?: string } {
+  if (bytes.length < 12) return { valid: false };
+
+  // JPEG: FF D8 FF
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return { valid: true, detectedMime: 'image/jpeg' };
+  }
+
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return { valid: true, detectedMime: 'image/png' };
+  }
+
+  // WebP: RIFF (bytes 0..3) and WEBP (bytes 8..11)
+  if (
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return { valid: true, detectedMime: 'image/webp' };
+  }
+
+  return { valid: false };
+}
 
 export class R2UploadRejectedError extends Error {
   statusCode: 400 | 413 | 415 | 507;
@@ -279,7 +322,17 @@ export async function uploadImageToR2(
     throw new R2UploadRejectedError(
       415,
       'UNSUPPORTED_IMAGE_TYPE',
-      'Only JPEG, PNG, WebP, or SVG images are supported.'
+      'Only JPEG, PNG, or WebP images are supported.'
+    );
+  }
+
+  const uint8 = params.bytes instanceof Uint8Array ? params.bytes : new Uint8Array(params.bytes);
+  const magic = validateImageMagicBytes(uint8);
+  if (!magic.valid) {
+    throw new R2UploadRejectedError(
+      415,
+      'INVALID_IMAGE_SIGNATURE',
+      'Uploaded file content does not match a valid JPEG, PNG, or WebP image signature.'
     );
   }
 

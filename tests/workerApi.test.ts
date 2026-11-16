@@ -154,8 +154,25 @@ function createMockD1() {
       return { rows: [] };
     }
     if (sql.startsWith('INSERT INTO login_attempts')) {
-      const [ip_key, attempts, locked_until] = params;
-      loginAttempts.set(String(ip_key), { ip_key, attempts, locked_until });
+      const [ip_key, maxAttempts, locked_until] = params;
+      const existing = loginAttempts.get(String(ip_key));
+      if (!existing) {
+        const attempts = 1;
+        const isLocked = Number(maxAttempts) <= 1;
+        loginAttempts.set(String(ip_key), {
+          ip_key,
+          attempts,
+          locked_until: isLocked ? locked_until : null,
+        });
+      } else {
+        const attempts = Number(existing.attempts ?? 0) + 1;
+        const isLocked = attempts >= Number(maxAttempts);
+        loginAttempts.set(String(ip_key), {
+          ip_key,
+          attempts,
+          locked_until: isLocked ? locked_until : existing.locked_until,
+        });
+      }
       return { rows: [] };
     }
     if (sql.startsWith('DELETE FROM admin_sessions WHERE expires_at <= ?')) {
@@ -772,10 +789,13 @@ describe('Cloudflare Worker API Integration', () => {
       const form = new FormData();
       form.append('projectId', 'proj-img');
       form.append('category', 'daily_log');
-      form.append(
-        'file',
-        new File([new Uint8Array(byteLen)], 'photo.jpg', { type: 'image/jpeg' })
-      );
+      const bytes = new Uint8Array(byteLen);
+      if (byteLen >= 3) {
+        bytes[0] = 0xff;
+        bytes[1] = 0xd8;
+        bytes[2] = 0xff;
+      }
+      form.append('file', new File([bytes], 'photo.jpg', { type: 'image/jpeg' }));
       return app.request(
         '/api/admin/images/upload',
         {
@@ -802,6 +822,7 @@ describe('Cloudflare Worker API Integration', () => {
     const imgRes = await app.request(warnJson.url, undefined, env);
     expect(imgRes.status).toBe(200);
     expect(imgRes.headers.get('Content-Type')).toBe('image/jpeg');
+    expect(imgRes.headers.get('X-Content-Type-Options')).toBe('nosniff');
 
     // Upload #2: 900 bytes would leave 900 bytes (< 1,000 min reserve) -> 507 R2_STORAGE_BLOCKED
     const blockedUpload = await uploadFile(900);
@@ -957,7 +978,11 @@ describe('Cloudflare Worker API Integration', () => {
     const form = new FormData();
     form.append('projectId', 'proj-a');
     form.append('category', 'daily_log');
-    form.append('file', new File([new Uint8Array(500)], 'shared.jpg', { type: 'image/jpeg' }));
+    const sharedBytes = new Uint8Array(500);
+    sharedBytes[0] = 0xff;
+    sharedBytes[1] = 0xd8;
+    sharedBytes[2] = 0xff;
+    form.append('file', new File([sharedBytes], 'shared.jpg', { type: 'image/jpeg' }));
     const upRes = await cachedApp.request(
       '/api/admin/images/upload',
       { method: 'POST', headers: { Cookie: cookie }, body: form },
@@ -1176,5 +1201,65 @@ describe('Cloudflare Worker API Integration', () => {
     const staleJson = (await staleSaveRes.json()) as { code: string; latestProject: { version: number } };
     expect(staleJson.code).toBe('VERSION_CONFLICT');
     expect(staleJson.latestProject.version).toBe(2);
+  });
+
+  it('rejects SVG uploads and validates binary image magic bytes', async () => {
+    const { env } = makeTestEnv();
+    const app = createWorkerApp();
+
+    const loginRes = await app.request(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'StrongPassword123!' }),
+      },
+      env
+    );
+    const cookie = loginRes.headers.get('Set-Cookie')?.split(';')[0] ?? '';
+
+    // 1. Attempt SVG upload -> rejected 415
+    const svgForm = new FormData();
+    svgForm.append('projectId', 'proj-img');
+    svgForm.append('category', 'logo');
+    svgForm.append('file', new File(['<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'], 'logo.svg', { type: 'image/svg+xml' }));
+
+    const svgRes = await app.request(
+      '/api/admin/images/upload',
+      { method: 'POST', headers: { Cookie: cookie }, body: svgForm },
+      env
+    );
+    expect(svgRes.status).toBe(415);
+    const svgJson = (await svgRes.json()) as { code: string };
+    expect(svgJson.code).toBe('UNSUPPORTED_IMAGE_TYPE');
+
+    // 2. Attempt forged MIME with invalid binary payload (e.g. text disguised as image/jpeg)
+    const forgedForm = new FormData();
+    forgedForm.append('projectId', 'proj-img');
+    forgedForm.append('category', 'daily_log');
+    forgedForm.append('file', new File(['not an actual jpeg file content at all'], 'fake.jpg', { type: 'image/jpeg' }));
+
+    const forgedRes = await app.request(
+      '/api/admin/images/upload',
+      { method: 'POST', headers: { Cookie: cookie }, body: forgedForm },
+      env
+    );
+    expect(forgedRes.status).toBe(415);
+    const forgedJson = (await forgedRes.json()) as { code: string };
+    expect(forgedJson.code).toBe('INVALID_IMAGE_SIGNATURE');
+
+    // 3. Valid PNG upload with proper magic bytes (89 50 4E 47 0D 0A 1A 0A)
+    const pngForm = new FormData();
+    pngForm.append('projectId', 'proj-img');
+    pngForm.append('category', 'logo');
+    const validPngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+    pngForm.append('file', new File([validPngBytes], 'logo.png', { type: 'image/png' }));
+
+    const pngRes = await app.request(
+      '/api/admin/images/upload',
+      { method: 'POST', headers: { Cookie: cookie }, body: pngForm },
+      env
+    );
+    expect(pngRes.status).toBe(201);
   });
 });

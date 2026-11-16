@@ -170,24 +170,16 @@ export async function recordFailedLoginAttempt(
   ipKey: string,
   maxAttempts = MAX_FAILED_LOGIN_ATTEMPTS
 ): Promise<void> {
-  const row = await env.DB.prepare(
-    'SELECT attempts FROM login_attempts WHERE ip_key = ?'
-  )
-    .bind(ipKey)
-    .first<{ attempts: number }>();
-
-  const nextAttempts = (row?.attempts ?? 0) + 1;
-  const lockedUntil =
-    nextAttempts >= maxAttempts
-      ? new Date(Date.now() + LOCKOUT_MS).toISOString()
-      : null;
+  const lockedUntil = new Date(Date.now() + LOCKOUT_MS).toISOString();
 
   await env.DB.prepare(
     `INSERT INTO login_attempts (ip_key, attempts, locked_until)
-     VALUES (?, ?, ?)
-     ON CONFLICT(ip_key) DO UPDATE SET attempts = excluded.attempts, locked_until = excluded.locked_until`
+     VALUES (?, 1, CASE WHEN 1 >= ? THEN ? ELSE NULL END)
+     ON CONFLICT(ip_key) DO UPDATE SET
+       attempts = attempts + 1,
+       locked_until = CASE WHEN attempts + 1 >= ? THEN ? ELSE locked_until END`
   )
-    .bind(ipKey, nextAttempts, lockedUntil)
+    .bind(ipKey, maxAttempts, lockedUntil, maxAttempts, lockedUntil)
     .run();
 }
 

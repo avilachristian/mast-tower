@@ -65,11 +65,11 @@ export function resizeLogoFileToDataUrl(file: File): Promise<string> {
     reader.onload = () => {
       const rawUrl = String(reader.result || '');
       if (!rawUrl.startsWith('data:image/')) {
-        reject(new Error('Please select a valid image file (PNG, JPG, WebP, or SVG).'));
+        reject(new Error('Please select a valid image file (PNG, JPG, or WebP).'));
         return;
       }
       if (file.type === 'image/svg+xml') {
-        resolve(rawUrl);
+        reject(new Error('SVG format is not supported. Please upload a PNG, JPG, or WebP image.'));
         return;
       }
       const img = new Image();
