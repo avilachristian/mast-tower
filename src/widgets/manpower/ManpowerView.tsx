@@ -225,10 +225,15 @@ export function ManpowerView() {
             Hauler Balance Due
           </div>
           <div className="text-lg font-extrabold text-emerald-900 mt-0.5">
-            ₱{haulerStats.totalBalanceDuePhp.toLocaleString()}
+            {haulerStats.totalBalanceDuePhp < 0 ? '-' : ''}₱
+            {Math.abs(haulerStats.totalBalanceDuePhp).toLocaleString()}
           </div>
           <div className="text-[11px] text-emerald-700">
-            {haulerStats.totalCredits} credits earned · ₱{haulerStats.totalPaidPhp.toLocaleString()} paid
+            {haulerStats.totalCredits} credits earned · ₱
+            {haulerStats.totalPaidPhp.toLocaleString()} paid
+            {haulerStats.totalDeductionsPhp > 0
+              ? ` · ₱${haulerStats.totalDeductionsPhp.toLocaleString()} ded.`
+              : ''}
           </div>
         </div>
       </div>
@@ -429,7 +434,11 @@ export function ManpowerView() {
 
                       {ledger && (
                         <div className="text-[11px] text-slate-600 bg-amber-50/60 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                          {ledger.tripsCompleted} trips · {ledger.totalHauledKg.toLocaleString()} kg · Balance Due: <strong>₱{ledger.balanceDuePhp.toLocaleString()}</strong>
+                          {ledger.tripsCompleted} trips · {ledger.totalHauledKg.toLocaleString()} kg · Balance Due:{' '}
+                          <strong>
+                            {ledger.balanceDuePhp < 0 ? '-' : ''}₱
+                            {Math.abs(ledger.balanceDuePhp).toLocaleString()}
+                          </strong>
                         </div>
                       )}
                       {member.notes && (
@@ -506,7 +515,7 @@ export function ManpowerView() {
                           </td>
                           <td className="px-3 py-2.5 text-[11px] text-slate-500">
                             {ledger
-                              ? `${ledger.tripsCompleted} trips · ${ledger.totalHauledKg.toLocaleString()} kg · Due ₱${ledger.balanceDuePhp.toLocaleString()}`
+                              ? `${ledger.tripsCompleted} trips · ${ledger.totalHauledKg.toLocaleString()} kg · Due ${ledger.balanceDuePhp < 0 ? '-' : ''}₱${Math.abs(ledger.balanceDuePhp).toLocaleString()}`
                               : member.notes || '—'}
                           </td>
                           <td className="px-3 py-2.5 text-right whitespace-nowrap">

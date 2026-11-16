@@ -385,6 +385,7 @@ export function AdminWorkspace() {
         totalHauledKg: preview.totalHauledKg,
         totalCredits: preview.totalCredits,
         totalEarnedPhp: preview.totalEarnedPhp,
+        totalDeductionPhp: preview.totalDeductionPhp,
         totalPayoutPhp: preview.totalSuggestedPayoutPhp,
         creditBlockKg: rateConfig.creditBlockKg,
         ratePerBlockPhp: rateConfig.ratePerBlockPhp,

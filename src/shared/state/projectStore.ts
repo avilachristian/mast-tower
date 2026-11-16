@@ -582,6 +582,43 @@ function appendHaulerToManpowerRoster(
   ];
 }
 
+function buildLinkedHaulerRecordsForSnapshot(
+  snapshot: Pick<HaulerPayrollSnapshot, 'title' | 'items'>,
+  snapshotId: string,
+  date: string
+): HaulerPayoutRecord[] {
+  const stamp = Date.now().toString(36);
+  const records: HaulerPayoutRecord[] = [];
+  snapshot.items.forEach((item, idx) => {
+    if (item.payoutReleasedPhp > 0) {
+      records.push({
+        id: `pay-${stamp}-${idx}-p-${Math.random().toString(36).slice(2, 6)}`,
+        date,
+        haulerName: item.haulerName,
+        amountPhp: item.payoutReleasedPhp,
+        kind: 'payout',
+        notes: `Hauler Payroll: ${snapshot.title}`,
+        payrollSnapshotId: snapshotId,
+      });
+    }
+    const ded = item.deductionPhp ?? 0;
+    if (ded > 0) {
+      records.push({
+        id: `pay-${stamp}-${idx}-d-${Math.random().toString(36).slice(2, 6)}`,
+        date,
+        haulerName: item.haulerName,
+        amountPhp: ded,
+        kind: 'deduction',
+        notes: item.deductionNote?.trim()
+          ? `Deduction (${item.deductionNote.trim()}): ${snapshot.title}`
+          : `Hauler Deduction: ${snapshot.title}`,
+        payrollSnapshotId: snapshotId,
+      });
+    }
+  });
+  return records;
+}
+
 function deriveLegacyHaulerNames(roster: ManpowerMember[]): string[] {
   return roster
     .filter((m) => m.category === 'hauler' && m.active)
@@ -1534,6 +1571,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           date: payout.date,
           haulerName,
           amountPhp,
+          kind: payout.kind === 'deduction' ? 'deduction' : 'payout',
           notes: payout.notes?.trim() || undefined,
           payrollSnapshotId: payout.payrollSnapshotId,
         };
@@ -1802,18 +1840,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
           createdAt: new Date().toISOString(),
           paidDate: snapshot.status === 'paid' ? today : undefined,
         };
-        const linkedPayouts: HaulerPayoutRecord[] =
+        const linkedPayouts =
           snapshot.status === 'paid'
-            ? snapshot.items
-                .filter((item) => item.payoutReleasedPhp > 0)
-                .map((item, idx) => ({
-                  id: `pay-${Date.now().toString(36)}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-                  date: today,
-                  haulerName: item.haulerName,
-                  amountPhp: item.payoutReleasedPhp,
-                  notes: `Hauler Payroll: ${snapshot.title}`,
-                  payrollSnapshotId: id,
-                }))
+            ? buildLinkedHaulerRecordsForSnapshot(snapshot, id, today)
             : [];
         return commitActiveProject(s, {
           ...s.project,
@@ -1843,18 +1872,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const basePayouts = (s.project.haulerPayouts ?? []).filter(
           (p) => p.payrollSnapshotId !== id
         );
-        const linkedPayouts: HaulerPayoutRecord[] =
+        const linkedPayouts =
           status === 'paid'
-            ? target.items
-                .filter((item) => item.payoutReleasedPhp > 0)
-                .map((item, idx) => ({
-                  id: `pay-${Date.now().toString(36)}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
-                  date: today,
-                  haulerName: item.haulerName,
-                  amountPhp: item.payoutReleasedPhp,
-                  notes: `Hauler Payroll: ${target.title}`,
-                  payrollSnapshotId: id,
-                }))
+            ? buildLinkedHaulerRecordsForSnapshot(target, id, today)
             : [];
 
         return commitActiveProject(s, {

@@ -212,11 +212,14 @@ export interface CentralMaterialItem {
   remarks?: string;
 }
 
+export type HaulerLedgerEntryKind = 'payout' | 'deduction';
+
 export interface HaulerPayoutRecord {
   id: string;
   date: string; // YYYY-MM-DD
   haulerName: string;
   amountPhp: number;
+  kind?: HaulerLedgerEntryKind; // defaults to 'payout' for backward compatibility
   notes?: string;
   payrollSnapshotId?: string;
 }
@@ -282,6 +285,8 @@ export interface HaulerPayrollLineItem {
   endingExcessKg: number;
   grossEarnedPhp: number;
   alreadyPaidInRangePhp: number;
+  deductionPhp?: number;
+  deductionNote?: string;
   payoutReleasedPhp: number;
   netBalanceAfterPhp: number;
 }
@@ -297,6 +302,7 @@ export interface HaulerPayrollSnapshot {
   totalHauledKg: number;
   totalCredits: number;
   totalEarnedPhp: number;
+  totalDeductionPhp?: number;
   totalPayoutPhp: number;
   creditBlockKg?: number;
   ratePerBlockPhp?: number;

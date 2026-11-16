@@ -408,10 +408,18 @@ export function computeCivilWorksPayrollPreview(
   };
 }
 
+export interface HaulerDeductionInput {
+  amountPhp: number;
+  note?: string;
+}
+
 export interface HaulerPayrollPreviewRow extends HaulerPayrollLineItem {
   overallEarnedPhp: number;
   overallPaidPhp: number;
+  overallDeductionsPhp: number;
   overallBalanceDuePhp: number;
+  alreadyDeductedInRangePhp: number;
+  baseSuggestedPayoutPhp: number;
   currentOverallExcessKg: number;
 }
 
@@ -422,6 +430,7 @@ export interface HaulerPayrollPreview {
   totalHauledKg: number;
   totalCredits: number;
   totalEarnedPhp: number;
+  totalDeductionPhp: number;
   totalSuggestedPayoutPhp: number;
   totalOverallBalanceDuePhp: number;
   rateConfig: HaulingRateConfig;
@@ -438,7 +447,8 @@ export function computeHaulerPayrollPreview(
   startDate: string,
   endDate: string,
   periodType: PayrollPeriodType = 'weekly',
-  rateConfig?: Partial<HaulingRateConfig>
+  rateConfig?: Partial<HaulingRateConfig>,
+  deductionsByHauler: Record<string, number | HaulerDeductionInput> = {}
 ): HaulerPayrollPreview {
   const resolvedRate = resolveHaulingRateConfig(rateConfig);
   const overall = computeHaulerCreditLedgers(
@@ -512,19 +522,54 @@ export function computeHaulerPayrollPreview(
   }
 
   const paidInRangeByKey = new Map<string, number>();
+  const deductedInRangeByKey = new Map<string, number>();
+  const overallPaidByKey = new Map<string, number>();
+  const overallDeductedByKey = new Map<string, number>();
+  const payoutDisplayNames = new Map<string, string>();
   for (const p of payouts) {
-    if (p.date < startDate || p.date > endDate) continue;
     const key = normalizeNameKey(p.haulerName);
     if (!key) continue;
-    paidInRangeByKey.set(
-      key,
-      round2((paidInRangeByKey.get(key) ?? 0) + (Number(p.amountPhp) || 0))
+    if (!payoutDisplayNames.has(key)) {
+      payoutDisplayNames.set(key, p.haulerName.trim());
+    }
+    const amt = Math.max(0, Number(p.amountPhp) || 0);
+    const inRange = p.date >= startDate && p.date <= endDate;
+    if (p.kind === 'deduction') {
+      overallDeductedByKey.set(
+        key,
+        round2((overallDeductedByKey.get(key) ?? 0) + amt)
+      );
+      if (inRange) {
+        deductedInRangeByKey.set(
+          key,
+          round2((deductedInRangeByKey.get(key) ?? 0) + amt)
+        );
+      }
+    } else {
+      overallPaidByKey.set(key, round2((overallPaidByKey.get(key) ?? 0) + amt));
+      if (inRange) {
+        paidInRangeByKey.set(key, round2((paidInRangeByKey.get(key) ?? 0) + amt));
+      }
+    }
+  }
+
+  const normalizedDeductions = new Map<string, HaulerDeductionInput>();
+  for (const [rawKey, val] of Object.entries(deductionsByHauler)) {
+    const key = normalizeNameKey(rawKey);
+    if (!key) continue;
+    const amountPhp = Math.max(
+      0,
+      round2(typeof val === 'number' ? val : val?.amountPhp ?? 0)
     );
+    const note =
+      typeof val === 'object' ? val?.note?.trim() || undefined : undefined;
+    normalizedDeductions.set(key, { amountPhp, note });
   }
 
   const allHaulerKeys = new Set<string>([
     ...periodStats.keys(),
     ...overallLedgerByKey.keys(),
+    ...payoutDisplayNames.keys(),
     ...Array.from(memberByKey.entries())
       .filter(([, m]) => m.active)
       .map(([k]) => k),
@@ -536,7 +581,11 @@ export function computeHaulerPayrollPreview(
       const pStat = periodStats.get(key);
       const overallRow = overallLedgerByKey.get(key);
       const haulerName =
-        member?.name ?? pStat?.displayName ?? overallRow?.haulerName ?? key;
+        member?.name ??
+        pStat?.displayName ??
+        overallRow?.haulerName ??
+        payoutDisplayNames.get(key) ??
+        key;
       const tripsCompleted = pStat?.tripsCompleted ?? 0;
       const priorExcessKg = pStat
         ? pStat.hasSetPriorExcess
@@ -550,20 +599,37 @@ export function computeHaulerPayrollPreview(
         creditsEarned * resolvedRate.ratePerBlockPhp
       );
       const alreadyPaidInRangePhp = paidInRangeByKey.get(key) ?? 0;
+      const alreadyDeductedInRangePhp = deductedInRangeByKey.get(key) ?? 0;
+      const settledInRangePhp = round2(
+        alreadyPaidInRangePhp + alreadyDeductedInRangePhp
+      );
       const overallEarnedPhp = overallRow?.grossEarnedPhp ?? 0;
-      const overallPaidPhp = overallRow?.totalPaidPhp ?? 0;
-      const overallBalanceDuePhp = overallRow?.balanceDuePhp ?? 0;
+      const overallPaidPhp =
+        overallRow?.totalPaidPhp ?? overallPaidByKey.get(key) ?? 0;
+      const overallDeductionsPhp =
+        overallRow?.totalDeductionsPhp ?? overallDeductedByKey.get(key) ?? 0;
+      const overallBalanceDuePhp = round2(
+        overallEarnedPhp - overallPaidPhp - overallDeductionsPhp
+      );
 
-      const suggestedPayoutPhp =
+      const baseSuggestedPayoutPhp =
         periodType === 'overall'
           ? Math.max(0, overallBalanceDuePhp)
           : Math.max(
               0,
               Math.min(
-                round2(grossEarnedPhp - alreadyPaidInRangePhp),
+                round2(grossEarnedPhp - settledInRangePhp),
                 overallBalanceDuePhp
               )
             );
+
+      const batchDed = normalizedDeductions.get(key);
+      const deductionPhp = batchDed?.amountPhp ?? 0;
+      const deductionNote = batchDed?.note;
+      const payoutReleasedPhp = Math.max(
+        0,
+        round2(baseSuggestedPayoutPhp - deductionPhp)
+      );
 
       return {
         haulerName,
@@ -576,12 +642,20 @@ export function computeHaulerPayrollPreview(
         endingExcessKg,
         grossEarnedPhp,
         alreadyPaidInRangePhp,
-        payoutReleasedPhp: round2(suggestedPayoutPhp),
+        alreadyDeductedInRangePhp,
+        deductionPhp,
+        deductionNote,
+        baseSuggestedPayoutPhp,
+        payoutReleasedPhp,
         netBalanceAfterPhp: round2(
-          Math.max(0, overallBalanceDuePhp - suggestedPayoutPhp)
+          Math.max(
+            0,
+            overallBalanceDuePhp - (payoutReleasedPhp + deductionPhp)
+          )
         ),
         overallEarnedPhp,
         overallPaidPhp,
+        overallDeductionsPhp,
         overallBalanceDuePhp,
         currentOverallExcessKg: overallRow?.currentExcessKg ?? endingExcessKg,
       };
@@ -589,7 +663,7 @@ export function computeHaulerPayrollPreview(
     .filter(
       (r) =>
         r.tripsCompleted > 0 ||
-        r.overallBalanceDuePhp > 0 ||
+        r.overallBalanceDuePhp !== 0 ||
         r.overallEarnedPhp > 0 ||
         memberByKey.get(normalizeNameKey(r.haulerName))?.active
     )
@@ -602,6 +676,9 @@ export function computeHaulerPayrollPreview(
     totalHauledKg: round2(rows.reduce((s, r) => s + r.hauledKg, 0)),
     totalCredits: rows.reduce((s, r) => s + r.creditsEarned, 0),
     totalEarnedPhp: round2(rows.reduce((s, r) => s + r.grossEarnedPhp, 0)),
+    totalDeductionPhp: round2(
+      rows.reduce((s, r) => s + (r.deductionPhp ?? 0), 0)
+    ),
     totalSuggestedPayoutPhp: round2(
       rows.reduce((s, r) => s + r.payoutReleasedPhp, 0)
     ),
@@ -629,8 +706,10 @@ export function formatCivilPayrollPlainText(
     | 'totalNetPayPhp'
     | 'notes'
   >,
-  project: Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy'>
+  project: Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy'>,
+  options?: { includeStatus?: boolean }
 ): string {
+  const includeStatus = options?.includeStatus ?? true;
   const totalDeduction =
     snapshot.totalDeductionPhp ??
     round2(snapshot.items.reduce((s, i) => s + (i.deductionPhp ?? 0), 0));
@@ -644,7 +723,11 @@ export function formatCivilPayrollPlainText(
     `Project: ${project.projectName}`,
     `Location: ${project.location}`,
     `Period: ${snapshot.startDate}${snapshot.startDate !== snapshot.endDate ? ` to ${snapshot.endDate}` : ''} (${snapshot.periodType.toUpperCase()})`,
-    `Status: ${snapshot.status === 'paid' ? `PAID${snapshot.paidDate ? ` (${snapshot.paidDate})` : ''}` : 'FOR APPROVAL / PENDING'}`,
+    ...(includeStatus
+      ? [
+          `Status: ${snapshot.status === 'paid' ? `PAID${snapshot.paidDate ? ` (${snapshot.paidDate})` : ''}` : 'FOR APPROVAL / PENDING'}`,
+        ]
+      : []),
     `Prepared By: ${project.preparedBy}`,
     '',
     'WORKERS & PAY:',
@@ -691,22 +774,32 @@ export function formatHaulerPayrollPlainText(
     | 'totalHauledKg'
     | 'totalCredits'
     | 'totalEarnedPhp'
+    | 'totalDeductionPhp'
     | 'totalPayoutPhp'
     | 'creditBlockKg'
     | 'ratePerBlockPhp'
     | 'notes'
   >,
-  project: Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy'>
+  project: Pick<MastProjectState, 'projectName' | 'location' | 'preparedBy'>,
+  options?: { includeStatus?: boolean }
 ): string {
+  const includeStatus = options?.includeStatus ?? true;
   const creditBlockKg = snapshot.creditBlockKg ?? HAULING_CREDIT_BLOCK_KG;
   const ratePerBlockPhp = snapshot.ratePerBlockPhp ?? HAULING_RATE_PER_BLOCK_PHP;
+  const totalDeduction =
+    snapshot.totalDeductionPhp ??
+    round2(snapshot.items.reduce((s, i) => s + (i.deductionPhp ?? 0), 0));
   const lines: string[] = [
     `INDIVIDUAL HAULER PAYROLL — ${snapshot.title}`,
     `Rate: PHP ${ratePerBlockPhp.toLocaleString()} per ${creditBlockKg} kg credit (excess carried over)`,
     `Project: ${project.projectName}`,
     `Location: ${project.location}`,
     `Period: ${snapshot.startDate}${snapshot.startDate !== snapshot.endDate ? ` to ${snapshot.endDate}` : ''} (${snapshot.periodType.toUpperCase()})`,
-    `Status: ${snapshot.status === 'paid' ? `PAID${snapshot.paidDate ? ` (${snapshot.paidDate})` : ''}` : 'FOR APPROVAL / PENDING'}`,
+    ...(includeStatus
+      ? [
+          `Status: ${snapshot.status === 'paid' ? `PAID${snapshot.paidDate ? ` (${snapshot.paidDate})` : ''}` : 'FOR APPROVAL / PENDING'}`,
+        ]
+      : []),
     `Prepared By: ${project.preparedBy}`,
     '',
     'INDIVIDUAL HAULERS:',
@@ -716,8 +809,14 @@ export function formatHaulerPayrollPlainText(
     lines.push('- No hauler trips or payouts in this period.');
   } else {
     for (const item of snapshot.items) {
+      const ded = item.deductionPhp ?? 0;
+      const dedSegment =
+        ded > 0
+          ? ` | Ded.: PHP ${ded.toLocaleString()}${item.deductionNote?.trim() ? ` (${item.deductionNote.trim()})` : ''}`
+          : '';
+      const payoutLabel = ded > 0 ? 'Net Payout' : 'Payout';
       lines.push(
-        `- ${item.haulerName}: ${item.tripsCompleted} trip${item.tripsCompleted === 1 ? '' : 's'}, ${item.hauledKg} kg hauled (prior excess ${item.priorExcessKg} kg -> ${item.creditsEarned} credit${item.creditsEarned === 1 ? '' : 's'}, ending excess ${item.endingExcessKg} kg) | Earned: PHP ${item.grossEarnedPhp.toLocaleString()} | Payout: PHP ${item.payoutReleasedPhp.toLocaleString()}`
+        `- ${item.haulerName}: ${item.tripsCompleted} trip${item.tripsCompleted === 1 ? '' : 's'}, ${item.hauledKg} kg hauled (prior excess ${item.priorExcessKg} kg -> ${item.creditsEarned} credit${item.creditsEarned === 1 ? '' : 's'}, ending excess ${item.endingExcessKg} kg) | Earned: PHP ${item.grossEarnedPhp.toLocaleString()}${dedSegment} | ${payoutLabel}: PHP ${item.payoutReleasedPhp.toLocaleString()}`
       );
     }
   }
@@ -726,6 +825,9 @@ export function formatHaulerPayrollPlainText(
     '',
     `TOTAL HAULED: ${snapshot.totalHauledKg} kg (${snapshot.totalCredits} credits)`,
     `TOTAL PERIOD EARNED: PHP ${snapshot.totalEarnedPhp.toLocaleString()}`,
+    ...(totalDeduction > 0
+      ? [`TOTAL DEDUCTIONS: PHP ${totalDeduction.toLocaleString()}`]
+      : []),
     `TOTAL PAYOUT AMOUNT: PHP ${snapshot.totalPayoutPhp.toLocaleString()}`
   );
   if (snapshot.notes?.trim()) {

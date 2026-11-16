@@ -38,6 +38,7 @@ export type AdminUiStyle = 'classic' | 'swiss';
 
 export const ADMIN_UI_STYLE_STORAGE_KEY = 'mast2-admin-ui-style-v1';
 export const PAYROLL_SHOW_SIGNATURE_STORAGE_KEY = 'mast2-payroll-show-signature-v1';
+export const PAYROLL_SHOW_STATUS_STORAGE_KEY = 'mast2-payroll-show-status-v1';
 
 export function readSavedAdminUiStyle(
   storage?: Pick<Storage, 'getItem'> | null
@@ -64,29 +65,59 @@ export function persistAdminUiStyle(
   }
 }
 
+function readSavedBooleanPref(
+  key: string,
+  defaultValue: boolean,
+  storage?: Pick<Storage, 'getItem'> | null
+): boolean {
+  if (!storage) return defaultValue;
+  try {
+    const val = storage.getItem(key);
+    if (val === '0' || val === 'false') return false;
+    if (val === '1' || val === 'true') return true;
+    return defaultValue;
+  } catch {
+    return defaultValue;
+  }
+}
+
+function persistBooleanPref(
+  key: string,
+  value: boolean,
+  storage?: Pick<Storage, 'setItem'> | null
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(key, value ? '1' : '0');
+  } catch {
+    // Ignore storage quota or private-mode errors
+  }
+}
+
 export function readSavedPayrollShowSignature(
   storage?: Pick<Storage, 'getItem'> | null
 ): boolean {
-  if (!storage) return true;
-  try {
-    const val = storage.getItem(PAYROLL_SHOW_SIGNATURE_STORAGE_KEY);
-    if (val === '0' || val === 'false') return false;
-    return true;
-  } catch {
-    return true;
-  }
+  return readSavedBooleanPref(PAYROLL_SHOW_SIGNATURE_STORAGE_KEY, true, storage);
 }
 
 export function persistPayrollShowSignature(
   show: boolean,
   storage?: Pick<Storage, 'setItem'> | null
 ): void {
-  if (!storage) return;
-  try {
-    storage.setItem(PAYROLL_SHOW_SIGNATURE_STORAGE_KEY, show ? '1' : '0');
-  } catch {
-    // Ignore storage quota or private-mode errors
-  }
+  persistBooleanPref(PAYROLL_SHOW_SIGNATURE_STORAGE_KEY, show, storage);
+}
+
+export function readSavedPayrollShowStatus(
+  storage?: Pick<Storage, 'getItem'> | null
+): boolean {
+  return readSavedBooleanPref(PAYROLL_SHOW_STATUS_STORAGE_KEY, true, storage);
+}
+
+export function persistPayrollShowStatus(
+  show: boolean,
+  storage?: Pick<Storage, 'setItem'> | null
+): void {
+  persistBooleanPref(PAYROLL_SHOW_STATUS_STORAGE_KEY, show, storage);
 }
 
 const firstLaunchIdbWriter = createCoalescedIdbWriter<string>(FIRST_LAUNCH_COMPLETED_KEY);
@@ -133,6 +164,7 @@ interface UiState {
   foundationOrderViolation: FoundationChecklistViolation | null;
   adminUiStyle: AdminUiStyle;
   payrollShowSignature: boolean;
+  payrollShowStatus: boolean;
 
   setActiveAppTab: (tab: ActiveAppTab) => void;
   setManpowerSubTab: (subTab: ManpowerSubTab) => void;
@@ -154,6 +186,7 @@ interface UiState {
   ) => void;
   setAdminUiStyle: (style: AdminUiStyle) => void;
   setPayrollShowSignature: (show: boolean) => void;
+  setPayrollShowStatus: (show: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -178,6 +211,9 @@ export const useUiStore = create<UiState>((set) => ({
     typeof window !== 'undefined' ? window.localStorage : null
   ),
   payrollShowSignature: readSavedPayrollShowSignature(
+    typeof window !== 'undefined' ? window.localStorage : null
+  ),
+  payrollShowStatus: readSavedPayrollShowStatus(
     typeof window !== 'undefined' ? window.localStorage : null
   ),
 
@@ -264,6 +300,13 @@ export const useUiStore = create<UiState>((set) => ({
       typeof window !== 'undefined' ? window.localStorage : null
     );
     set({ payrollShowSignature });
+  },
+  setPayrollShowStatus: (payrollShowStatus) => {
+    persistPayrollShowStatus(
+      payrollShowStatus,
+      typeof window !== 'undefined' ? window.localStorage : null
+    );
+    set({ payrollShowStatus });
   },
 }));
 

@@ -23,6 +23,7 @@ import {
   resolveKnownHaulerNames,
 } from '@/entities/project/manpowerPayroll';
 import type {
+  HaulerLedgerEntryKind,
   HaulerPayoutRecord,
   HaulerPayrollLineItem,
   HaulerPayrollSnapshot,
@@ -93,10 +94,14 @@ export function HaulerPayrollPanel({
   const [customTitle, setCustomTitle] = useState('');
   const [payrollNotes, setPayrollNotes] = useState('');
   const [selectedHaulers, setSelectedHaulers] = useState<Record<string, boolean>>({});
+  const [deductionsByHauler, setDeductionsByHauler] = useState<
+    Record<string, { amountStr: string; note: string }>
+  >({});
   const [payoutOverrides, setPayoutOverrides] = useState<Record<string, string>>({});
 
-  // Ad-hoc direct payout form
+  // Ad-hoc direct payout / cash advance form
   const [directHauler, setDirectHauler] = useState('');
+  const [directKind, setDirectKind] = useState<HaulerLedgerEntryKind>('payout');
   const [directAmount, setDirectAmount] = useState('');
   const [directDate, setDirectDate] = useState(todayStr);
   const [directNotes, setDirectNotes] = useState('');
@@ -122,6 +127,18 @@ export function HaulerPayrollPanel({
     [project]
   );
 
+  const haulerDeductionMap = useMemo(() => {
+    const out: Record<string, { amountPhp: number; note?: string }> = {};
+    for (const [name, entry] of Object.entries(deductionsByHauler)) {
+      const amountPhp = Math.max(0, Number(entry.amountStr) || 0);
+      const note = entry.note.trim();
+      if (amountPhp > 0 || note) {
+        out[name] = { amountPhp, note: note || undefined };
+      }
+    }
+    return out;
+  }, [deductionsByHauler]);
+
   const preview = useMemo(
     () =>
       computeHaulerPayrollPreview(
@@ -131,7 +148,8 @@ export function HaulerPayrollPanel({
         periodBounds.startDate,
         periodBounds.endDate,
         periodType,
-        rateConfig
+        rateConfig,
+        haulerDeductionMap
       ),
     [
       project.haulingLogs,
@@ -141,6 +159,7 @@ export function HaulerPayrollPanel({
       periodBounds.endDate,
       periodType,
       rateConfig,
+      haulerDeductionMap,
     ]
   );
 
@@ -152,6 +171,7 @@ export function HaulerPayrollPanel({
     if (periodChanged) {
       lastInitPeriodKeyRef.current = periodKey;
       setCustomTitle('');
+      setDeductionsByHauler({});
       setPayoutOverrides({});
       const nextSel: Record<string, boolean> = {};
       for (const row of preview.rows) {
@@ -184,6 +204,8 @@ export function HaulerPayrollPanel({
           (row.tripsCompleted > 0 || row.overallBalanceDuePhp > 0)
       )
       .map((row) => {
+        const deductionPhp = row.deductionPhp ?? 0;
+        const deductionNote = row.deductionNote;
         const override = payoutOverrides[row.haulerName];
         const payoutReleasedPhp =
           override !== undefined
@@ -200,14 +222,27 @@ export function HaulerPayrollPanel({
           endingExcessKg: row.endingExcessKg,
           grossEarnedPhp: row.grossEarnedPhp,
           alreadyPaidInRangePhp: row.alreadyPaidInRangePhp,
+          deductionPhp,
+          deductionNote,
           payoutReleasedPhp,
           netBalanceAfterPhp: Math.max(
             0,
-            Math.round((row.overallBalanceDuePhp - payoutReleasedPhp) * 100) / 100
+            Math.round(
+              (row.overallBalanceDuePhp - (payoutReleasedPhp + deductionPhp)) *
+                100
+            ) / 100
           ),
         };
       });
   }, [preview.rows, selectedHaulers, payoutOverrides]);
+
+  const totalBatchDeductionPhp = useMemo(
+    () =>
+      Math.round(
+        effectiveItems.reduce((sum, i) => sum + (i.deductionPhp ?? 0), 0) * 100
+      ) / 100,
+    [effectiveItems]
+  );
 
   const totalBatchPayoutPhp = useMemo(
     () =>
@@ -234,6 +269,7 @@ export function HaulerPayrollPanel({
       Math.round(
         effectiveItems.reduce((s, r) => s + r.grossEarnedPhp, 0) * 100
       ) / 100,
+    totalDeductionPhp: totalBatchDeductionPhp,
     totalPayoutPhp: totalBatchPayoutPhp,
     creditBlockKg: rateConfig.creditBlockKg,
     ratePerBlockPhp: rateConfig.ratePerBlockPhp,
@@ -253,6 +289,10 @@ export function HaulerPayrollPanel({
     }
     createHaulerPayrollSnapshot(draft);
     setPayrollNotes('');
+    if (status === 'paid') {
+      setDeductionsByHauler({});
+      setPayoutOverrides({});
+    }
     pushToast({
       tone: 'success',
       title:
@@ -288,7 +328,10 @@ export function HaulerPayrollPanel({
       | 'totalHauledKg'
       | 'totalCredits'
       | 'totalEarnedPhp'
+      | 'totalDeductionPhp'
       | 'totalPayoutPhp'
+      | 'creditBlockKg'
+      | 'ratePerBlockPhp'
       | 'notes'
     >
   ) => {
@@ -315,7 +358,7 @@ export function HaulerPayrollPanel({
       message: `Delete "${rec.title}" (₱${rec.totalPayoutPhp.toLocaleString()}) from Hauler Payment History?`,
       detail:
         rec.status === 'paid'
-          ? 'Any hauler payouts linked to this payroll batch will also be removed so balances due stay accurate.'
+          ? 'Any hauler payouts and deductions linked to this payroll batch will also be removed so balances due stay accurate.'
           : undefined,
       confirmLabel: 'Delete Record',
     });
@@ -332,11 +375,17 @@ export function HaulerPayrollPanel({
       date: directDate,
       haulerName: directHauler.trim(),
       amountPhp: amt,
-      notes: directNotes.trim() || undefined,
+      kind: directKind,
+      notes:
+        directNotes.trim() ||
+        (directKind === 'deduction' ? 'Cash advance' : undefined),
     });
     pushToast({
       tone: 'success',
-      message: `Recorded ₱${amt.toLocaleString()} payout to ${directHauler.trim()}.`,
+      message:
+        directKind === 'deduction'
+          ? `Recorded ₱${amt.toLocaleString()} cash advance / deduction for ${directHauler.trim()}.`
+          : `Recorded ₱${amt.toLocaleString()} payout to ${directHauler.trim()}.`,
       durationMs: 3500,
     });
     setDirectAmount('');
@@ -344,11 +393,12 @@ export function HaulerPayrollPanel({
   };
 
   const handleDeleteDirectPayout = async (p: HaulerPayoutRecord) => {
+    const label = p.kind === 'deduction' ? 'Deduction / Cash Advance' : 'Payout';
     const ok = await requestConfirm({
       tone: 'danger',
-      title: 'Delete Payout Entry?',
-      message: `Delete ₱${p.amountPhp.toLocaleString()} payout to ${p.haulerName} (${formatDateWithWeekday(p.date)})?`,
-      confirmLabel: 'Delete Payout',
+      title: `Delete ${label} Entry?`,
+      message: `Delete ₱${p.amountPhp.toLocaleString()} ${label.toLowerCase()} for ${p.haulerName} (${formatDateWithWeekday(p.date)})?`,
+      confirmLabel: 'Delete Entry',
     });
     if (ok) {
       deleteHaulerPayout(p.id);
@@ -481,6 +531,11 @@ export function HaulerPayrollPanel({
           </div>
           <div className="text-xs font-bold text-emerald-800">
             Selected Batch Payout: ₱{totalBatchPayoutPhp.toLocaleString()}
+            {totalBatchDeductionPhp > 0 && (
+              <span className="text-slate-500 font-semibold ml-1">
+                (Ded. ₱{totalBatchDeductionPhp.toLocaleString()})
+              </span>
+            )}
           </div>
         </div>
 
@@ -494,8 +549,14 @@ export function HaulerPayrollPanel({
             <div className="md:hidden space-y-2.5">
               {preview.rows.map((row) => {
                 const checked = selectedHaulers[row.haulerName] ?? true;
+                const dedEntry = deductionsByHauler[row.haulerName] ?? {
+                  amountStr: '',
+                  note: '',
+                };
                 const valStr =
                   payoutOverrides[row.haulerName] ?? String(row.payoutReleasedPhp);
+                const priorSettledInRange =
+                  row.alreadyPaidInRangePhp + row.alreadyDeductedInRangePhp;
                 const pct = Math.min(
                   100,
                   rateConfig.creditBlockKg > 0
@@ -543,8 +604,15 @@ export function HaulerPayrollPanel({
                           Period: ₱{row.grossEarnedPhp.toLocaleString()}
                         </div>
                         <div className="text-slate-500">
-                          Total Due: ₱{row.overallBalanceDuePhp.toLocaleString()}
+                          Total Due:{' '}
+                          {row.overallBalanceDuePhp < 0 ? '-' : ''}₱
+                          {Math.abs(row.overallBalanceDuePhp).toLocaleString()}
                         </div>
+                        {priorSettledInRange > 0 && (
+                          <div className="text-[10px] text-slate-400">
+                            Prev. paid/adv: ₱{priorSettledInRange.toLocaleString()}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -567,22 +635,66 @@ export function HaulerPayrollPanel({
                     </div>
 
                     {checked && (
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-bold text-slate-600">
-                          Release Payout (₱):
-                        </span>
+                      <div className="space-y-1.5 pt-0.5">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">
+                              Deduction / CA (₱)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step="any"
+                              placeholder="0"
+                              value={dedEntry.amountStr}
+                              onChange={(e) =>
+                                setDeductionsByHauler((prev) => ({
+                                  ...prev,
+                                  [row.haulerName]: {
+                                    amountStr: e.target.value,
+                                    note: prev[row.haulerName]?.note ?? '',
+                                  },
+                                }))
+                              }
+                              aria-label={`Deduction for ${row.haulerName}`}
+                              className="w-full min-h-8 rounded-lg border border-slate-300 bg-white px-2 py-1 text-right text-xs font-semibold text-slate-900"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
+                              Net Payout (₱)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              step="any"
+                              value={valStr}
+                              onChange={(e) =>
+                                setPayoutOverrides((prev) => ({
+                                  ...prev,
+                                  [row.haulerName]: e.target.value,
+                                }))
+                              }
+                              aria-label={`Payout for ${row.haulerName}`}
+                              className="w-full min-h-8 rounded-lg border border-slate-300 bg-white px-2 py-1 text-right text-xs font-extrabold text-slate-900"
+                            />
+                          </div>
+                        </div>
                         <input
-                          type="number"
-                          min={0}
-                          step="any"
-                          value={valStr}
+                          type="text"
+                          value={dedEntry.note}
                           onChange={(e) =>
-                            setPayoutOverrides((prev) => ({
+                            setDeductionsByHauler((prev) => ({
                               ...prev,
-                              [row.haulerName]: e.target.value,
+                              [row.haulerName]: {
+                                amountStr: prev[row.haulerName]?.amountStr ?? '',
+                                note: e.target.value,
+                              },
                             }))
                           }
-                          className="w-28 min-h-8 rounded-lg border border-slate-300 bg-white px-2 py-1 text-right text-xs font-extrabold text-slate-900"
+                          placeholder="Deduction reason (e.g. Cash Advance)"
+                          aria-label={`Deduction note for ${row.haulerName}`}
+                          className="w-full min-h-7 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
                         />
                       </div>
                     )}
@@ -605,14 +717,21 @@ export function HaulerPayrollPanel({
                     <th className="px-2 py-2 font-bold text-right">End Excess</th>
                     <th className="px-2 py-2 font-bold text-right">Period Earned</th>
                     <th className="px-2 py-2 font-bold text-right">Balance Due</th>
-                    <th className="px-3 py-2 font-bold text-right w-32">Payout (₱)</th>
+                    <th className="px-2 py-2 font-bold text-right w-36">Deduction (₱)</th>
+                    <th className="px-3 py-2 font-bold text-right w-32">Net Payout (₱)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {preview.rows.map((row) => {
                     const checked = selectedHaulers[row.haulerName] ?? true;
+                    const dedEntry = deductionsByHauler[row.haulerName] ?? {
+                      amountStr: '',
+                      note: '',
+                    };
                     const valStr =
                       payoutOverrides[row.haulerName] ?? String(row.payoutReleasedPhp);
+                    const priorSettledInRange =
+                      row.alreadyPaidInRangePhp + row.alreadyDeductedInRangePhp;
                     return (
                       <tr
                         key={row.haulerName}
@@ -656,7 +775,53 @@ export function HaulerPayrollPanel({
                           ₱{row.grossEarnedPhp.toLocaleString()}
                         </td>
                         <td className="px-2 py-2 text-right font-semibold text-slate-700">
-                          ₱{row.overallBalanceDuePhp.toLocaleString()}
+                          <div>
+                            {row.overallBalanceDuePhp < 0 ? '-' : ''}₱
+                            {Math.abs(row.overallBalanceDuePhp).toLocaleString()}
+                          </div>
+                          {priorSettledInRange > 0 && (
+                            <div className="text-[10px] font-normal text-slate-400">
+                              Prev: -₱{priorSettledInRange.toLocaleString()}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right space-y-1">
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            disabled={!checked}
+                            placeholder="0"
+                            value={dedEntry.amountStr}
+                            onChange={(e) =>
+                              setDeductionsByHauler((prev) => ({
+                                ...prev,
+                                [row.haulerName]: {
+                                  amountStr: e.target.value,
+                                  note: prev[row.haulerName]?.note ?? '',
+                                },
+                              }))
+                            }
+                            aria-label={`Deduction for ${row.haulerName}`}
+                            className="w-28 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs font-semibold text-slate-900 disabled:bg-slate-100 tabular-nums"
+                          />
+                          <input
+                            type="text"
+                            disabled={!checked}
+                            placeholder="CA / reason"
+                            value={dedEntry.note}
+                            onChange={(e) =>
+                              setDeductionsByHauler((prev) => ({
+                                ...prev,
+                                [row.haulerName]: {
+                                  amountStr: prev[row.haulerName]?.amountStr ?? '',
+                                  note: e.target.value,
+                                },
+                              }))
+                            }
+                            aria-label={`Deduction note for ${row.haulerName}`}
+                            className="w-28 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-700 disabled:bg-slate-100"
+                          />
                         </td>
                         <td className="px-3 py-2 text-right">
                           <input
@@ -672,7 +837,7 @@ export function HaulerPayrollPanel({
                               }))
                             }
                             aria-label={`Payout for ${row.haulerName}`}
-                            className="w-24 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs font-extrabold text-slate-900 disabled:bg-slate-100"
+                            className="w-24 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-xs font-extrabold text-slate-900 disabled:bg-slate-100 tabular-nums"
                           />
                         </td>
                       </tr>
@@ -715,7 +880,10 @@ export function HaulerPayrollPanel({
           <button
             type="button"
             onClick={() => handleSaveSnapshot('paid')}
-            disabled={effectiveItems.length === 0 || totalBatchPayoutPhp <= 0}
+            disabled={
+              effectiveItems.length === 0 ||
+              (totalBatchPayoutPhp <= 0 && totalBatchDeductionPhp <= 0)
+            }
             className="inline-flex items-center gap-1.5 min-h-9 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-xs font-bold cursor-pointer shadow-2xs"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
@@ -724,14 +892,14 @@ export function HaulerPayrollPanel({
         </div>
       </div>
 
-      {/* 2. Quick Individual Ad-Hoc Payout */}
+      {/* 2. Quick Individual Ad-Hoc Payout / Cash Advance */}
       <form
         onSubmit={handleRecordDirectPayout}
-        className="rounded-xl border border-slate-200 bg-white p-3.5 grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end shadow-2xs"
+        className="rounded-xl border border-slate-200 bg-white p-3.5 grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-12 gap-2.5 items-end shadow-2xs"
       >
-        <div className="sm:col-span-4">
+        <div className="sm:col-span-3 lg:col-span-3">
           <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
-            Quick Individual Payout / Advance
+            Quick Payout / Cash Advance
           </label>
           <select
             value={directHauler}
@@ -747,7 +915,22 @@ export function HaulerPayrollPanel({
             ))}
           </select>
         </div>
-        <div className="sm:col-span-2">
+        <div className="sm:col-span-3 lg:col-span-2">
+          <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
+            Entry Type
+          </label>
+          <select
+            value={directKind}
+            onChange={(e) =>
+              setDirectKind(e.target.value as HaulerLedgerEntryKind)
+            }
+            className="w-full min-h-9 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-900"
+          >
+            <option value="payout">Payout (Pay)</option>
+            <option value="deduction">Cash Advance / Ded.</option>
+          </select>
+        </div>
+        <div className="sm:col-span-2 lg:col-span-2">
           <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
             Amount (₱)
           </label>
@@ -757,12 +940,16 @@ export function HaulerPayrollPanel({
             step="any"
             value={directAmount}
             onChange={(e) => setDirectAmount(e.target.value)}
-            placeholder={String(rateConfig.ratePerBlockPhp)}
+            placeholder={
+              directKind === 'deduction'
+                ? '500'
+                : String(rateConfig.ratePerBlockPhp)
+            }
             required
             className="w-full min-h-9 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-900"
           />
         </div>
-        <div className="sm:col-span-2">
+        <div className="sm:col-span-2 lg:col-span-2">
           <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
             Date
           </label>
@@ -774,7 +961,7 @@ export function HaulerPayrollPanel({
             className="w-full min-h-9 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900"
           />
         </div>
-        <div className="sm:col-span-2">
+        <div className="sm:col-span-2 lg:col-span-2">
           <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
             Note (Optional)
           </label>
@@ -782,17 +969,25 @@ export function HaulerPayrollPanel({
             type="text"
             value={directNotes}
             onChange={(e) => setDirectNotes(e.target.value)}
-            placeholder="Cash advance / partial"
+            placeholder={
+              directKind === 'deduction'
+                ? 'Cash advance / rice / tools'
+                : 'Partial payout'
+            }
             className="w-full min-h-9 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-800"
           />
         </div>
-        <div className="sm:col-span-2">
+        <div className="sm:col-span-6 lg:col-span-1">
           <button
             type="submit"
-            className="w-full min-h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1"
+            className={`w-full min-h-9 px-2.5 rounded-lg text-white text-xs font-bold cursor-pointer inline-flex items-center justify-center gap-1 ${
+              directKind === 'deduction'
+                ? 'bg-amber-600 hover:bg-amber-700'
+                : 'bg-emerald-600 hover:bg-emerald-700'
+            }`}
           >
-            <Banknote className="w-3.5 h-3.5" />
-            <span>Record Pay</span>
+            <Banknote className="w-3.5 h-3.5 shrink-0" />
+            <span>{directKind === 'deduction' ? 'Deduct' : 'Pay'}</span>
           </button>
         </div>
       </form>
@@ -844,6 +1039,12 @@ export function HaulerPayrollPanel({
                     <strong className="text-emerald-700">
                       ₱{rec.totalPayoutPhp.toLocaleString()}
                     </strong>
+                    {(rec.totalDeductionPhp ?? 0) > 0 && (
+                      <span className="text-slate-400">
+                        {' '}
+                        (Ded. ₱{(rec.totalDeductionPhp ?? 0).toLocaleString()})
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -896,45 +1097,61 @@ export function HaulerPayrollPanel({
         )}
       </div>
 
-      {/* 4. Individual Payout Transactions */}
+      {/* 4. Individual Payout & Deduction Transactions */}
       {payouts.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2 shadow-2xs">
           <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Individual Payout Transactions ({payouts.length})
+            Individual Payouts &amp; Deductions ({payouts.length})
           </div>
           <div className="divide-y divide-slate-100">
-            {payouts.map((p) => (
-              <div
-                key={p.id}
-                className="py-1.5 flex items-center justify-between gap-2 text-xs"
-              >
-                <div>
-                  <span className="font-bold text-slate-900">{p.haulerName}</span>
-                  <span className="text-slate-400 mx-1.5">·</span>
-                  <span className="text-slate-500">
-                    {formatDateWithWeekday(p.date)}
-                  </span>
-                  {p.notes && (
-                    <span className="text-slate-400 ml-2 text-[11px]">
-                      ({p.notes})
+            {payouts.map((p) => {
+              const isDeduction = p.kind === 'deduction';
+              return (
+                <div
+                  key={p.id}
+                  className="py-1.5 flex items-center justify-between gap-2 text-xs"
+                >
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-bold text-slate-900">{p.haulerName}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[9.5px] font-bold uppercase border ${
+                        isDeduction
+                          ? 'bg-amber-50 border-amber-200 text-amber-800'
+                          : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      }`}
+                    >
+                      {isDeduction ? 'CA / Ded.' : 'Payout'}
                     </span>
-                  )}
+                    <span className="text-slate-400">·</span>
+                    <span className="text-slate-500">
+                      {formatDateWithWeekday(p.date)}
+                    </span>
+                    {p.notes && (
+                      <span className="text-slate-400 text-[11px]">
+                        ({p.notes})
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`font-bold ${
+                        isDeduction ? 'text-amber-700' : 'text-emerald-700'
+                      }`}
+                    >
+                      {isDeduction ? '-' : ''}₱{p.amountPhp.toLocaleString()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteDirectPayout(p)}
+                      aria-label={`Delete entry for ${p.haulerName}`}
+                      className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-emerald-700">
-                    ₱{p.amountPhp.toLocaleString()}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void handleDeleteDirectPayout(p)}
-                    aria-label={`Delete payout to ${p.haulerName}`}
-                    className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

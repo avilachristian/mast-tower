@@ -282,7 +282,9 @@ export function HaulingInventoryView() {
             ₱{totalEarnedPhp.toLocaleString()}
           </div>
           <div className="text-[11px] text-emerald-700">
-            {totalCredits} × {formatNum(rateConfig.creditBlockKg)}kg · Due: ₱{totalBalanceDuePhp.toLocaleString()}
+            {totalCredits} × {formatNum(rateConfig.creditBlockKg)}kg · Due:{' '}
+            {totalBalanceDuePhp < 0 ? '-' : ''}₱
+            {Math.abs(totalBalanceDuePhp).toLocaleString()}
           </div>
         </div>
 

@@ -612,5 +612,168 @@ describe('Manpower roster and Civil Works / Individual Hauler payroll', () => {
     const plainText = formatHaulerPayrollPlainText(savedSnapshot!, updatedProject);
     expect(plainText).toContain('Rate: PHP 1,500 per 100 kg');
     expect(plainText).toContain('TOTAL PAYOUT AMOUNT: PHP 3,000');
+    expect(plainText).toContain('Status:');
+
+    const plainTextWithoutStatus = formatHaulerPayrollPlainText(
+      savedSnapshot!,
+      updatedProject,
+      { includeStatus: false }
+    );
+    expect(plainTextWithoutStatus).not.toContain('Status:');
+    expect(plainTextWithoutStatus).toContain('TOTAL PAYOUT AMOUNT: PHP 3,000');
+  });
+
+  it('omits Status line from civil payroll plain-text copy when includeStatus is false', () => {
+    const project = useProjectStore.getState().project;
+    const civilSnap = {
+      id: 'pay-civ-status-toggle',
+      createdAt: '2026-11-22T00:00:00Z',
+      periodType: 'weekly' as const,
+      startDate: '2026-11-16',
+      endDate: '2026-11-22',
+      title: 'Week Nov 16-22',
+      items: [],
+      totalDaysWorked: 0,
+      totalAmountPhp: 0,
+      status: 'generated' as const,
+    };
+
+    const withStatus = formatCivilPayrollPlainText(civilSnap, project);
+    expect(withStatus).toContain('Status:');
+
+    const withoutStatus = formatCivilPayrollPlainText(civilSnap, project, {
+      includeStatus: false,
+    });
+    expect(withoutStatus).not.toContain('Status:');
+    expect(withoutStatus).toContain('Week Nov 16-22');
+  });
+
+  it('tracks Individual Hauler cash advances and deductions accurately across preview, paid settlement, rollback, and carryover', () => {
+    const clean = createCleanBaselineProject();
+    useProjectStore.setState({ project: clean });
+
+    // Log 360 kg (3 credits * PHP 1,100 = PHP 3,300 earned)
+    useProjectStore.getState().addHaulingTrip({
+      date: '2026-11-11',
+      haulerName: 'Carlo Mendez',
+      tripNumber: 1,
+      items: [
+        {
+          itemLabel: 'Portland Cement',
+          material: 'cement',
+          unitLabel: 'bags',
+          quantity: 9,
+          totalKg: 360,
+        },
+      ],
+    });
+
+    const bounds = getPayrollPeriodBounds('weekly', '2026-11-11');
+    const state1 = useProjectStore.getState().project;
+    const withBatchDed = computeHaulerPayrollPreview(
+      state1.haulingLogs,
+      state1.haulerPayouts ?? [],
+      resolveManpowerRoster(state1),
+      bounds.startDate,
+      bounds.endDate,
+      'weekly',
+      undefined,
+      { 'Carlo Mendez': { amountPhp: 500, note: 'Cash Advance' } }
+    );
+
+    expect(withBatchDed.totalEarnedPhp).toBe(3300);
+    expect(withBatchDed.totalDeductionPhp).toBe(500);
+    expect(withBatchDed.totalSuggestedPayoutPhp).toBe(2800);
+    expect(withBatchDed.rows[0]).toMatchObject({
+      haulerName: 'Carlo Mendez',
+      grossEarnedPhp: 3300,
+      deductionPhp: 500,
+      deductionNote: 'Cash Advance',
+      payoutReleasedPhp: 2800,
+      netBalanceAfterPhp: 0,
+    });
+
+    const snapId = useProjectStore.getState().createHaulerPayrollSnapshot({
+      periodType: 'weekly',
+      startDate: bounds.startDate,
+      endDate: bounds.endDate,
+      title: 'Week Nov 9-15 (With CA)',
+      items: withBatchDed.rows,
+      totalHauledKg: withBatchDed.totalHauledKg,
+      totalCredits: withBatchDed.totalCredits,
+      totalEarnedPhp: withBatchDed.totalEarnedPhp,
+      totalDeductionPhp: withBatchDed.totalDeductionPhp,
+      totalPayoutPhp: withBatchDed.totalSuggestedPayoutPhp,
+      status: 'paid',
+      paidDate: '2026-11-15',
+    });
+
+    const afterPaid = useProjectStore.getState().project;
+    expect(afterPaid.haulerPayouts).toHaveLength(2);
+    expect(
+      afterPaid.haulerPayouts?.some(
+        (p) =>
+          p.payrollSnapshotId === snapId &&
+          p.kind === 'payout' &&
+          p.amountPhp === 2800
+      )
+    ).toBe(true);
+    expect(
+      afterPaid.haulerPayouts?.some(
+        (p) =>
+          p.payrollSnapshotId === snapId &&
+          p.kind === 'deduction' &&
+          p.amountPhp === 500
+      )
+    ).toBe(true);
+
+    const ledgerPaid = computeHaulerCreditLedgers(
+      afterPaid.haulingLogs,
+      afterPaid.haulerPayouts ?? []
+    );
+    expect(ledgerPaid.totalPaidPhp).toBe(2800);
+    expect(ledgerPaid.totalDeductionsPhp).toBe(500);
+    expect(ledgerPaid.totalBalanceDuePhp).toBe(0);
+
+    const plainText = formatHaulerPayrollPlainText(
+      afterPaid.haulerPayrollHistory![0],
+      afterPaid
+    );
+    expect(plainText).toContain('Ded.: PHP 500 (Cash Advance)');
+    expect(plainText).toContain('Net Payout: PHP 2,800');
+    expect(plainText).toContain('TOTAL DEDUCTIONS: PHP 500');
+    expect(plainText).toContain('TOTAL PAYOUT AMOUNT: PHP 2,800');
+
+    // Revert to generated -> removes both payout and deduction records atomically
+    useProjectStore.getState().updateHaulerPayrollStatus(snapId, 'generated');
+    expect(useProjectStore.getState().project.haulerPayouts).toHaveLength(0);
+
+    // Record standalone mid-week cash advance exceeding next period earnings (carryover debt)
+    useProjectStore.getState().addHaulerPayout({
+      date: '2026-11-12',
+      haulerName: 'Carlo Mendez',
+      amountPhp: 3800,
+      kind: 'deduction',
+      notes: 'Cash advance',
+    });
+
+    const withMidweekCa = useProjectStore.getState().project;
+    const ledgerAfterCa = computeHaulerCreditLedgers(
+      withMidweekCa.haulingLogs,
+      withMidweekCa.haulerPayouts ?? []
+    );
+    expect(ledgerAfterCa.totalBalanceDuePhp).toBe(-500);
+
+    const previewAfterCa = computeHaulerPayrollPreview(
+      withMidweekCa.haulingLogs,
+      withMidweekCa.haulerPayouts ?? [],
+      resolveManpowerRoster(withMidweekCa),
+      bounds.startDate,
+      bounds.endDate,
+      'weekly'
+    );
+    expect(previewAfterCa.rows[0].alreadyDeductedInRangePhp).toBe(3800);
+    expect(previewAfterCa.rows[0].overallBalanceDuePhp).toBe(-500);
+    expect(previewAfterCa.rows[0].payoutReleasedPhp).toBe(0);
   });
 });

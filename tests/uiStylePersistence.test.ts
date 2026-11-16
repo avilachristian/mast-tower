@@ -2,10 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_UI_STYLE_STORAGE_KEY,
   PAYROLL_SHOW_SIGNATURE_STORAGE_KEY,
+  PAYROLL_SHOW_STATUS_STORAGE_KEY,
   persistAdminUiStyle,
   persistPayrollShowSignature,
+  persistPayrollShowStatus,
   readSavedAdminUiStyle,
   readSavedPayrollShowSignature,
+  readSavedPayrollShowStatus,
   useUiStore,
 } from '../src/shared/state/uiStore';
 
@@ -75,5 +78,22 @@ describe('Admin UI Style Persistence', () => {
     persistPayrollShowSignature(true, localStorage);
     expect(readSavedPayrollShowSignature(localStorage)).toBe(true);
     useUiStore.getState().setPayrollShowSignature(true);
+  });
+
+  it('persists payroll report status visibility preference across reloads', () => {
+    const localStorage = createMemoryStorage();
+    vi.stubGlobal('window', { localStorage });
+
+    expect(readSavedPayrollShowStatus(null)).toBe(true);
+    expect(readSavedPayrollShowStatus(localStorage)).toBe(true);
+
+    useUiStore.getState().setPayrollShowStatus(false);
+    expect(useUiStore.getState().payrollShowStatus).toBe(false);
+    expect(localStorage.getItem(PAYROLL_SHOW_STATUS_STORAGE_KEY)).toBe('0');
+    expect(readSavedPayrollShowStatus(localStorage)).toBe(false);
+
+    persistPayrollShowStatus(true, localStorage);
+    expect(readSavedPayrollShowStatus(localStorage)).toBe(true);
+    useUiStore.getState().setPayrollShowStatus(true);
   });
 });

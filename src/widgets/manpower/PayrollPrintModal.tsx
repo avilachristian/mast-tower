@@ -43,10 +43,12 @@ export function PayrollReportSheet({
   project,
   data,
   showSignature = true,
+  showStatus = true,
 }: {
   project: MastProjectState;
   data: PayrollSheetData;
   showSignature?: boolean;
+  showStatus?: boolean;
 }) {
   const isCivil = data.kind === 'civil';
   const civilSnapshot = data.kind === 'civil' ? data.snapshot : null;
@@ -80,6 +82,21 @@ export function PayrollReportSheet({
             0
           );
         return { gross, deduction, net };
+      })()
+    : null;
+
+  const haulerTotals = haulerSnapshot
+    ? (() => {
+        const earned =
+          haulerSnapshot.totalEarnedPhp ??
+          haulerSnapshot.items.reduce((sum, i) => sum + i.grossEarnedPhp, 0);
+        const deduction =
+          haulerSnapshot.totalDeductionPhp ??
+          haulerSnapshot.items.reduce((sum, i) => sum + (i.deductionPhp ?? 0), 0);
+        const payout =
+          haulerSnapshot.totalPayoutPhp ??
+          haulerSnapshot.items.reduce((sum, i) => sum + i.payoutReleasedPhp, 0);
+        return { earned, deduction, payout };
       })()
     : null;
 
@@ -182,7 +199,13 @@ export function PayrollReportSheet({
 
       <div className="border-2 border-slate-900 bg-white text-xs">
         {/* Flush Period Metadata Strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 pdf-desktop:grid-cols-4 print:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x pdf-desktop:divide-y-0 pdf-desktop:divide-x print:divide-y-0 print:divide-x divide-slate-900 border-b-2 border-slate-900 bg-slate-50">
+        <div
+          className={`grid ${
+            showStatus
+              ? 'grid-cols-2 sm:grid-cols-4 pdf-desktop:grid-cols-4 print:grid-cols-4'
+              : 'grid-cols-1 sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3'
+          } divide-y sm:divide-y-0 sm:divide-x pdf-desktop:divide-y-0 pdf-desktop:divide-x print:divide-y-0 print:divide-x divide-slate-900 border-b-2 border-slate-900 bg-slate-50`}
+        >
           <div className="p-2.5">
             <div className="text-[10px] font-bold uppercase text-slate-500">
               Payroll Type
@@ -201,39 +224,47 @@ export function PayrollReportSheet({
                 ` – ${formatDateWithWeekday(snapshot.endDate)}`}
             </div>
           </div>
-          <div className="p-2.5">
-            <div className="text-[10px] font-bold uppercase text-slate-500">
-              Status
+          {showStatus && (
+            <div className="p-2.5">
+              <div className="text-[10px] font-bold uppercase text-slate-500">
+                Status
+              </div>
+              <div className="mt-0.5">
+                <span
+                  className={`inline-block px-1.5 py-0.5 border text-[10px] font-bold uppercase ${
+                    snapshot.status === 'paid'
+                      ? 'bg-emerald-50 border-emerald-700 text-emerald-800'
+                      : 'bg-amber-50 border-amber-700 text-amber-800'
+                  }`}
+                >
+                  {snapshot.status === 'paid'
+                    ? `PAID${snapshot.paidDate ? ` (${snapshot.paidDate})` : ''}`
+                    : 'FOR APPROVAL / PENDING'}
+                </span>
+              </div>
             </div>
-            <div className="mt-0.5">
-              <span
-                className={`inline-block px-1.5 py-0.5 border text-[10px] font-bold uppercase ${
-                  snapshot.status === 'paid'
-                    ? 'bg-emerald-50 border-emerald-700 text-emerald-800'
-                    : 'bg-amber-50 border-amber-700 text-amber-800'
-                }`}
-              >
-                {snapshot.status === 'paid'
-                  ? `PAID${snapshot.paidDate ? ` (${snapshot.paidDate})` : ''}`
-                  : 'FOR APPROVAL / PENDING'}
-              </span>
-            </div>
-          </div>
+          )}
           <div className="p-2.5 text-right">
             <div className="text-[10px] font-bold uppercase text-slate-500">
-              {isCivil ? 'Total Net Payroll' : 'Total Payout Amount'}
+              {isCivil ? 'Total Net Payroll' : 'Total Net Payout'}
             </div>
             <div className="text-base font-extrabold text-emerald-800 tabular-nums mt-0.5">
               ₱
               {(civilTotals
                 ? civilTotals.net
-                : haulerSnapshot?.totalPayoutPhp ?? 0
+                : haulerTotals?.payout ?? 0
               ).toLocaleString()}
             </div>
             {civilTotals && civilTotals.deduction > 0 && (
               <div className="text-[10px] text-slate-600 tabular-nums">
                 Gross ₱{civilTotals.gross.toLocaleString()} − Ded. ₱
                 {civilTotals.deduction.toLocaleString()}
+              </div>
+            )}
+            {haulerTotals && haulerTotals.deduction > 0 && (
+              <div className="text-[10px] text-slate-600 tabular-nums">
+                Earned ₱{haulerTotals.earned.toLocaleString()} − Ded. ₱
+                {haulerTotals.deduction.toLocaleString()}
               </div>
             )}
           </div>
@@ -256,63 +287,63 @@ export function PayrollReportSheet({
         {/* Flush Ledger Table */}
         {civilSnapshot && civilMatrix && civilTotals ? (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-[11px] border-collapse">
+            <div className="overflow-x-auto print:overflow-visible">
+              <table className="w-full text-left text-[10.5px] print:text-[9.5px] border-collapse">
                 <thead>
                   {civilMatrix.mode === 'days' ? (
                     <>
-                      <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[10px]">
+                      <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9.5px] print:text-[8.5px] leading-tight">
                         <th
                           rowSpan={3}
-                          className="px-1.5 py-1.5 border-r border-slate-900 w-7 text-center align-middle"
+                          className="px-1 py-1 border-r border-slate-900 w-6 text-center align-middle"
                         >
                           #
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-2 py-1.5 border-r border-slate-900 align-middle"
+                          className="px-1.5 py-1 border-r border-slate-900 align-middle"
                         >
                           Name
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-2 py-1.5 border-r border-slate-900 align-middle"
+                          className="px-1.5 py-1 border-r border-slate-900 align-middle"
                         >
                           Position
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-2 py-1.5 border-r border-slate-900 text-right align-middle whitespace-nowrap"
+                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
                         >
                           Daily Rate (₱)
                         </th>
                         <th
                           colSpan={civilMatrix.dayCols.length}
-                          className="px-1.5 py-1 border-r border-slate-900 text-center"
+                          className="px-1 py-1 border-r border-slate-900 text-center"
                         >
                           Attendance
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-2 py-1.5 border-r border-slate-900 text-center align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-center align-middle"
                         >
                           Days Present
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-2 py-1.5 border-r border-slate-900 text-right align-middle whitespace-nowrap"
+                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
                         >
                           Gross Pay (₱)
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-2 py-1.5 border-r border-slate-900 text-right align-middle whitespace-nowrap"
+                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
                         >
                           Deduction (₱)
                         </th>
                         <th
                           rowSpan={3}
-                          className={`px-2 py-1.5 text-right align-middle whitespace-nowrap ${
+                          className={`px-1.5 py-1 text-right align-middle ${
                             showSignature ? 'border-r border-slate-900' : ''
                           }`}
                         >
@@ -321,17 +352,17 @@ export function PayrollReportSheet({
                         {showSignature && (
                           <th
                             rowSpan={3}
-                            className="px-2 py-1.5 text-center align-middle w-24"
+                            className="px-1 py-1 text-center align-middle w-20 print:w-16"
                           >
                             Signature
                           </th>
                         )}
                       </tr>
-                      <tr className="bg-slate-50 text-slate-900 border-b border-slate-900 font-bold text-[10px]">
+                      <tr className="bg-slate-50 text-slate-900 border-b border-slate-900 font-bold text-[9.5px] print:text-[8.5px]">
                         {civilMatrix.dayCols.map((col) => (
                           <th
                             key={col.date}
-                            className="px-1 py-0.5 border-r border-slate-900 text-center tabular-nums min-w-[26px]"
+                            className="px-0.5 py-0.5 border-r border-slate-900 text-center tabular-nums min-w-[18px] print:min-w-0"
                           >
                             {civilMatrix.spansMultiMonth
                               ? col.monthDayLabel
@@ -339,11 +370,11 @@ export function PayrollReportSheet({
                           </th>
                         ))}
                       </tr>
-                      <tr className="bg-slate-50 text-slate-600 border-b border-slate-900 font-bold uppercase text-[9px]">
+                      <tr className="bg-slate-50 text-slate-600 border-b border-slate-900 font-bold uppercase text-[8.5px] print:text-[7.5px]">
                         {civilMatrix.dayCols.map((col) => (
                           <th
                             key={`${col.date}-wk`}
-                            className="px-1 py-0.5 border-r border-slate-900 text-center"
+                            className="px-0.5 py-0.5 border-r border-slate-900 text-center"
                           >
                             {col.weekdayShort}
                           </th>
@@ -353,34 +384,34 @@ export function PayrollReportSheet({
                   ) : civilMatrix.mode === 'weeks' ||
                     civilMatrix.mode === 'months' ? (
                     <>
-                      <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[10px]">
+                      <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9.5px] print:text-[8.5px] leading-tight">
                         <th
                           rowSpan={2}
-                          className="px-1.5 py-1.5 border-r border-slate-900 w-7 text-center align-middle"
+                          className="px-1 py-1 border-r border-slate-900 w-6 text-center align-middle"
                         >
                           #
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-2 py-1.5 border-r border-slate-900 align-middle"
+                          className="px-1.5 py-1 border-r border-slate-900 align-middle"
                         >
                           Name
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-2 py-1.5 border-r border-slate-900 align-middle"
+                          className="px-1.5 py-1 border-r border-slate-900 align-middle"
                         >
                           Position
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-2 py-1.5 border-r border-slate-900 text-right align-middle whitespace-nowrap"
+                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
                         >
                           Daily Rate (₱)
                         </th>
                         <th
                           colSpan={civilMatrix.buckets.length}
-                          className="px-2 py-1 border-r border-slate-900 text-center"
+                          className="px-1.5 py-1 border-r border-slate-900 text-center"
                         >
                           {civilMatrix.mode === 'weeks'
                             ? 'Attendance (Days Present per Week)'
@@ -388,25 +419,25 @@ export function PayrollReportSheet({
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-2 py-1.5 border-r border-slate-900 text-center align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-center align-middle"
                         >
                           Days Present
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-2 py-1.5 border-r border-slate-900 text-right align-middle whitespace-nowrap"
+                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
                         >
                           Gross Pay (₱)
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-2 py-1.5 border-r border-slate-900 text-right align-middle whitespace-nowrap"
+                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
                         >
                           Deduction (₱)
                         </th>
                         <th
                           rowSpan={2}
-                          className={`px-2 py-1.5 text-right align-middle whitespace-nowrap ${
+                          className={`px-1.5 py-1 text-right align-middle ${
                             showSignature ? 'border-r border-slate-900' : ''
                           }`}
                         >
@@ -415,20 +446,20 @@ export function PayrollReportSheet({
                         {showSignature && (
                           <th
                             rowSpan={2}
-                            className="px-2 py-1.5 text-center align-middle w-24"
+                            className="px-1 py-1 text-center align-middle w-20 print:w-16"
                           >
                             Signature
                           </th>
                         )}
                       </tr>
-                      <tr className="bg-slate-50 text-slate-800 border-b border-slate-900 font-bold text-[9.5px]">
+                      <tr className="bg-slate-50 text-slate-800 border-b border-slate-900 font-bold text-[9px] print:text-[8px]">
                         {civilMatrix.buckets.map((b) => (
                           <th
                             key={`${b.label}-${b.rangeLabel}`}
-                            className="px-1.5 py-1 border-r border-slate-900 text-center leading-tight"
+                            className="px-1 py-1 border-r border-slate-900 text-center leading-tight"
                           >
                             <div className="uppercase">{b.label}</div>
-                            <div className="text-[9px] font-semibold text-slate-500">
+                            <div className="text-[8.5px] font-semibold text-slate-500">
                               ({b.rangeLabel})
                             </div>
                           </th>
@@ -436,36 +467,38 @@ export function PayrollReportSheet({
                       </tr>
                     </>
                   ) : (
-                    <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[10px]">
-                      <th className="px-1.5 py-1.5 border-r border-slate-900 w-7 text-center">
+                    <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9.5px] print:text-[8.5px] leading-tight">
+                      <th className="px-1 py-1.5 border-r border-slate-900 w-6 text-center">
                         #
                       </th>
-                      <th className="px-2 py-1.5 border-r border-slate-900">Name</th>
-                      <th className="px-2 py-1.5 border-r border-slate-900">Position</th>
-                      <th className="px-2 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
+                      <th className="px-1.5 py-1.5 border-r border-slate-900">Name</th>
+                      <th className="px-1.5 py-1.5 border-r border-slate-900">Position</th>
+                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right">
                         Daily Rate (₱)
                       </th>
-                      <th className="px-2 py-1.5 border-r border-slate-900 text-center">
+                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-center">
                         Attendance Span
                       </th>
-                      <th className="px-2 py-1.5 border-r border-slate-900 text-center">
+                      <th className="px-1 py-1.5 border-r border-slate-900 text-center">
                         Days Present
                       </th>
-                      <th className="px-2 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
+                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right">
                         Gross Pay (₱)
                       </th>
-                      <th className="px-2 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
+                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right">
                         Deduction (₱)
                       </th>
                       <th
-                        className={`px-2 py-1.5 text-right whitespace-nowrap ${
+                        className={`px-1.5 py-1.5 text-right ${
                           showSignature ? 'border-r border-slate-900' : ''
                         }`}
                       >
                         Net Pay (₱)
                       </th>
                       {showSignature && (
-                        <th className="px-2 py-1.5 text-center w-24">Signature</th>
+                        <th className="px-1 py-1.5 text-center w-20 print:w-16">
+                          Signature
+                        </th>
                       )}
                     </tr>
                   )}
@@ -499,16 +532,16 @@ export function PayrollReportSheet({
 
                       return (
                         <tr key={item.memberId}>
-                          <td className="px-1.5 py-1.5 border-r border-slate-900 text-center text-slate-500 tabular-nums">
+                          <td className="px-1 py-1.5 border-r border-slate-900 text-center text-slate-500 tabular-nums">
                             {idx + 1}
                           </td>
-                          <td className="px-2 py-1.5 border-r border-slate-900 font-bold text-slate-900">
+                          <td className="px-1.5 py-1.5 border-r border-slate-900 font-bold text-slate-900">
                             {item.name}
                           </td>
-                          <td className="px-2 py-1.5 border-r border-slate-900 text-slate-700">
+                          <td className="px-1.5 py-1.5 border-r border-slate-900 text-slate-700">
                             {item.position}
                           </td>
-                          <td className="px-2 py-1.5 border-r border-slate-900 text-right font-medium text-slate-800 tabular-nums">
+                          <td className="px-1.5 py-1.5 border-r border-slate-900 text-right font-medium text-slate-800 tabular-nums whitespace-nowrap">
                             ₱{item.dailyRatePhp.toLocaleString()}
                           </td>
 
@@ -528,7 +561,7 @@ export function PayrollReportSheet({
                               return (
                                 <td
                                   key={`${item.memberId}-${col.date}`}
-                                  className={`px-1 py-1.5 border-r border-slate-900 text-center font-bold text-[10px] ${codeCls}`}
+                                  className={`px-0.5 py-1.5 border-r border-slate-900 text-center font-bold text-[9.5px] print:text-[8.5px] ${codeCls}`}
                                 >
                                   {code}
                                 </td>
@@ -546,9 +579,9 @@ export function PayrollReportSheet({
                               return (
                                 <td
                                   key={`${item.memberId}-${b.label}`}
-                                  className={`px-1.5 py-1.5 border-r border-slate-900 text-center tabular-nums font-bold ${
+                                  className={`px-1 py-1.5 border-r border-slate-900 text-center tabular-nums font-bold ${
                                     !bucketWorked
-                                      ? 'text-emerald-700 text-[10px]'
+                                      ? 'text-emerald-700 text-[9.5px]'
                                       : count > 0
                                         ? 'text-slate-900'
                                         : 'text-rose-700'
@@ -559,39 +592,39 @@ export function PayrollReportSheet({
                               );
                             })
                           ) : (
-                            <td className="px-2 py-1.5 border-r border-slate-900 text-center text-[10px] text-slate-700 tabular-nums">
+                            <td className="px-1.5 py-1.5 border-r border-slate-900 text-center text-[10px] text-slate-700 tabular-nums">
                               {item.daysPresent} / {civilMatrix.totalDaysSpan} days
                             </td>
                           )}
 
-                          <td className="px-2 py-1.5 border-r border-slate-900 text-center font-bold text-slate-900 tabular-nums">
+                          <td className="px-1 py-1.5 border-r border-slate-900 text-center font-bold text-slate-900 tabular-nums">
                             {item.daysPresent}
                           </td>
-                          <td className="px-2 py-1.5 border-r border-slate-900 text-right font-semibold text-slate-800 tabular-nums">
+                          <td className="px-1.5 py-1.5 border-r border-slate-900 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">
                             ₱{item.grossPayPhp.toLocaleString()}
                           </td>
-                          <td className="px-2 py-1.5 border-r border-slate-900 text-right text-slate-800 tabular-nums">
+                          <td className="px-1.5 py-1.5 border-r border-slate-900 text-right text-slate-800 tabular-nums whitespace-nowrap">
                             ₱{ded.toLocaleString()}
                           </td>
                           <td
-                            className={`px-2 py-1.5 text-right font-extrabold text-slate-900 tabular-nums ${
+                            className={`px-1.5 py-1.5 text-right font-extrabold text-slate-900 tabular-nums whitespace-nowrap ${
                               showSignature ? 'border-r border-slate-900' : ''
                             }`}
                           >
                             ₱{net.toLocaleString()}
                           </td>
-                          {showSignature && <td className="px-2 py-1.5" />}
+                          {showSignature && <td className="px-1 py-1.5" />}
                         </tr>
                       );
                     })
                   )}
                 </tbody>
 
-                <tfoot className="bg-slate-100 border-t-2 border-slate-900 font-bold text-xs">
+                <tfoot className="bg-slate-100 border-t-2 border-slate-900 font-bold text-[11px] print:text-[10px]">
                   <tr>
                     <td
                       colSpan={4}
-                      className="px-2.5 py-2 border-r border-slate-900 text-right uppercase text-slate-700"
+                      className="px-1.5 py-2 border-r border-slate-900 text-right uppercase text-slate-700"
                     >
                       Total
                     </td>
@@ -599,7 +632,7 @@ export function PayrollReportSheet({
                       civilMatrix.dayCols.map((col) => (
                         <td
                           key={`total-${col.date}`}
-                          className="px-1 py-2 border-r border-slate-900"
+                          className="px-0.5 py-2 border-r border-slate-900"
                         />
                       ))
                     ) : civilMatrix.mode === 'weeks' ||
@@ -607,29 +640,29 @@ export function PayrollReportSheet({
                       civilMatrix.buckets.map((b) => (
                         <td
                           key={`total-${b.label}`}
-                          className="px-1.5 py-2 border-r border-slate-900"
+                          className="px-1 py-2 border-r border-slate-900"
                         />
                       ))
                     ) : (
-                      <td className="px-2 py-2 border-r border-slate-900" />
+                      <td className="px-1.5 py-2 border-r border-slate-900" />
                     )}
-                    <td className="px-2 py-2 border-r border-slate-900 text-center text-slate-900 tabular-nums">
+                    <td className="px-1 py-2 border-r border-slate-900 text-center text-slate-900 tabular-nums">
                       {civilSnapshot.totalDaysWorked}
                     </td>
-                    <td className="px-2 py-2 border-r border-slate-900 text-right text-slate-900 tabular-nums">
+                    <td className="px-1.5 py-2 border-r border-slate-900 text-right text-slate-900 tabular-nums whitespace-nowrap">
                       ₱{civilTotals.gross.toLocaleString()}
                     </td>
-                    <td className="px-2 py-2 border-r border-slate-900 text-right text-slate-900 tabular-nums">
+                    <td className="px-1.5 py-2 border-r border-slate-900 text-right text-slate-900 tabular-nums whitespace-nowrap">
                       ₱{civilTotals.deduction.toLocaleString()}
                     </td>
                     <td
-                      className={`px-2 py-2 text-right text-sm font-extrabold text-emerald-800 tabular-nums ${
+                      className={`px-1.5 py-2 text-right text-xs print:text-[11px] font-extrabold text-emerald-800 tabular-nums whitespace-nowrap ${
                         showSignature ? 'border-r border-slate-900' : ''
                       }`}
                     >
                       ₱{civilTotals.net.toLocaleString()}
                     </td>
-                    {showSignature && <td className="px-2 py-2" />}
+                    {showSignature && <td className="px-1 py-2" />}
                   </tr>
                 </tfoot>
               </table>
@@ -666,38 +699,41 @@ export function PayrollReportSheet({
             </div>
           </>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-[11px] border-collapse">
+          <div className="overflow-x-auto print:overflow-visible">
+            <table className="w-full text-left text-[10.5px] print:text-[9.5px] border-collapse">
               <thead>
-                <tr className="bg-slate-50 text-slate-800 border-b border-slate-900 font-bold uppercase text-[10px]">
-                  <th className="px-2 py-1.5 border-r border-slate-900 w-9 text-center">#</th>
-                  <th className="px-2.5 py-1.5 border-r border-slate-900">Hauler Name</th>
-                  <th className="px-2 py-1.5 border-r border-slate-900 text-center">Days</th>
-                  <th className="px-2 py-1.5 border-r border-slate-900 text-center">Trips</th>
-                  <th className="px-2 py-1.5 border-r border-slate-900 text-right">
+                <tr className="bg-slate-50 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9.5px] print:text-[8.5px] leading-tight">
+                  <th className="px-1 py-1.5 border-r border-slate-900 w-5 text-center">#</th>
+                  <th className="px-1 py-1.5 border-r border-slate-900">Hauler Name</th>
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-center">Days</th>
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-center">Trips</th>
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
                     Hauled (kg)
                   </th>
-                  <th className="px-2 py-1.5 border-r border-slate-900 text-right">
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
                     Prior Excess
                   </th>
-                  <th className="px-2 py-1.5 border-r border-slate-900 text-center">
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-center">
                     Credits ({formatNum(creditBlockKg)}kg)
                   </th>
-                  <th className="px-2 py-1.5 border-r border-slate-900 text-right">
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
                     End Excess
                   </th>
-                  <th className="px-2 py-1.5 border-r border-slate-900 text-right">
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
                     Period Earned
                   </th>
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
+                    Deduction (₱)
+                  </th>
                   <th
-                    className={`px-2.5 py-1.5 text-right ${
+                    className={`px-1 py-1.5 text-right ${
                       showSignature ? 'border-r border-slate-900' : ''
                     }`}
                   >
-                    Payout (₱)
+                    Net Payout (₱)
                   </th>
                   {showSignature && (
-                    <th className="px-2 py-1.5 text-center w-24">Signature</th>
+                    <th className="px-1 py-1.5 text-center w-20 print:w-16">Signature</th>
                   )}
                 </tr>
               </thead>
@@ -705,81 +741,97 @@ export function PayrollReportSheet({
                 {(haulerSnapshot?.items.length ?? 0) === 0 ? (
                   <tr>
                     <td
-                      colSpan={showSignature ? 11 : 10}
+                      colSpan={showSignature ? 12 : 11}
                       className="px-3 py-6 text-center text-slate-500 italic"
                     >
                       No hauling records or payouts in this period.
                     </td>
                   </tr>
                 ) : (
-                  haulerSnapshot!.items.map((item, idx) => (
-                    <tr key={item.haulerName}>
-                      <td className="px-2 py-1.5 border-r border-slate-900 text-center text-slate-500 tabular-nums">
-                        {idx + 1}
-                      </td>
-                      <td className="px-2.5 py-1.5 border-r border-slate-900 font-bold text-slate-900">
-                        {item.haulerName}
-                      </td>
-                      <td className="px-2 py-1.5 border-r border-slate-900 text-center text-slate-700 tabular-nums">
-                        {item.activeDays}
-                      </td>
-                      <td className="px-2 py-1.5 border-r border-slate-900 text-center font-semibold text-slate-800 tabular-nums">
-                        {item.tripsCompleted}
-                      </td>
-                      <td className="px-2 py-1.5 border-r border-slate-900 text-right font-semibold text-slate-800 tabular-nums">
-                        {formatNum(item.hauledKg)} kg
-                      </td>
-                      <td className="px-2 py-1.5 border-r border-slate-900 text-right text-slate-500 tabular-nums">
-                        {formatNum(item.priorExcessKg)} kg
-                      </td>
-                      <td className="px-2 py-1.5 border-r border-slate-900 text-center font-bold text-emerald-800 tabular-nums">
-                        {item.creditsEarned}
-                      </td>
-                      <td className="px-2 py-1.5 border-r border-slate-900 text-right text-amber-800 font-semibold tabular-nums">
-                        {formatNum(item.endingExcessKg)} kg
-                      </td>
-                      <td className="px-2 py-1.5 border-r border-slate-900 text-right font-semibold text-slate-800 tabular-nums">
-                        ₱{item.grossEarnedPhp.toLocaleString()}
-                      </td>
-                      <td
-                        className={`px-2.5 py-1.5 text-right font-extrabold text-slate-900 tabular-nums ${
-                          showSignature ? 'border-r border-slate-900' : ''
-                        }`}
-                      >
-                        ₱{item.payoutReleasedPhp.toLocaleString()}
-                      </td>
-                      {showSignature && <td className="px-2 py-1.5" />}
-                    </tr>
-                  ))
+                  haulerSnapshot!.items.map((item, idx) => {
+                    const ded = item.deductionPhp ?? 0;
+                    return (
+                      <tr key={item.haulerName}>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-center text-slate-500 tabular-nums">
+                          {idx + 1}
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 font-bold text-slate-900">
+                          {item.haulerName}
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-center text-slate-700 tabular-nums">
+                          {item.activeDays}
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-center font-semibold text-slate-800 tabular-nums">
+                          {item.tripsCompleted}
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                          {formatNum(item.hauledKg)} kg
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-right text-slate-500 tabular-nums whitespace-nowrap">
+                          {formatNum(item.priorExcessKg)} kg
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-center font-bold text-emerald-800 tabular-nums">
+                          {item.creditsEarned}
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-right text-amber-800 font-semibold tabular-nums whitespace-nowrap">
+                          {formatNum(item.endingExcessKg)} kg
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">
+                          ₱{item.grossEarnedPhp.toLocaleString()}
+                        </td>
+                        <td className="px-1 py-1.5 border-r border-slate-900 text-right text-slate-800 tabular-nums">
+                          <div className="whitespace-nowrap">
+                            ₱{ded.toLocaleString()}
+                          </div>
+                          {item.deductionNote?.trim() && (
+                            <div className="text-[8.5px] leading-tight text-slate-500">
+                              {item.deductionNote.trim()}
+                            </div>
+                          )}
+                        </td>
+                        <td
+                          className={`px-1 py-1.5 text-right font-extrabold text-slate-900 tabular-nums whitespace-nowrap ${
+                            showSignature ? 'border-r border-slate-900' : ''
+                          }`}
+                        >
+                          ₱{item.payoutReleasedPhp.toLocaleString()}
+                        </td>
+                        {showSignature && <td className="px-1 py-1.5" />}
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
-              <tfoot className="bg-slate-100 border-t-2 border-slate-900 font-bold text-xs">
+              <tfoot className="bg-slate-100 border-t-2 border-slate-900 font-bold text-[11px] print:text-[10px]">
                 <tr>
                   <td
                     colSpan={4}
-                    className="px-2.5 py-2 border-r border-slate-900 text-right uppercase text-slate-700"
+                    className="px-1 py-2 border-r border-slate-900 text-right uppercase text-slate-700"
                   >
                     Total
                   </td>
-                  <td className="px-2 py-2 border-r border-slate-900 text-right text-slate-900 tabular-nums">
+                  <td className="px-1 py-2 border-r border-slate-900 text-right text-slate-900 tabular-nums whitespace-nowrap">
                     {formatNum(haulerSnapshot?.totalHauledKg ?? 0)} kg
                   </td>
-                  <td className="px-2 py-2 border-r border-slate-900" />
-                  <td className="px-2 py-2 border-r border-slate-900 text-center text-emerald-800 tabular-nums">
+                  <td className="px-1 py-2 border-r border-slate-900" />
+                  <td className="px-1 py-2 border-r border-slate-900 text-center text-emerald-800 tabular-nums">
                     {haulerSnapshot?.totalCredits ?? 0}
                   </td>
-                  <td className="px-2 py-2 border-r border-slate-900" />
-                  <td className="px-2 py-2 border-r border-slate-900 text-right text-slate-800 tabular-nums">
-                    ₱{(haulerSnapshot?.totalEarnedPhp ?? 0).toLocaleString()}
+                  <td className="px-1 py-2 border-r border-slate-900" />
+                  <td className="px-1 py-2 border-r border-slate-900 text-right text-slate-800 tabular-nums whitespace-nowrap">
+                    ₱{(haulerTotals?.earned ?? 0).toLocaleString()}
+                  </td>
+                  <td className="px-1 py-2 border-r border-slate-900 text-right text-slate-900 tabular-nums whitespace-nowrap">
+                    ₱{(haulerTotals?.deduction ?? 0).toLocaleString()}
                   </td>
                   <td
-                    className={`px-2.5 py-2 text-right text-sm font-extrabold text-emerald-800 tabular-nums ${
+                    className={`px-1 py-2 text-right text-xs print:text-[11px] font-extrabold text-emerald-800 tabular-nums whitespace-nowrap ${
                       showSignature ? 'border-r border-slate-900' : ''
                     }`}
                   >
-                    ₱{(haulerSnapshot?.totalPayoutPhp ?? 0).toLocaleString()}
+                    ₱{(haulerTotals?.payout ?? 0).toLocaleString()}
                   </td>
-                  {showSignature && <td className="px-2 py-2" />}
+                  {showSignature && <td className="px-1 py-2" />}
                 </tr>
               </tfoot>
             </table>
@@ -842,6 +894,8 @@ function PayrollPrintModalContent({
   const [copied, setCopied] = useState(false);
   const payrollShowSignature = useUiStore((s) => s.payrollShowSignature);
   const setPayrollShowSignature = useUiStore((s) => s.setPayrollShowSignature);
+  const payrollShowStatus = useUiStore((s) => s.payrollShowStatus);
+  const setPayrollShowStatus = useUiStore((s) => s.setPayrollShowStatus);
   const pushToast = useFeedbackStore((s) => s.pushToast);
   const sheetRef = useRef<HTMLDivElement>(null);
   const { dialogMaxWidthClass, sheetWidthPx } = usePrintPageSetup(true);
@@ -870,8 +924,12 @@ function PayrollPrintModalContent({
           ? { ...project, preparedBy: overriddenPrepared.trim() }
           : project;
       const text = isCivil
-        ? formatCivilPayrollPlainText(data.snapshot, effectiveProject)
-        : formatHaulerPayrollPlainText(data.snapshot, effectiveProject);
+        ? formatCivilPayrollPlainText(data.snapshot, effectiveProject, {
+            includeStatus: payrollShowStatus,
+          })
+        : formatHaulerPayrollPlainText(data.snapshot, effectiveProject, {
+            includeStatus: payrollShowStatus,
+          });
       await navigator.clipboard.writeText(text);
       setCopied(true);
       pushToast({
@@ -903,6 +961,15 @@ function PayrollPrintModalContent({
           subtitle={`${snapshot.title} · Ready for Manager / Admin`}
           extraActions={
             <>
+              <label className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-9 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer shadow-2xs select-none">
+                <input
+                  type="checkbox"
+                  checked={payrollShowStatus}
+                  onChange={(e) => setPayrollShowStatus(e.target.checked)}
+                  className="rounded accent-sky-600"
+                />
+                <span>Status</span>
+              </label>
               <label className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-9 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer shadow-2xs select-none">
                 <input
                   type="checkbox"
@@ -941,6 +1008,7 @@ function PayrollPrintModalContent({
               project={project}
               data={data}
               showSignature={payrollShowSignature}
+              showStatus={payrollShowStatus}
             />
           </div>
         </div>

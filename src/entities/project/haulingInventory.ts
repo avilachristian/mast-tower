@@ -300,6 +300,7 @@ export interface HaulerCreditLedgerRow {
   kgToNextCredit: number;
   grossEarnedPhp: number;
   totalPaidPhp: number;
+  totalDeductionsPhp: number;
   balanceDuePhp: number;
   materialTotals: {
     materialId: string;
@@ -327,6 +328,7 @@ export function computeHaulerCreditLedgers(
   totalCredits: number;
   totalEarnedPhp: number;
   totalPaidPhp: number;
+  totalDeductionsPhp: number;
   totalBalanceDuePhp: number;
   totalActiveExcessKg: number;
   rateConfig: HaulingRateConfig;
@@ -466,16 +468,23 @@ export function computeHaulerCreditLedgers(
   });
 
   const paidByHauler = new Map<string, number>();
+  const deductedByHauler = new Map<string, number>();
   for (const p of payouts) {
     const hKey = normalizeKey(p.haulerName);
     if (!hKey) continue;
-    paidByHauler.set(hKey, round2((paidByHauler.get(hKey) ?? 0) + (Number(p.amountPhp) || 0)));
+    const amt = Math.max(0, Number(p.amountPhp) || 0);
+    if (p.kind === 'deduction') {
+      deductedByHauler.set(hKey, round2((deductedByHauler.get(hKey) ?? 0) + amt));
+    } else {
+      paidByHauler.set(hKey, round2((paidByHauler.get(hKey) ?? 0) + amt));
+    }
   }
 
   const ledgers: HaulerCreditLedgerRow[] = Array.from(haulerStats.entries())
     .sort(([, a], [, b]) => a.displayName.localeCompare(b.displayName))
     .map(([hKey, st]) => {
       const totalPaidPhp = paidByHauler.get(hKey) ?? 0;
+      const totalDeductionsPhp = deductedByHauler.get(hKey) ?? 0;
       return {
         haulerName: st.displayName,
         activeDays: st.dates.size,
@@ -486,7 +495,8 @@ export function computeHaulerCreditLedgers(
         kgToNextCredit: round2(creditBlockKg - st.currentExcessKg),
         grossEarnedPhp: st.grossEarnedPhp,
         totalPaidPhp,
-        balanceDuePhp: round2(st.grossEarnedPhp - totalPaidPhp),
+        totalDeductionsPhp,
+        balanceDuePhp: round2(st.grossEarnedPhp - totalPaidPhp - totalDeductionsPhp),
         materialTotals: Array.from(st.materials.values()),
       };
     });
@@ -496,7 +506,10 @@ export function computeHaulerCreditLedgers(
   const totalCredits = ledgers.reduce((s, r) => s + r.totalCredits, 0);
   const totalEarnedPhp = round2(ledgers.reduce((s, r) => s + r.grossEarnedPhp, 0));
   const totalPaidPhp = round2(ledgers.reduce((s, r) => s + r.totalPaidPhp, 0));
-  const totalBalanceDuePhp = round2(totalEarnedPhp - totalPaidPhp);
+  const totalDeductionsPhp = round2(ledgers.reduce((s, r) => s + r.totalDeductionsPhp, 0));
+  const totalBalanceDuePhp = round2(
+    totalEarnedPhp - totalPaidPhp - totalDeductionsPhp
+  );
   const totalActiveExcessKg = round2(ledgers.reduce((s, r) => s + r.currentExcessKg, 0));
 
   return {
@@ -507,6 +520,7 @@ export function computeHaulerCreditLedgers(
     totalCredits,
     totalEarnedPhp,
     totalPaidPhp,
+    totalDeductionsPhp,
     totalBalanceDuePhp,
     totalActiveExcessKg,
     rateConfig: resolvedRate,

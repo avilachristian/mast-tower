@@ -81,9 +81,13 @@ describe('PayrollReportSheet Engineering Sheet Formatting', () => {
         project,
         data: civilWeeklyData,
         showSignature: false,
+        showStatus: false,
       })
     );
     expect(withoutSigHtml).not.toContain('Signature');
+    expect(withoutSigHtml).not.toContain('FOR APPROVAL / PENDING');
+    expect(withoutSigHtml).toContain('sm:grid-cols-3');
+    expect(withoutSigHtml).not.toMatch(/\brounded(?:-[a-z0-9]+)?\b/);
   });
 
   it('adapts Monthly Civil Payroll to Week 1..Week 5 present counts and renders Daily & Hauler sheets without rounded corners', () => {
@@ -296,5 +300,95 @@ describe('PayrollReportSheet Engineering Sheet Formatting', () => {
 
     expect(snapshotFallbackHtml).toContain('₱950 per 80 kg Block');
     expect(snapshotFallbackHtml).toContain('Credits (80kg)');
+    expect(snapshotFallbackHtml).toContain('Signature');
+    expect(snapshotFallbackHtml).toContain('print:w-16');
+    expect(snapshotFallbackHtml).toContain('FOR APPROVAL / PENDING');
+    expect(snapshotFallbackHtml).toContain('sm:grid-cols-4');
+    expect(snapshotFallbackHtml).not.toMatch(/\brounded(?:-[a-z0-9]+)?\b/);
+
+    const haulerWithoutStatusHtml = renderToStaticMarkup(
+      createElement(PayrollReportSheet, {
+        project: projectWithCustomRate,
+        data: {
+          kind: 'hauler',
+          snapshot: {
+            id: 'pay-haul-no-status',
+            periodType: 'weekly',
+            startDate: '2026-11-08',
+            endDate: '2026-11-14',
+            title: 'Without Status Hauler',
+            items: [],
+            totalHauledKg: 0,
+            totalCredits: 0,
+            totalEarnedPhp: 0,
+            totalPayoutPhp: 0,
+            status: 'generated',
+            createdAt: '2026-11-14T00:00:00Z',
+          },
+        },
+        showSignature: true,
+        showStatus: false,
+      })
+    );
+    expect(haulerWithoutStatusHtml).toContain('Signature');
+    expect(haulerWithoutStatusHtml).toContain('print:w-16');
+    expect(haulerWithoutStatusHtml).toContain('sm:grid-cols-3');
+    expect(haulerWithoutStatusHtml).not.toContain('FOR APPROVAL / PENDING');
+    expect(haulerWithoutStatusHtml).not.toContain('PAID');
+    expect(haulerWithoutStatusHtml).not.toMatch(/\brounded(?:-[a-z0-9]+)?\b/);
+
+    const haulerWithDeductionHtml = renderToStaticMarkup(
+      createElement(PayrollReportSheet, {
+        project: projectWithCustomRate,
+        data: {
+          kind: 'hauler',
+          snapshot: {
+            id: 'pay-haul-deduction',
+            periodType: 'weekly',
+            startDate: '2026-11-08',
+            endDate: '2026-11-14',
+            title: 'With CA Deduction',
+            items: [
+              {
+                haulerName: 'Carlo Mendez',
+                activeDays: 2,
+                tripsCompleted: 2,
+                hauledKg: 240,
+                priorExcessKg: 0,
+                creditsEarned: 2,
+                endingExcessKg: 0,
+                grossEarnedPhp: 2200,
+                alreadyPaidInRangePhp: 0,
+                deductionPhp: 500,
+                deductionNote: 'Cash Advance',
+                payoutReleasedPhp: 1700,
+                netBalanceAfterPhp: 0,
+              },
+            ],
+            totalHauledKg: 240,
+            totalCredits: 2,
+            totalEarnedPhp: 2200,
+            totalDeductionPhp: 500,
+            totalPayoutPhp: 1700,
+            creditBlockKg: 120,
+            ratePerBlockPhp: 1100,
+            status: 'paid',
+            paidDate: '2026-11-14',
+            createdAt: '2026-11-14T00:00:00Z',
+          },
+        },
+        showSignature: true,
+        showStatus: true,
+      })
+    );
+    expect(haulerWithDeductionHtml).toContain('Deduction (₱)');
+    expect(haulerWithDeductionHtml).toContain('Net Payout (₱)');
+    expect(haulerWithDeductionHtml).toContain('₱500');
+    expect(haulerWithDeductionHtml).toContain('Cash Advance');
+    expect(haulerWithDeductionHtml).toContain('Total Net Payout');
+    expect(haulerWithDeductionHtml).toContain('Earned ₱2,200 − Ded. ₱500');
+    expect(haulerWithDeductionHtml).toContain('₱1,700');
+    expect(haulerWithDeductionHtml).toContain('print:w-16');
+    expect(haulerWithDeductionHtml).not.toMatch(/\brounded(?:-[a-z0-9]+)?\b/);
   });
 });
