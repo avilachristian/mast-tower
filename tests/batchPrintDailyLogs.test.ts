@@ -16,10 +16,14 @@ describe('DailyLogPrintSheet and Batch PDF Export Layout', () => {
     weatherNotes: 'Clear skies and dry ground',
     foundationsWorked: ['F1', 'F2'],
     workers: [
-      { role: 'Foreman', count: 1, names: 'Juan Dela Cruz' },
-      { role: 'Mason', count: 2, names: 'Pedro, Jose' },
+      { role: 'Foreman', count: 1, names: 'Juan Dela Cruz', hours: 8 },
+      { role: 'Mason', count: 2, names: 'Pedro, Jose', hours: 8 },
     ],
     totalWorkers: 3,
+    totalManHours: 24,
+    cementUsedBags: 15,
+    sandUsedBags: 0,
+    gravelUsedBags: 0,
     activities: [
       {
         id: 'act-1',

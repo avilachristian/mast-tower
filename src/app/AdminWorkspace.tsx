@@ -34,6 +34,7 @@ import {
   resolveManpowerRoster,
 } from '@/entities/project/manpowerPayroll';
 import { computeVerticalMastMetrics } from '@/entities/project/verticalMastCalculations';
+import { apiClient } from '@/shared/api/client';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
 import { navigateTo } from '@/shared/lib/router';
 import { usePwaStore } from '@/shared/pwa/pwaManager';
@@ -167,6 +168,11 @@ const ClientVisibilityModal = lazy(() =>
     default: m.ClientVisibilityModal,
   }))
 );
+const ConflictDiffModal = lazy(() =>
+  import('@/widgets/storage/ConflictDiffModal').then((m) => ({
+    default: m.ConflictDiffModal,
+  }))
+);
 
 function WorkspaceTabFallback() {
   return (
@@ -210,6 +216,9 @@ export function AdminWorkspace() {
   const offlineCached = useAuthStore((s) => s.offlineCached);
   const logout = useAuthStore((s) => s.logout);
   const conflictProjectId = useCloudSyncStore((s) => s.conflictProjectId);
+  const conflictServerRecord = useCloudSyncStore((s) => s.conflictServerRecord);
+  const [showConflictDiff, setShowConflictDiff] = useState(false);
+  const [fetchingConflictServer, setFetchingConflictServer] = useState(false);
   const syncError = useCloudSyncStore((s) => s.lastError);
   const pendingDeleteCount = useCloudSyncStore((s) => s.pendingDeleteIds.length);
   const r2StatusLevel = useStorageQuotaStore((s) => s.status?.level);
@@ -224,6 +233,42 @@ export function AdminWorkspace() {
     () => projects.some((p) => doesRecordNeedSync(p)),
     [projects]
   );
+
+  const localConflictRecord = useMemo(() => {
+    if (!conflictProjectId) return null;
+    const rec = projects.find((p) => p.id === conflictProjectId);
+    if (!rec) return null;
+    if (activeProjectId === conflictProjectId) {
+      return {
+        ...rec,
+        state: project,
+      };
+    }
+    return rec;
+  }, [conflictProjectId, projects, activeProjectId, project]);
+
+  const handleOpenConflictDiff = async () => {
+    if (!conflictProjectId) return;
+    if (conflictServerRecord) {
+      setShowConflictDiff(true);
+      return;
+    }
+    setFetchingConflictServer(true);
+    try {
+      const res = await apiClient.getAdminProject(conflictProjectId);
+      if (res.project) {
+        useCloudSyncStore.getState().setStatePatch({ conflictServerRecord: res.project });
+        setShowConflictDiff(true);
+      }
+    } catch {
+      useFeedbackStore.getState().pushToast({
+        tone: 'error',
+        message: 'Could not fetch server copy for comparison.',
+      });
+    } finally {
+      setFetchingConflictServer(false);
+    }
+  };
 
   const {
     activeAppTab,
@@ -606,6 +651,14 @@ export function AdminWorkspace() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleOpenConflictDiff()}
+              disabled={fetchingConflictServer}
+              className="px-2.5 py-1 rounded-md border border-amber-400 bg-amber-100 hover:bg-amber-200 font-semibold cursor-pointer text-amber-900 disabled:opacity-50"
+            >
+              {fetchingConflictServer ? 'Loading...' : 'Review Differences'}
+            </button>
             <button
               type="button"
               onClick={() => void resolveConflictUseCloud()}
@@ -1693,6 +1746,25 @@ export function AdminWorkspace() {
             projectId={clientModalProjectId}
             open
             onClose={() => setClientModalProjectId(null)}
+          />
+        </Suspense>
+      )}
+
+      {/* Cloud Sync Conflict Comparison Diff Modal */}
+      {showConflictDiff && conflictServerRecord && localConflictRecord && (
+        <Suspense fallback={null}>
+          <ConflictDiffModal
+            localRecord={localConflictRecord}
+            cloudRecord={conflictServerRecord}
+            onUseCloud={async () => {
+              setShowConflictDiff(false);
+              await resolveConflictUseCloud();
+            }}
+            onKeepLocal={async () => {
+              setShowConflictDiff(false);
+              await resolveConflictOverwriteCloud();
+            }}
+            onClose={() => setShowConflictDiff(false)}
           />
         </Suspense>
       )}
