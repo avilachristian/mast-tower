@@ -1,37 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
-  Camera,
-  Check,
-  ChevronDown,
-  ChevronRight,
   ClipboardList,
   Cloud,
   CloudFog,
   CloudRain,
   CloudLightning,
   Copy,
-  Edit3,
-  ImagePlus,
-  Package,
   Pencil,
   Plus,
-  Printer,
   RotateCcw,
-  ShieldCheck,
   Sun,
   Trash2,
-  Truck,
   UserCheck,
-  Users,
   Wrench,
 } from 'lucide-react';
 import {
   computeDailyLogMaterialRemaining,
   createDefaultDailyLogMaterials,
   findPreviousDailyLogForDraft,
-  formatDailyLogPlainText,
-  formatDateWithWeekday,
   getDailyLogActivityRows,
   getDailyLogDelayRows,
   getDailyLogEquipmentRows,
@@ -47,6 +34,12 @@ import {
 } from '@/entities/project/haulingInventory';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
 import { DailyLogBatchPrintModal } from './DailyLogBatchPrintModal';
+import { DailyLogsHistoryFeed } from './sections/DailyLogsHistoryFeed';
+import { DailyLogActivitiesSection } from './sections/DailyLogActivitiesSection';
+import { DailyLogDocumentationSection } from './sections/DailyLogDocumentationSection';
+import { DailyLogManpowerSection } from './sections/DailyLogManpowerSection';
+import { DailyLogMaterialsSection } from './sections/DailyLogMaterialsSection';
+import { DailyLogSafetySection } from './sections/DailyLogSafetySection';
 import type {
   DailyActivityLogEntry,
   DailyLogActivityItem,
@@ -67,7 +60,6 @@ import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
 import { MANPOWER_POSITIONS } from '@/entities/project/manpowerPayroll';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
-import { useUiStore } from '@/shared/state/uiStore';
 import {
   DailyLogRowEditorModal,
   type DailyLogModalTarget,
@@ -93,13 +85,6 @@ const ACTIVITY_STATUS_OPTIONS: DailyLogActivityStatus[] = [
   'Pending',
   'Delayed',
 ];
-
-const ACTIVITY_STATUS_BADGE: Record<DailyLogActivityStatus, string> = {
-  Completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  Ongoing: 'bg-sky-50 text-sky-700 border-sky-200',
-  Pending: 'bg-slate-100 text-slate-700 border-slate-200',
-  Delayed: 'bg-amber-50 text-amber-800 border-amber-200',
-};
 
 function createEmptyActivity(foundationId = ''): DailyLogActivityItem {
   return {
@@ -186,11 +171,8 @@ export function DailyLogsView({
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const addDailyLog = useProjectStore((s) => s.addDailyLog);
   const updateDailyLog = useProjectStore((s) => s.updateDailyLog);
-  const deleteDailyLog = useProjectStore((s) => s.deleteDailyLog);
   const updateProjectMeta = useProjectStore((s) => s.updateProjectMeta);
-  const setDailyLogPrintId = useUiStore((s) => s.setDailyLogPrintId);
   const showAlert = useFeedbackStore((s) => s.showAlert);
-  const requestConfirm = useFeedbackStore((s) => s.requestConfirm);
 
   const project = projectProp ?? storeProject;
   const isVerticalMast = project.projectType === 'vertical_mast';
@@ -199,8 +181,6 @@ export function DailyLogsView({
 
   const [mobilePane, setMobilePane] = useState<'form' | 'history'>('form');
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
-  const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
-  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
   const [batchPrintOpen, setBatchPrintOpen] = useState(false);
 
   const sortedDailyLogs = useMemo(
@@ -1009,16 +989,6 @@ export function DailyLogsView({
     setMobilePane('history');
   };
 
-  const handleCopyText = async (log: DailyActivityLogEntry) => {
-    try {
-      await navigator.clipboard.writeText(formatDailyLogPlainText(log, project));
-      setCopiedLogId(log.id);
-      window.setTimeout(() => setCopiedLogId(null), 1800);
-    } catch {
-      // Ignore if clipboard permission blocked
-    }
-  };
-
   return (
     <div className="p-3 sm:p-4 max-w-7xl w-full mx-auto space-y-3">
       {/* Mobile Sub-Pane Switcher */}
@@ -1207,710 +1177,78 @@ export function DailyLogsView({
               />
             </section>
 
-            {/* 3. Manpower */}
-            <section className="space-y-2 pt-2 border-t border-slate-100">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <Users className="w-3.5 h-3.5 text-sky-600" />
-                  3. Manpower
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-[11px] font-bold">
-                    {totalPreviewWorkers} crew
-                  </span>
-                  <button
-                    type="button"
-                    onClick={addWorkerRow}
-                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                  >
-                    + Add Role
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openAddModal('worker')}
-                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Role
-                  </button>
-                </div>
-              </div>
+            <DailyLogManpowerSection
+              workers={workers}
+              roles={ROLES}
+              totalWorkers={totalPreviewWorkers}
+              onAddWorkerRow={addWorkerRow}
+              onOpenAddModal={() => openAddModal('worker')}
+              onOpenEditModal={(w, idx) =>
+                setModalTarget({ kind: 'worker', index: idx, item: { ...w } })
+              }
+              onRemoveWorkerRow={removeWorkerRow}
+              onUpdateWorkerRow={updateWorkerRow}
+            />
 
-              {/* Mobile Compact Cards + Modal Trigger */}
-              <div className="md:hidden space-y-2">
-                {workers.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">
-                    No manpower roles added yet. Tap Add Role above.
-                  </div>
-                ) : (
-                  workers.map((w, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-center justify-between gap-2.5"
-                    >
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-900 truncate">
-                            {w.role}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 text-[11px] font-bold">
-                            {w.count} pax
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate">
-                          {w.names.trim() || 'No worker names recorded'}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setModalTarget({ kind: 'worker', index: idx, item: { ...w } })
-                          }
-                          aria-label={`Edit ${w.role}`}
-                          title="Edit Role"
-                          className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeWorkerRow(idx)}
-                          aria-label={`Remove ${w.role}`}
-                          title="Remove Role"
-                          className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+            <DailyLogMaterialsSection
+              isVerticalMast={isVerticalMast}
+              materialsOnSite={materialsOnSite}
+              hauledItemsOnDateCount={hauledItemsOnDate.length}
+              date={date}
+              hasPrevLog={Boolean(prevLogForDraft)}
+              prevLogDayNumber={prevLogForDraft?.dayNumber}
+              editingLogId={editingLogId}
+              onSyncHauling={() => {
+                setMaterialsTouched(true);
+                setMaterialsOnSite((prev) =>
+                  syncDailyLogMaterialsWithHauling(
+                    project,
+                    date,
+                    prev,
+                    computeDailyLogMaterialRemaining
+                  )
+                );
+              }}
+              onAutoFillPrev={() => {
+                if (!prevLogForDraft) return;
+                setMaterialsTouched(false);
+                setMaterialsOnSite(
+                  buildCentralizedDailyLogMaterials(
+                    project,
+                    prevLogForDraft,
+                    date,
+                    computeDailyLogMaterialRemaining
+                  )
+                );
+              }}
+              onAddMaterialRow={addMaterialRow}
+              onOpenAddModal={() => openAddModal('material')}
+              onOpenEditModal={(item, idx) =>
+                setModalTarget({ kind: 'material', index: idx, item: { ...item } })
+              }
+              onRemoveMaterialRow={removeMaterialRow}
+              onUpdateMaterialRow={updateMaterialRow}
+            />
 
-              {/* Desktop Inline Editor */}
-              <div className="hidden md:block space-y-2">
-                {workers.map((w, idx) => (
-                  <div
-                    key={idx}
-                    className="rounded-lg border border-slate-200 bg-slate-50/70 p-2 space-y-1.5"
-                  >
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <select
-                        value={w.role}
-                        onChange={(e) =>
-                          updateWorkerRow(idx, { role: e.target.value as WorkerRole })
-                        }
-                        className="flex-1 min-w-[120px] rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
-                      >
-                        {ROLES.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
-
-                      {/* Tap-friendly headcount stepper */}
-                      <div className="inline-flex items-center rounded-md border border-slate-300 bg-white overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            updateWorkerRow(idx, { count: Math.max(0, w.count - 1) })
-                          }
-                          className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                        >
-                          −
-                        </button>
-                        <input
-                          type="number"
-                          min={0}
-                          value={w.count}
-                          onChange={(e) =>
-                            updateWorkerRow(idx, {
-                              count: Math.max(0, Number(e.target.value)),
-                            })
-                          }
-                          aria-label={`${w.role} count`}
-                          className="w-10 text-center text-xs font-bold text-slate-900 border-x border-slate-200 py-1 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateWorkerRow(idx, { count: w.count + 1 })}
-                          className="px-2 py-1 text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
-                        >
-                          +
-                        </button>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => removeWorkerRow(idx)}
-                        aria-label={`Remove ${w.role}`}
-                        className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <input
-                      type="text"
-                      value={w.names}
-                      onChange={(e) => updateWorkerRow(idx, { names: e.target.value })}
-                      placeholder="Worker names / assignment notes..."
-                      className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 focus:border-sky-500 focus:outline-none"
-                    />
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* 4. Materials on Site (Table Format: On Site, Delivered, Used, Remaining) */}
-            <section className="space-y-2 pt-2 border-t border-slate-100">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <Package className="w-3.5 h-3.5 text-sky-600" />
-                  {isVerticalMast ? '4. Tower Parts on Site' : '4. Materials on Site'}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {hauledItemsOnDate.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMaterialsTouched(true);
-                        setMaterialsOnSite((prev) =>
-                          syncDailyLogMaterialsWithHauling(
-                            project,
-                            date,
-                            prev,
-                            computeDailyLogMaterialRemaining
-                          )
-                        );
-                      }}
-                      title={`Pull delivered quantities from ${hauledItemsOnDate.length} hauled item(s) on ${date} (you can still override manually)`}
-                      className="inline-flex items-center gap-1 min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-1 sm:py-0.5 rounded-lg sm:rounded-full bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 text-[11px] sm:text-[10px] font-semibold cursor-pointer"
-                    >
-                      <Truck className="w-3 h-3" />
-                      Sync Hauling ({hauledItemsOnDate.length})
-                    </button>
-                  )}
-                  {prevLogForDraft && !editingLogId && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMaterialsTouched(false);
-                        setMaterialsOnSite(
-                          buildCentralizedDailyLogMaterials(
-                            project,
-                            prevLogForDraft,
-                            date,
-                            computeDailyLogMaterialRemaining
-                          )
-                        );
-                      }}
-                      title="Fill On Site from previous day's Remaining quantities and Hauling deliveries"
-                      className="min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-1 sm:py-0.5 rounded-lg sm:rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 text-[11px] sm:text-[10px] font-semibold cursor-pointer"
-                    >
-                      Auto-fill from Day {prevLogForDraft.dayNumber}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={addMaterialRow}
-                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                  >
-                    + {isVerticalMast ? 'Add Tower Part' : 'Add Material'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openAddModal('material')}
-                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    {isVerticalMast ? 'Add Part' : 'Add Material'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Mobile Compact Cards + Modal Trigger */}
-              <div className="md:hidden space-y-2">
-                {materialsOnSite.map((m, idx) => {
-                  const remaining = computeDailyLogMaterialRemaining(m);
-                  return (
-                    <div
-                      key={m.id}
-                      className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-2"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-bold text-slate-900 truncate">
-                              {m.name.trim() || (isVerticalMast ? 'Unnamed Part' : 'Unnamed Material')}
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-700 text-[10px] font-semibold shrink-0">
-                              {m.unit || 'pcs'}
-                            </span>
-                          </div>
-                          {m.remarks && (
-                            <div className="text-[11px] text-slate-500 mt-0.5 truncate">
-                              {m.remarks}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setModalTarget({ kind: 'material', index: idx, item: { ...m } })
-                            }
-                            aria-label={`Edit ${m.name || 'material'}`}
-                            title="Edit Item"
-                            className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeMaterialRow(idx)}
-                            aria-label={`Remove ${m.name || 'material'}`}
-                            title="Remove Item"
-                            className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-4 gap-1.5 text-center text-[11px]">
-                        <div className="rounded-md bg-white border border-slate-200 py-1 px-1">
-                          <div className="text-[9px] text-slate-400 uppercase font-bold">On Site</div>
-                          <div className="font-bold text-slate-900">{m.onSiteQty}</div>
-                        </div>
-                        <div className="rounded-md bg-emerald-50/70 border border-emerald-200 py-1 px-1">
-                          <div className="text-[9px] text-emerald-700 uppercase font-bold">Deliv.</div>
-                          <div className="font-bold text-emerald-900">{m.deliveredQty ?? 0}</div>
-                        </div>
-                        <div className="rounded-md bg-white border border-slate-200 py-1 px-1">
-                          <div className="text-[9px] text-slate-400 uppercase font-bold">Used</div>
-                          <div className="font-bold text-slate-800">{m.usedTodayQty}</div>
-                        </div>
-                        <div className="rounded-md bg-sky-50 border border-sky-200 py-1 px-1">
-                          <div className="text-[9px] text-sky-700 uppercase font-bold">Rem.</div>
-                          <div className="font-bold text-sky-800">{remaining}</div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Desktop Inline Table */}
-              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
-                    <tr>
-                      <th className="px-2 py-1.5 font-semibold">
-                        {isVerticalMast ? 'Tower Part' : 'Material'}
-                      </th>
-                      <th className="px-2 py-1.5 font-semibold w-14 text-center">Unit</th>
-                      <th className="px-2 py-1.5 font-semibold text-right w-16">On Site</th>
-                      <th className="px-2 py-1.5 font-semibold text-right w-16">Delivered</th>
-                      <th className="px-2 py-1.5 font-semibold text-right w-16">Used</th>
-                      <th className="px-2 py-1.5 font-semibold text-right w-16">Remaining</th>
-                      <th className="px-2 py-1.5 font-semibold">Remarks</th>
-                      <th className="w-7" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {materialsOnSite.map((m, idx) => {
-                      const remaining = computeDailyLogMaterialRemaining(m);
-                      return (
-                        <tr key={m.id}>
-                          <td className="px-1.5 py-1">
-                            <input
-                              type="text"
-                              value={m.name}
-                              onChange={(e) =>
-                                updateMaterialRow(idx, { name: e.target.value })
-                              }
-                              placeholder="Item name"
-                              className="w-full min-w-[85px] rounded border border-slate-200 px-1.5 py-1 text-xs font-medium text-slate-900 focus:border-sky-500 focus:outline-none"
-                            />
-                          </td>
-                          <td className="px-1 py-1">
-                            <input
-                              type="text"
-                              value={m.unit}
-                              onChange={(e) =>
-                                updateMaterialRow(idx, { unit: e.target.value })
-                              }
-                              className="w-12 rounded border border-slate-200 px-1 py-1 text-xs text-slate-700 text-center focus:border-sky-500 focus:outline-none"
-                            />
-                          </td>
-                          <td className="px-1 py-1">
-                            <input
-                              type="number"
-                              min={0}
-                              step="any"
-                              value={m.onSiteQty}
-                              onChange={(e) =>
-                                updateMaterialRow(idx, {
-                                  onSiteQty: Math.max(0, Number(e.target.value)),
-                                })
-                              }
-                              aria-label={`${m.name || 'Material'} on site`}
-                              className="w-14 rounded border border-slate-300 px-1.5 py-1 text-xs font-semibold text-right text-slate-900 focus:border-sky-500 focus:outline-none"
-                            />
-                          </td>
-                          <td className="px-1 py-1">
-                            <input
-                              type="number"
-                              min={0}
-                              step="any"
-                              value={m.deliveredQty ?? 0}
-                              onChange={(e) =>
-                                updateMaterialRow(idx, {
-                                  deliveredQty: Math.max(0, Number(e.target.value)),
-                                })
-                              }
-                              aria-label={`${m.name || 'Material'} delivered`}
-                              className="w-14 rounded border border-emerald-300 bg-emerald-50/40 px-1.5 py-1 text-xs font-semibold text-right text-emerald-900 focus:border-sky-500 focus:outline-none"
-                            />
-                          </td>
-                          <td className="px-1 py-1">
-                            <input
-                              type="number"
-                              min={0}
-                              step="any"
-                              value={m.usedTodayQty}
-                              onChange={(e) =>
-                                updateMaterialRow(idx, {
-                                  usedTodayQty: Math.max(0, Number(e.target.value)),
-                                })
-                              }
-                              aria-label={`${m.name || 'Material'} used`}
-                              className="w-14 rounded border border-slate-300 px-1.5 py-1 text-xs text-right text-slate-800 focus:border-sky-500 focus:outline-none"
-                            />
-                          </td>
-                          <td className="px-1.5 py-1 text-right">
-                            <span className="inline-block min-w-[36px] rounded bg-sky-50 border border-sky-200 px-1.5 py-1 text-xs font-bold text-sky-800">
-                              {remaining}
-                            </span>
-                          </td>
-                          <td className="px-1 py-1">
-                            <input
-                              type="text"
-                              value={m.remarks ?? ''}
-                              onChange={(e) =>
-                                updateMaterialRow(idx, { remarks: e.target.value })
-                              }
-                              placeholder="Note"
-                              className="w-full min-w-[70px] rounded border border-slate-200 px-1.5 py-1 text-[11px] text-slate-700 focus:border-sky-500 focus:outline-none"
-                            />
-                          </td>
-                          <td className="pr-1.5 py-1 text-center">
-                            <button
-                              type="button"
-                              onClick={() => removeMaterialRow(idx)}
-                              aria-label={`Remove ${m.name || 'material'}`}
-                              className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            {/* 5. Activities & Status (Table Format) */}
-            <section className="space-y-2.5 pt-2 border-t border-slate-100">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  5. Activities &amp; Status
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={addActivityRow}
-                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                  >
-                    + Add Activity
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openAddModal('activity')}
-                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Activity
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-[11px] font-medium text-slate-600 block mb-1">
-                  {isVerticalMast
-                    ? 'Tower Sections & Guy Layers Worked On'
-                    : 'Foundations Worked On'}
-                </span>
-                {isVerticalMast ? (
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-1">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase mr-1">
-                        Guy Layers:
-                      </span>
-                      {verticalMastGuyLayers.map((g) => {
-                        const active = selectedFoundations.includes(g.id);
-                        return (
-                          <button
-                            key={g.id}
-                            type="button"
-                            onClick={() => toggleFoundation(g.id)}
-                            className={`px-2 py-1 sm:px-1.5 sm:py-0.5 rounded border text-xs sm:text-[10px] font-semibold transition cursor-pointer ${
-                              active
-                                ? 'bg-teal-600 text-white border-teal-600'
-                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                          >
-                            {g.id}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1 max-h-24 overflow-y-auto p-1.5 rounded border border-slate-200 bg-slate-50/50">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase mr-1">
-                        Sections:
-                      </span>
-                      {verticalMastSections.map((s) => {
-                        const active = selectedFoundations.includes(s.id);
-                        return (
-                          <button
-                            key={s.id}
-                            type="button"
-                            onClick={() => toggleFoundation(s.id)}
-                            className={`px-2 py-1 sm:px-1.5 sm:py-0.5 rounded border text-xs sm:text-[10px] font-semibold transition cursor-pointer ${
-                              active
-                                ? 'bg-sky-600 text-white border-sky-600'
-                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                            }`}
-                          >
-                            {s.id}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5 sm:gap-1">
-                    {foundations.map((f) => {
-                      const active = selectedFoundations.includes(f.id);
-                      return (
-                        <button
-                          key={f.id}
-                          type="button"
-                          onClick={() => toggleFoundation(f.id)}
-                          className={`px-2.5 py-1.5 sm:px-2 sm:py-1 rounded border text-xs sm:text-[11px] font-semibold transition cursor-pointer ${
-                            active
-                              ? 'bg-sky-600 text-white border-sky-600'
-                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                          }`}
-                        >
-                          {f.id}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Mobile Compact Cards + Modal Trigger */}
-              <div className="md:hidden space-y-2">
-                {activities.map((act, idx) => (
-                  <div
-                    key={act.id}
-                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-start justify-between gap-2.5"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-[11px] font-bold text-slate-800">
-                          {act.foundationId || 'Site'}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${
-                            ACTIVITY_STATUS_BADGE[act.status]
-                          }`}
-                        >
-                          {act.status}
-                        </span>
-                      </div>
-                      <div className="text-xs font-medium text-slate-900">
-                        {act.description.trim() || (
-                          <span className="text-slate-400 italic">
-                            Tap Edit to describe activity...
-                          </span>
-                        )}
-                      </div>
-                      {act.remarks && (
-                        <div className="text-[11px] text-slate-500">
-                          Remarks: {act.remarks}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setModalTarget({ kind: 'activity', index: idx, item: { ...act } })
-                        }
-                        aria-label="Edit activity"
-                        title="Edit Activity"
-                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeActivityRow(idx)}
-                        aria-label="Remove activity"
-                        title="Remove Activity"
-                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
-                    <tr>
-                      <th className="px-2 py-1.5 font-semibold w-24">Location</th>
-                      <th className="px-2 py-1.5 font-semibold">Activity Description</th>
-                      <th className="px-2 py-1.5 font-semibold w-28">Status</th>
-                      <th className="px-2 py-1.5 font-semibold">Remarks</th>
-                      <th className="w-7" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {activities.map((act, idx) => (
-                      <tr key={act.id}>
-                        <td className="px-1.5 py-1">
-                          <select
-                            value={act.foundationId ?? ''}
-                            onChange={(e) =>
-                              updateActivityRow(idx, { foundationId: e.target.value })
-                            }
-                            aria-label="Activity foundation"
-                            className="w-full min-w-[78px] rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-semibold text-slate-700"
-                          >
-                            <option value="">Site</option>
-                            {isVerticalMast ? (
-                              <>
-                                <optgroup label="Guy Layers">
-                                  {verticalMastGuyLayers.map((g) => (
-                                    <option key={g.id} value={g.id}>
-                                      {g.id} (+{g.elevationM}m)
-                                    </option>
-                                  ))}
-                                </optgroup>
-                                <optgroup label="Tower Sections">
-                                  {verticalMastSections.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.id} ({s.elevationFromM}–{s.elevationToM}m)
-                                    </option>
-                                  ))}
-                                </optgroup>
-                                <optgroup label="Ground Anchors">
-                                  {foundations.map((f) => (
-                                    <option key={f.id} value={f.id}>
-                                      {f.id}
-                                    </option>
-                                  ))}
-                                </optgroup>
-                              </>
-                            ) : (
-                              foundations.map((f) => (
-                                <option key={f.id} value={f.id}>
-                                  {f.id}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                        </td>
-                        <td className="px-1 py-1">
-                          <input
-                            type="text"
-                            value={act.description}
-                            onChange={(e) =>
-                              updateActivityRow(idx, { description: e.target.value })
-                            }
-                            placeholder="Activity description"
-                            className="w-full min-w-[140px] rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
-                          />
-                        </td>
-                        <td className="px-1 py-1">
-                          <select
-                            value={act.status}
-                            onChange={(e) =>
-                              updateActivityRow(idx, {
-                                status: e.target.value as DailyLogActivityStatus,
-                              })
-                            }
-                            aria-label="Activity status"
-                            className="w-full min-w-[92px] rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] font-semibold text-slate-800"
-                          >
-                            {ACTIVITY_STATUS_OPTIONS.map((st) => (
-                              <option key={st} value={st}>
-                                {st}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-1 py-1">
-                          <input
-                            type="text"
-                            value={act.remarks ?? ''}
-                            onChange={(e) =>
-                              updateActivityRow(idx, { remarks: e.target.value })
-                            }
-                            placeholder="Remarks"
-                            className="w-full min-w-[85px] rounded border border-slate-200 px-1.5 py-1 text-[11px] text-slate-700 focus:border-sky-500 focus:outline-none"
-                          />
-                        </td>
-                        <td className="pr-1.5 py-1 text-center">
-                          <button
-                            type="button"
-                            onClick={() => removeActivityRow(idx)}
-                            aria-label="Remove activity"
-                            className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <label className="block text-xs">
-                <span className="font-semibold text-slate-700">
-                  Overall Activity Summary (optional if listed above)
-                </span>
-                <textarea
-                  rows={2}
-                  value={activitiesSummary}
-                  onChange={(e) => setActivitiesSummary(e.target.value)}
-                  placeholder="Brief daily accomplishment summary..."
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
-                />
-              </label>
-            </section>
+            <DailyLogActivitiesSection
+              isVerticalMast={isVerticalMast}
+              activities={activities}
+              activitiesSummary={activitiesSummary}
+              onActivitiesSummaryChange={setActivitiesSummary}
+              selectedFoundations={selectedFoundations}
+              onToggleFoundation={toggleFoundation}
+              foundations={foundations}
+              verticalMastSections={verticalMastSections}
+              verticalMastGuyLayers={verticalMastGuyLayers}
+              activityStatuses={ACTIVITY_STATUS_OPTIONS}
+              onAddActivityRow={addActivityRow}
+              onOpenAddModal={() => openAddModal('activity')}
+              onOpenEditModal={(act, idx) =>
+                setModalTarget({ kind: 'activity', index: idx, item: { ...act } })
+              }
+              onRemoveActivityRow={removeActivityRow}
+              onUpdateActivityRow={updateActivityRow}
+            />
 
             {/* 6. Equipments (Table Format) */}
             <section className="space-y-2 pt-2 border-t border-slate-100">
@@ -2363,375 +1701,32 @@ export function DailyLogsView({
               </div>
             </section>
 
-            {/* 9. Safety Logs (Safety Officer) */}
-            <section className="space-y-2 pt-2 border-t border-slate-100">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  9. Safety Logs (Safety Officer)
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={addSafetyRow}
-                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                  >
-                    + Add Safety Log
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openAddModal('safety')}
-                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Safety
-                  </button>
-                </div>
-              </div>
+            <DailyLogSafetySection
+              safetyOfficer={safetyOfficer}
+              onSafetyOfficerChange={setSafetyOfficer}
+              safetyLogs={safetyLogs}
+              onAddRow={addSafetyRow}
+              onOpenModal={(item, idx) =>
+                setModalTarget({ kind: 'safety', index: idx, item: { ...item } })
+              }
+              onRemoveRow={removeSafetyRow}
+              onUpdateRow={updateSafetyRow}
+            />
 
-              <label className="block">
-                <span className="text-[11px] font-semibold text-slate-600">
-                  Safety Officer
-                </span>
-                <input
-                  type="text"
-                  value={safetyOfficer}
-                  onChange={(e) => setSafetyOfficer(e.target.value)}
-                  placeholder="Name of Safety Officer"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
-                />
-              </label>
-
-              {/* Mobile Compact Cards */}
-              <div className="md:hidden space-y-2">
-                {safetyLogs.map((s, idx) => (
-                  <div
-                    key={s.id}
-                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-start justify-between gap-2.5"
-                  >
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs font-bold text-slate-900">
-                          {s.timeOrActivity.trim() || (
-                            <span className="text-slate-400 italic font-normal">
-                              Safety entry (tap Edit)
-                            </span>
-                          )}
-                        </span>
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] font-bold text-emerald-700">
-                          {s.status}
-                        </span>
-                      </div>
-                      {s.hazardOrFinding && (
-                        <div className="text-[11px] text-slate-700">
-                          Obs: {s.hazardOrFinding}
-                        </div>
-                      )}
-                      {s.actionTaken && (
-                        <div className="text-[11px] text-slate-500">
-                          Action: {s.actionTaken}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setModalTarget({ kind: 'safety', index: idx, item: { ...s } })
-                        }
-                        aria-label="Edit safety log"
-                        title="Edit Safety Log"
-                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeSafetyRow(idx)}
-                        aria-label="Remove safety log"
-                        title="Remove Safety Log"
-                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
-                    <tr>
-                      <th className="px-2 py-1.5 font-semibold">Time / Activity</th>
-                      <th className="px-2 py-1.5 font-semibold">Safety Observation / Hazard</th>
-                      <th className="px-2 py-1.5 font-semibold">Action Taken / Control</th>
-                      <th className="px-2 py-1.5 font-semibold">Status</th>
-                      <th className="w-7" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {safetyLogs.map((s, idx) => (
-                      <tr key={s.id}>
-                        <td className="px-1.5 py-1">
-                          <input
-                            type="text"
-                            value={s.timeOrActivity}
-                            onChange={(e) =>
-                              updateSafetyRow(idx, { timeOrActivity: e.target.value })
-                            }
-                            placeholder="07:30 Toolbox Talk"
-                            className="w-full min-w-[95px] rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
-                          />
-                        </td>
-                        <td className="px-1 py-1">
-                          <input
-                            type="text"
-                            value={s.hazardOrFinding}
-                            onChange={(e) =>
-                              updateSafetyRow(idx, { hazardOrFinding: e.target.value })
-                            }
-                            placeholder="PPE, shoring, housekeeping..."
-                            className="w-full min-w-[110px] rounded border border-slate-200 px-1.5 py-1 text-[11px] text-slate-800 focus:border-sky-500 focus:outline-none"
-                          />
-                        </td>
-                        <td className="px-1 py-1">
-                          <input
-                            type="text"
-                            value={s.actionTaken}
-                            onChange={(e) =>
-                              updateSafetyRow(idx, { actionTaken: e.target.value })
-                            }
-                            placeholder="Briefing / barricading / PPE check"
-                            className="w-full min-w-[110px] rounded border border-slate-200 px-1.5 py-1 text-[11px] text-slate-800 focus:border-sky-500 focus:outline-none"
-                          />
-                        </td>
-                        <td className="px-1 py-1">
-                          <select
-                            value={s.status}
-                            onChange={(e) =>
-                              updateSafetyRow(idx, { status: e.target.value })
-                            }
-                            className="rounded border border-slate-300 bg-white px-1.5 py-1 text-[11px] font-medium text-slate-800 focus:border-sky-500 focus:outline-none"
-                          >
-                            <option value="Compliant">Compliant</option>
-                            <option value="Action Taken">Action Taken</option>
-                            <option value="Open">Open</option>
-                            <option value="N/A">N/A</option>
-                          </select>
-                        </td>
-                        <td className="pr-1.5 py-1 text-center">
-                          <button
-                            type="button"
-                            onClick={() => removeSafetyRow(idx)}
-                            aria-label="Remove safety log"
-                            className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            {/* 10. Documentation (Image left, Description / Remarks right) */}
-            <section className="space-y-2 pt-2 border-t border-slate-100">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <Camera className="w-3.5 h-3.5 text-sky-600" />
-                  10. Documentation
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={addDocumentationRow}
-                    className="hidden md:inline text-[11px] font-semibold text-sky-600 hover:underline cursor-pointer"
-                  >
-                    + Add Documentation
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openAddModal('documentation')}
-                    className="md:hidden inline-flex items-center gap-1 min-h-9 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 hover:bg-sky-100 text-xs font-bold cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Photo
-                  </button>
-                </div>
-              </div>
-
-              {/* Mobile Compact Cards */}
-              <div className="md:hidden space-y-2">
-                {documentationItems.map((doc, idx) => (
-                  <div
-                    key={doc.id}
-                    className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 flex items-center justify-between gap-2.5"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      {doc.photoDataUrl ? (
-                        <img
-                          src={doc.photoDataUrl}
-                          alt={doc.description || doc.photoName || 'Documentation'}
-                          className="w-14 h-14 object-cover rounded-lg border border-slate-200 bg-white shrink-0"
-                        />
-                      ) : (
-                        <div className="w-14 h-14 rounded-lg border border-dashed border-slate-300 bg-white flex items-center justify-center text-slate-400 shrink-0">
-                          <Camera className="w-5 h-5" />
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <div className="text-xs font-bold text-slate-900 truncate">
-                          {doc.description.trim() || (
-                            <span className="text-slate-400 italic font-normal">
-                              Tap Edit to add photo/caption
-                            </span>
-                          )}
-                        </div>
-                        {doc.remarks && (
-                          <div className="text-[11px] text-slate-500 truncate">
-                            {doc.remarks}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setModalTarget({
-                            kind: 'documentation',
-                            index: idx,
-                            item: { ...doc },
-                          })
-                        }
-                        aria-label="Edit documentation"
-                        title="Edit Documentation"
-                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-sky-50 hover:text-sky-700 cursor-pointer"
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeDocumentationRow(idx)}
-                        aria-label="Remove documentation row"
-                        title="Remove Documentation"
-                        className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white text-rose-500 hover:bg-rose-50 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="hidden md:block rounded-lg border border-slate-200 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[11px] text-slate-600 border-b border-slate-200">
-                    <tr>
-                      <th className="px-2 py-1.5 font-semibold w-5/12">Image</th>
-                      <th className="px-2 py-1.5 font-semibold w-7/12">
-                        Description / Remarks
-                      </th>
-                      <th className="w-7" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {documentationItems.map((doc, idx) => (
-                      <tr key={doc.id}>
-                        <td className="p-2 align-middle">
-                          <div className="space-y-1.5">
-                            {doc.photoDataUrl ? (
-                              <div className="space-y-1.5">
-                                <img
-                                  src={doc.photoDataUrl}
-                                  alt={doc.description || doc.photoName || 'Documentation'}
-                                  className="w-full max-h-36 object-contain rounded border border-slate-200 bg-slate-50"
-                                />
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <label className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-[10px] font-semibold text-slate-700 cursor-pointer">
-                                    <ImagePlus className="w-3 h-3 text-sky-600" />
-                                    Replace
-                                    <input
-                                      type="file"
-                                      accept="image/*"
-                                      onChange={(e) => handleUploadDocPhoto(idx, e)}
-                                      className="hidden"
-                                    />
-                                  </label>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      updateDocumentationRow(idx, {
-                                        photoDataUrl: undefined,
-                                        photoName: undefined,
-                                      })
-                                    }
-                                    className="px-2 py-0.5 rounded border border-rose-200 bg-rose-50 hover:bg-rose-100 text-[10px] font-semibold text-rose-700 cursor-pointer"
-                                  >
-                                    Clear Photo
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <label className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-sky-50/60 hover:border-sky-300 p-4 text-center cursor-pointer transition">
-                                <ImagePlus className="w-4 h-4 text-sky-600" />
-                                <span className="text-[11px] font-semibold text-sky-700">
-                                  Upload Photo
-                                </span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={(e) => handleUploadDocPhoto(idx, e)}
-                                  className="hidden"
-                                />
-                              </label>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-2 align-top space-y-1.5">
-                          <textarea
-                            rows={2}
-                            value={doc.description}
-                            onChange={(e) =>
-                              updateDocumentationRow(idx, {
-                                description: e.target.value,
-                              })
-                            }
-                            placeholder="Photo description (e.g. I-A1 excavation & rebar spacing check)"
-                            className="w-full rounded border border-slate-300 px-2 py-1 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
-                          />
-                          <input
-                            type="text"
-                            value={doc.remarks ?? ''}
-                            onChange={(e) =>
-                              updateDocumentationRow(idx, {
-                                remarks: e.target.value,
-                              })
-                            }
-                            placeholder="Remarks / location / notes"
-                            className="w-full rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-700 focus:border-sky-500 focus:outline-none"
-                          />
-                        </td>
-                        <td className="pr-1.5 py-2 align-top text-center">
-                          <button
-                            type="button"
-                            onClick={() => removeDocumentationRow(idx)}
-                            aria-label="Remove documentation row"
-                            className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
+            <DailyLogDocumentationSection
+              documentationItems={documentationItems}
+              onAddRow={addDocumentationRow}
+              onOpenModal={(doc, idx) =>
+                setModalTarget({
+                  kind: 'documentation',
+                  index: idx,
+                  item: { ...doc },
+                })
+              }
+              onRemoveRow={removeDocumentationRow}
+              onUpdateRow={updateDocumentationRow}
+              onUploadPhoto={handleUploadDocPhoto}
+            />
 
             <button
               type="submit"
@@ -2743,585 +1738,13 @@ export function DailyLogsView({
           </div>
         </form>
 
-        {/* RIGHT COLUMN: Saved Daily Logs Feed */}
-        <div
-          className={`lg:col-span-6 space-y-3 ${
-            mobilePane === 'history' ? 'block' : 'hidden lg:block'
-          }`}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-              Saved Daily Logs ({project.dailyLogs.length})
-            </h2>
-            <div className="flex items-center gap-2">
-              {sortedDailyLogs.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setBatchPrintOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-semibold cursor-pointer shadow-2xs"
-                    title="Batch export multiple logs to a single PDF / print document"
-                  >
-                    <Printer className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Batch Print / PDF</span>
-                  </button>
-                  <div className="inline-flex rounded-md border border-slate-200 bg-white overflow-hidden text-[11px] font-medium">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next: Record<string, boolean> = {};
-                        sortedDailyLogs.forEach((l) => {
-                          next[l.id] = true;
-                        });
-                        setExpandedLogs(next);
-                      }}
-                      className="px-2 py-0.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 border-r border-slate-200 cursor-pointer"
-                    >
-                      Expand All
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next: Record<string, boolean> = {};
-                        sortedDailyLogs.forEach((l) => {
-                          next[l.id] = false;
-                        });
-                        setExpandedLogs(next);
-                      }}
-                      className="px-2 py-0.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
-                    >
-                      Collapse All
-                    </button>
-                  </div>
-                </>
-              )}
-              <span className="text-[11px] text-slate-500 hidden sm:inline">
-                Stored offline on device
-              </span>
-            </div>
-          </div>
-
-          {sortedDailyLogs.length === 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-400">
-              No daily logs recorded yet. Fill out the form to log today&apos;s site report.
-            </div>
-          ) : (
-            sortedDailyLogs.map((log, index) => {
-              const isExpanded = expandedLogs[log.id] ?? index === 0;
-              const activityRows = getDailyLogActivityRows(log);
-              const mats = getDailyLogMaterialRows(log).filter(
-                (m) =>
-                  m.onSiteQty > 0 ||
-                  (m.deliveredQty ?? 0) > 0 ||
-                  m.usedTodayQty > 0 ||
-                  (m.remainingQty ?? 0) > 0 ||
-                  Boolean(m.remarks?.trim())
-              );
-              const equips = getDailyLogEquipmentRows(log);
-              const delays = getDailyLogDelayRows(log);
-              const visitors = getDailyLogVisitorRows(log);
-              const safetyRows = getDailyLogSafetyRows(log);
-              const docs = log.documentationItems ?? [];
-
-              const logProjectName = log.projectName?.trim() || project.projectName;
-              const logLocation = log.location?.trim() || project.location;
-              const logAuthor = log.preparedBy?.trim() || project.preparedBy;
-
-              return (
-                <article
-                  key={log.id}
-                  className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden"
-                >
-                  {/* Collapsible Card Top Bar */}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    aria-expanded={isExpanded}
-                    onClick={() =>
-                      setExpandedLogs((prev) => ({ ...prev, [log.id]: !isExpanded }))
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setExpandedLogs((prev) => ({ ...prev, [log.id]: !isExpanded }));
-                      }
-                    }}
-                    className={`flex flex-wrap items-start justify-between gap-2 p-3 sm:p-3.5 cursor-pointer hover:bg-slate-50/80 transition ${
-                      isExpanded ? 'border-b border-slate-100' : ''
-                    }`}
-                  >
-                    <div className="flex items-start gap-2 min-w-0 flex-1">
-                      <span className="mt-0.5 text-slate-400 shrink-0">
-                        {isExpanded ? (
-                          <ChevronDown className="w-4 h-4 text-slate-600" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4" />
-                        )}
-                      </span>
-                      <div className="space-y-0.5 min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded bg-sky-50 border border-sky-200 text-sky-700 text-[11px] font-bold">
-                            Day {log.dayNumber}
-                          </span>
-                          <span className="text-xs sm:text-sm font-bold text-slate-900">
-                            {formatDateWithWeekday(log.date)}
-                          </span>
-                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-medium">
-                            {log.weather}
-                          </span>
-                        </div>
-                        <div className="text-xs font-bold text-slate-800 truncate">
-                          {logProjectName}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {logLocation} · By {logAuthor}
-                          {log.weatherNotes ? ` · ${log.weatherNotes}` : ''}
-                        </div>
-                        {!isExpanded && (
-                          <div className="text-[11px] text-slate-600 pt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5">
-                            <span>{log.totalWorkers} workers</span>
-                            <span>· {activityRows.length} activities</span>
-                            {safetyRows.length > 0 && (
-                              <span>· {safetyRows.length} safety</span>
-                            )}
-                            {log.foundationsWorked.length > 0 && (
-                              <span className="font-semibold text-sky-700">
-                                · {log.foundationsWorked.join(', ')}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div
-                      className="flex items-center gap-1 shrink-0"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText(log)}
-                        title="Copy plain text summary"
-                        aria-label="Copy plain text summary"
-                        className="inline-flex items-center justify-center gap-1 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-2.5 sm:px-2 py-2 sm:py-1 rounded-lg sm:rounded border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer"
-                      >
-                        {copiedLogId === log.id ? (
-                          <Check className="w-4 h-4 sm:w-3 sm:h-3 text-emerald-600" />
-                        ) : (
-                          <Copy className="w-4 h-4 sm:w-3 sm:h-3" />
-                        )}
-                        <span className="hidden sm:inline">
-                          {copiedLogId === log.id ? 'Copied' : 'Copy'}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDailyLogPrintId(log.id)}
-                        title="Print / Save PDF"
-                        aria-label="Print / Save PDF"
-                        className="inline-flex items-center justify-center gap-1 min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 px-2.5 sm:px-2 py-2 sm:py-1 rounded-lg sm:rounded border border-slate-200 bg-slate-50 hover:bg-sky-50 hover:border-sky-200 text-[11px] font-semibold text-slate-700 hover:text-sky-700 cursor-pointer"
-                      >
-                        <Printer className="w-4 h-4 sm:w-3 sm:h-3" />
-                        <span className="hidden sm:inline">Print</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleLoadLogForEdit(log)}
-                        title="Edit daily log"
-                        aria-label="Edit daily log"
-                        className="min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center p-2 sm:p-1.5 rounded-lg sm:rounded border border-slate-200 text-slate-500 hover:text-sky-700 hover:bg-sky-50 cursor-pointer"
-                      >
-                        <Edit3 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const ok = await requestConfirm({
-                            tone: 'danger',
-                            title: 'Delete Daily Log?',
-                            message: `Delete Day ${log.dayNumber} (${log.date}) log?`,
-                            detail:
-                              'This removes the daily log entry and recalculates carried-over material balances for subsequent logs.',
-                            confirmLabel: 'Delete Log',
-                          });
-                          if (ok) {
-                            deleteDailyLog(log.id);
-                          }
-                        }}
-                        title="Delete daily log"
-                        aria-label="Delete daily log"
-                        className="min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center p-2 sm:p-1.5 rounded-lg sm:rounded border border-slate-200 text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
-                      >
-                        <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {isExpanded && (
-                    <div className="p-3.5 sm:p-4 space-y-3">
-                  {/* Manpower Summary & Tags */}
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
-                      <span className="font-bold uppercase tracking-wider text-slate-500">
-                        Manpower: {log.totalWorkers} workers
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 text-[11px]">
-                      {log.foundationsWorked.map((fid) => (
-                        <span
-                          key={fid}
-                          className="px-2 py-0.5 rounded bg-sky-600 text-white font-semibold"
-                        >
-                          {fid}
-                        </span>
-                      ))}
-                      {log.workers.map((w, idx) => (
-                        <span
-                          key={idx}
-                          className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700"
-                        >
-                          {w.count}× {w.role}
-                          {w.names ? ` (${w.names})` : ''}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Activities & Status Table */}
-                  <div className="space-y-1">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                      Activities &amp; Status
-                    </div>
-                    <div className="rounded-lg border border-slate-200 overflow-x-auto">
-                      <table className="w-full text-left text-[11px]">
-                        <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                          <tr>
-                            <th className="px-2 py-1 font-semibold w-16">Loc.</th>
-                            <th className="px-2 py-1 font-semibold">Activity</th>
-                            <th className="px-2 py-1 font-semibold text-center w-24">Status</th>
-                            <th className="px-2 py-1 font-semibold">Remarks</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {activityRows.length === 0 ? (
-                            <tr>
-                              <td colSpan={4} className="px-2 py-1.5 text-center text-slate-400 italic">
-                                No activities recorded
-                              </td>
-                            </tr>
-                          ) : (
-                            activityRows.map((act) => (
-                              <tr key={act.id}>
-                                <td className="px-2 py-1 font-bold text-sky-700">
-                                  {act.foundationId || 'Site'}
-                                </td>
-                                <td className="px-2 py-1 text-slate-900 font-medium">
-                                  {act.description}
-                                </td>
-                                <td className="px-2 py-1 text-center">
-                                  <span
-                                    className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-bold ${
-                                      ACTIVITY_STATUS_BADGE[act.status]
-                                    }`}
-                                  >
-                                    {act.status}
-                                  </span>
-                                </td>
-                                <td className="px-2 py-1 text-slate-500">
-                                  {act.remarks || '—'}
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                    {log.activitiesSummary && log.activities && log.activities.length > 0 && (
-                      <p className="text-xs text-slate-600 leading-relaxed pt-0.5">
-                        {log.activitiesSummary}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Safety Logs Table (Safety Officer) */}
-                  {(safetyRows.length > 0 || Boolean(log.safetyOfficer?.trim())) && (
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                        <span className="font-bold uppercase tracking-wider text-slate-500">
-                          Safety Logs
-                        </span>
-                        {log.safetyOfficer?.trim() && (
-                          <span className="font-semibold text-emerald-700">
-                            Safety Officer: {log.safetyOfficer}
-                          </span>
-                        )}
-                      </div>
-                      <div className="rounded-lg border border-slate-200 overflow-x-auto">
-                        <table className="w-full text-left text-[11px]">
-                          <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                            <tr>
-                              <th className="px-2 py-1 font-semibold">Time / Activity</th>
-                              <th className="px-2 py-1 font-semibold">Observation / Hazard</th>
-                              <th className="px-2 py-1 font-semibold">Action Taken</th>
-                              <th className="px-2 py-1 font-semibold">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {safetyRows.length === 0 ? (
-                              <tr>
-                                <td
-                                  colSpan={4}
-                                  className="px-2 py-1.5 text-center text-slate-400 italic"
-                                >
-                                  No safety log entries recorded
-                                </td>
-                              </tr>
-                            ) : (
-                              safetyRows.map((s) => (
-                                <tr key={s.id}>
-                                  <td className="px-2 py-1 font-semibold text-slate-800">
-                                    {s.timeOrActivity || '—'}
-                                  </td>
-                                  <td className="px-2 py-1 text-slate-700">
-                                    {s.hazardOrFinding || '—'}
-                                  </td>
-                                  <td className="px-2 py-1 text-slate-700">
-                                    {s.actionTaken || '—'}
-                                  </td>
-                                  <td className="px-2 py-1 font-semibold text-emerald-700">
-                                    {s.status || 'Compliant'}
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Materials on Site Table */}
-                  {mats.length > 0 && (
-                    <div className="space-y-1">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                        Materials on Site
-                      </div>
-                      <div className="rounded-lg border border-slate-200 overflow-x-auto">
-                        <table className="w-full text-left text-[11px]">
-                          <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                            <tr>
-                              <th className="px-2 py-1 font-semibold">Item</th>
-                              <th className="px-2 py-1 font-semibold text-right">On Site</th>
-                              <th className="px-2 py-1 font-semibold text-right">Delivered</th>
-                              <th className="px-2 py-1 font-semibold text-right">Used</th>
-                              <th className="px-2 py-1 font-semibold text-right">Remaining</th>
-                              <th className="px-2 py-1 font-semibold">Remarks</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {mats.map((m) => {
-                              const delivered = m.deliveredQty ?? 0;
-                              const remaining =
-                                m.remainingQty ?? computeDailyLogMaterialRemaining(m);
-                              return (
-                                <tr key={m.id}>
-                                  <td className="px-2 py-1 font-semibold text-slate-800">
-                                    {m.name} ({m.unit})
-                                  </td>
-                                  <td className="px-2 py-1 text-right font-semibold text-slate-900">
-                                    {m.onSiteQty}
-                                  </td>
-                                  <td className="px-2 py-1 text-right font-semibold text-emerald-700">
-                                    {delivered}
-                                  </td>
-                                  <td className="px-2 py-1 text-right text-slate-700">
-                                    {m.usedTodayQty}
-                                  </td>
-                                  <td className="px-2 py-1 text-right font-bold text-sky-700">
-                                    {remaining}
-                                  </td>
-                                  <td className="px-2 py-1 text-slate-500">
-                                    {m.remarks || '—'}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Equipments Table */}
-                  {equips.length > 0 && (
-                    <div className="space-y-1">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                        Equipments
-                      </div>
-                      <div className="rounded-lg border border-slate-200 overflow-x-auto">
-                        <table className="w-full text-left text-[11px]">
-                          <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                            <tr>
-                              <th className="px-2 py-1 font-semibold">Equipment / Tool</th>
-                              <th className="px-2 py-1 font-semibold text-center w-14">Qty</th>
-                              <th className="px-2 py-1 font-semibold text-center w-24">Status</th>
-                              <th className="px-2 py-1 font-semibold">Remarks</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {equips.map((eq) => (
-                              <tr key={eq.id}>
-                                <td className="px-2 py-1 font-semibold text-slate-800">
-                                  {eq.name}
-                                </td>
-                                <td className="px-2 py-1 text-center text-slate-900">
-                                  {eq.qty}
-                                </td>
-                                <td className="px-2 py-1 text-center text-slate-700">
-                                  {eq.status}
-                                </td>
-                                <td className="px-2 py-1 text-slate-500">
-                                  {eq.remarks || '—'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Delays Table */}
-                  {delays.length > 0 && (
-                    <div className="space-y-1">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
-                        Delays
-                      </div>
-                      <div className="rounded-lg border border-amber-200 overflow-x-auto">
-                        <table className="w-full text-left text-[11px]">
-                          <thead className="bg-amber-50 text-amber-900 border-b border-amber-200">
-                            <tr>
-                              <th className="px-2 py-1 font-semibold">Delay / Issue</th>
-                              <th className="px-2 py-1 font-semibold w-28">Impact</th>
-                              <th className="px-2 py-1 font-semibold">Remarks</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-amber-100">
-                            {delays.map((d) => (
-                              <tr key={d.id}>
-                                <td className="px-2 py-1 font-medium text-amber-950">
-                                  {d.description}
-                                </td>
-                                <td className="px-2 py-1 text-amber-900">
-                                  {d.impact || '—'}
-                                </td>
-                                <td className="px-2 py-1 text-amber-800">
-                                  {d.remarks || '—'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Visitors Table */}
-                  {visitors.length > 0 && (
-                    <div className="space-y-1">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                        Visitors
-                      </div>
-                      <div className="rounded-lg border border-slate-200 overflow-x-auto">
-                        <table className="w-full text-left text-[11px]">
-                          <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                            <tr>
-                              <th className="px-2 py-1 font-semibold">Name</th>
-                              <th className="px-2 py-1 font-semibold">Company / Role</th>
-                              <th className="px-2 py-1 font-semibold">Purpose</th>
-                              <th className="px-2 py-1 font-semibold">Remarks</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {visitors.map((v) => (
-                              <tr key={v.id}>
-                                <td className="px-2 py-1 font-semibold text-slate-800">
-                                  {v.name}
-                                </td>
-                                <td className="px-2 py-1 text-slate-700">
-                                  {v.roleOrCompany || '—'}
-                                </td>
-                                <td className="px-2 py-1 text-slate-700">
-                                  {v.purpose || '—'}
-                                </td>
-                                <td className="px-2 py-1 text-slate-500">
-                                  {v.remarks || '—'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Documentation Table (Image left, Description / Remarks right) */}
-                  {docs.length > 0 && (
-                    <div className="space-y-1">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                        Documentation
-                      </div>
-                      <div className="rounded-lg border border-slate-200 overflow-x-auto">
-                        <table className="w-full text-left text-[11px]">
-                          <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
-                            <tr>
-                              <th className="px-2 py-1 font-semibold w-5/12">Image</th>
-                              <th className="px-2 py-1 font-semibold w-7/12">
-                                Description / Remarks
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-200">
-                            {docs.map((doc) => (
-                              <tr key={doc.id}>
-                                <td className="p-1.5 align-middle">
-                                  {doc.photoDataUrl ? (
-                                    <img
-                                      src={doc.photoDataUrl}
-                                      alt={doc.description || doc.photoName || 'Documentation'}
-                                      className="max-h-28 w-auto mx-auto rounded border border-slate-200 object-contain"
-                                    />
-                                  ) : (
-                                    <span className="text-slate-400 italic block text-center">
-                                      No photo
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="p-2 align-top space-y-1">
-                                  <div className="font-semibold text-slate-900">
-                                    {doc.description || '—'}
-                                  </div>
-                                  {doc.remarks && (
-                                    <div className="text-slate-600">
-                                      <span className="font-semibold">Remarks:</span> {doc.remarks}
-                                    </div>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                    </div>
-                  )}
-                </article>
-              );
-            })
-          )}
-        </div>
+        <DailyLogsHistoryFeed
+          project={project}
+          sortedDailyLogs={sortedDailyLogs}
+          mobilePane={mobilePane}
+          onLoadLogForEdit={handleLoadLogForEdit}
+          onBatchPrint={() => setBatchPrintOpen(true)}
+        />
       </div>
 
       <DailyLogRowEditorModal
