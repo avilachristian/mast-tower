@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   BarChart3,
   Building2,
+  Camera,
   ClipboardCheck,
   ClipboardList,
   Download,
@@ -19,6 +20,7 @@ import {
   PanelLeft,
   RefreshCw,
   RotateCcw,
+  Search,
   Truck,
   Upload,
   Users,
@@ -173,6 +175,17 @@ const ConflictDiffModal = lazy(() =>
     default: m.ConflictDiffModal,
   }))
 );
+const GlobalSearchModal = lazy(() =>
+  import('@/widgets/search/GlobalSearchModal').then((m) => ({
+    default: m.GlobalSearchModal,
+  }))
+);
+const PhotoGalleryModal = lazy(() =>
+  import('@/widgets/gallery/PhotoGalleryModal').then((m) => ({
+    default: m.PhotoGalleryModal,
+  }))
+);
+import type { SearchResultItem } from '@/shared/search/globalProjectSearch';
 
 function WorkspaceTabFallback() {
   return (
@@ -191,6 +204,7 @@ export function AdminWorkspace() {
     activeProjectId,
     project,
     selectedFoundationId,
+    selectFoundation,
     switchProject,
     setProjectPhase,
     updateReportDetails,
@@ -203,6 +217,7 @@ export function AdminWorkspace() {
       activeProjectId: s.activeProjectId,
       project: s.project,
       selectedFoundationId: s.selectedFoundationId,
+      selectFoundation: s.selectFoundation,
       switchProject: s.switchProject,
       setProjectPhase: s.setProjectPhase,
       updateReportDetails: s.updateReportDetails,
@@ -270,6 +285,43 @@ export function AdminWorkspace() {
     }
   };
 
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [photoGalleryOpen, setPhotoGalleryOpen] = useState(false);
+  const [photoGalleryInitialId, setPhotoGalleryInitialId] = useState<string | undefined>(undefined);
+
+  // Global Ctrl+K / Cmd+K listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setGlobalSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleSelectSearchResult = (item: SearchResultItem) => {
+    if (item.navigation.phase && item.navigation.phase !== (project.projectType ?? 'foundation')) {
+      setProjectPhase(item.navigation.phase);
+    }
+    if (item.navigation.foundationId) {
+      selectFoundation(item.navigation.foundationId);
+    }
+    if (item.navigation.manpowerSubTab) {
+      setManpowerSubTab(item.navigation.manpowerSubTab);
+    }
+    if (item.navigation.manpowerMode) {
+      setManpowerPaymentMode(item.navigation.manpowerMode);
+    }
+    if (item.category === 'photos' && item.navigation.photoId) {
+      setPhotoGalleryInitialId(item.navigation.photoId);
+      setPhotoGalleryOpen(true);
+      return;
+    }
+    setActiveAppTab(item.navigation.tab);
+  };
+
   const {
     activeAppTab,
     setActiveAppTab,
@@ -285,6 +337,8 @@ export function AdminWorkspace() {
     setDailyLogPrintId,
     selectedMastTarget,
     manpowerPaymentMode,
+    setManpowerSubTab,
+    setManpowerPaymentMode,
     payrollPrintTarget,
     setPayrollPrintTarget,
     hasOrderViolation,
@@ -306,6 +360,8 @@ export function AdminWorkspace() {
       setDailyLogPrintId: s.setDailyLogPrintId,
       selectedMastTarget: s.selectedMastTarget,
       manpowerPaymentMode: s.manpowerPaymentMode,
+      setManpowerSubTab: s.setManpowerSubTab,
+      setManpowerPaymentMode: s.setManpowerPaymentMode,
       payrollPrintTarget: s.payrollPrintTarget,
       setPayrollPrintTarget: s.setPayrollPrintTarget,
       hasOrderViolation: Boolean(
@@ -788,9 +844,32 @@ export function AdminWorkspace() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setMobileMenuOpen((v) => !v)}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setGlobalSearchOpen(true)}
+                  aria-label="Search project"
+                  title="Search project (Ctrl+K)"
+                  className="inline-flex items-center justify-center min-h-10 min-w-10 px-2.5 py-2 border border-stone-400 bg-white hover:border-neutral-950 text-neutral-900 text-[11px] font-mono uppercase tracking-wider transition cursor-pointer"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhotoGalleryInitialId(undefined);
+                    setPhotoGalleryOpen(true);
+                  }}
+                  aria-label="Open photo gallery"
+                  title="Project Photo Gallery"
+                  className="inline-flex items-center justify-center min-h-10 min-w-10 px-2.5 py-2 border border-stone-400 bg-white hover:border-neutral-950 text-neutral-900 text-[11px] font-mono uppercase tracking-wider transition cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen((v) => !v)}
                 aria-expanded={mobileMenuOpen}
                 aria-label={mobileMenuOpen ? 'Close workspace menu' : 'Open workspace menu'}
                 title="Workspace menu, Cloud Sync & Tools"
@@ -805,6 +884,7 @@ export function AdminWorkspace() {
                   />
                 )}
               </button>
+            </div>
             </div>
 
             {!projectBrowserOpen && (
@@ -1019,6 +1099,32 @@ export function AdminWorkspace() {
 
                   {!projectBrowserOpen && (
                     <>
+                      <button
+                        type="button"
+                        onClick={() => setGlobalSearchOpen(true)}
+                        className="w-full py-1.5 px-2.5 border border-stone-300 bg-white text-neutral-800 hover:border-neutral-950 text-[11px] font-mono uppercase tracking-wider inline-flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <Search className="w-3.5 h-3.5 shrink-0" />
+                          <span>Search Records</span>
+                        </span>
+                        <kbd className="text-[10px] text-neutral-400 font-mono">Ctrl+K</kbd>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhotoGalleryInitialId(undefined);
+                          setPhotoGalleryOpen(true);
+                        }}
+                        className="w-full py-1.5 px-2.5 border border-stone-300 bg-white text-neutral-800 hover:border-neutral-950 text-[11px] font-mono uppercase tracking-wider inline-flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 shrink-0" />
+                          <span>Photo Gallery</span>
+                        </span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={handleOpenReport}
@@ -1260,6 +1366,34 @@ export function AdminWorkspace() {
 
                 {/* Cloud, R2 Quota, Showcase, Style & Auth Controls */}
                 <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setGlobalSearchOpen(true)}
+                    title="Global Search across logs, inspections, payroll & photos (Ctrl+K)"
+                    aria-label="Global Project Search"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold transition cursor-pointer shadow-2xs"
+                  >
+                    <Search className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="hidden lg:inline">Search</span>
+                    <kbd className="hidden xl:inline-flex items-center text-[10px] font-mono text-slate-400 bg-slate-100 px-1 py-0.2 rounded border border-slate-200">
+                      Ctrl+K
+                    </kbd>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoGalleryInitialId(undefined);
+                      setPhotoGalleryOpen(true);
+                    }}
+                    title="Project Photo Gallery & Offline Storage"
+                    aria-label="Open Photo Gallery"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="hidden xl:inline">Photos</span>
+                  </button>
+
                   <R2StorageHeaderPill />
 
                   {!projectBrowserOpen && (
@@ -1325,7 +1459,28 @@ export function AdminWorkspace() {
               </div>
 
               {/* Mobile Compact Menu Toggle (< md) */}
-              <div className="flex md:hidden items-center shrink-0">
+              <div className="flex md:hidden items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setGlobalSearchOpen(true)}
+                  aria-label="Search project"
+                  title="Search project (Ctrl+K)"
+                  className="inline-flex items-center justify-center min-h-10 min-w-10 px-2.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhotoGalleryInitialId(undefined);
+                    setPhotoGalleryOpen(true);
+                  }}
+                  aria-label="Open photo gallery"
+                  title="Project Photo Gallery"
+                  className="inline-flex items-center justify-center min-h-10 min-w-10 px-2.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
                 <button
                   type="button"
                   onClick={() => setMobileMenuOpen((v) => !v)}
@@ -1465,6 +1620,38 @@ export function AdminWorkspace() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+                {/* Quick Tools */}
+                <section className="space-y-1.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Quick Tools
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        setGlobalSearchOpen(true);
+                      }}
+                      className="py-2 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Search className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Search</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        setPhotoGalleryInitialId(undefined);
+                        setPhotoGalleryOpen(true);
+                      }}
+                      className="py-2 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Photos</span>
+                    </button>
+                  </div>
+                </section>
+
                 {/* Workspace Style Selector */}
                 <section className="space-y-1.5">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -1765,6 +1952,37 @@ export function AdminWorkspace() {
               await resolveConflictOverwriteCloud();
             }}
             onClose={() => setShowConflictDiff(false)}
+          />
+        </Suspense>
+      )}
+
+      {/* Global Project Search Modal */}
+      {globalSearchOpen && (
+        <Suspense fallback={null}>
+          <GlobalSearchModal
+            project={project}
+            isOpen={globalSearchOpen}
+            onClose={() => setGlobalSearchOpen(false)}
+            onSelectResult={handleSelectSearchResult}
+            onOpenPhotoGallery={() => {
+              setPhotoGalleryInitialId(undefined);
+              setPhotoGalleryOpen(true);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {/* Project Photo Gallery Modal */}
+      {photoGalleryOpen && (
+        <Suspense fallback={null}>
+          <PhotoGalleryModal
+            project={project}
+            isOpen={photoGalleryOpen}
+            onClose={() => {
+              setPhotoGalleryOpen(false);
+              setPhotoGalleryInitialId(undefined);
+            }}
+            initialPhotoId={photoGalleryInitialId}
           />
         </Suspense>
       )}
