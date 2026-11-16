@@ -46,6 +46,7 @@ import {
   syncDailyLogMaterialsWithHauling,
 } from '@/entities/project/haulingInventory';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
+import { DailyLogBatchPrintModal } from './DailyLogBatchPrintModal';
 import type {
   DailyActivityLogEntry,
   DailyLogActivityItem,
@@ -200,6 +201,7 @@ export function DailyLogsView({
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [copiedLogId, setCopiedLogId] = useState<string | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({});
+  const [batchPrintOpen, setBatchPrintOpen] = useState(false);
 
   const sortedDailyLogs = useMemo(
     () => sortDailyLogsNewestFirst(project.dailyLogs),
@@ -2753,34 +2755,45 @@ export function DailyLogsView({
             </h2>
             <div className="flex items-center gap-2">
               {sortedDailyLogs.length > 0 && (
-                <div className="inline-flex rounded-md border border-slate-200 bg-white overflow-hidden text-[11px] font-medium">
+                <>
                   <button
                     type="button"
-                    onClick={() => {
-                      const next: Record<string, boolean> = {};
-                      sortedDailyLogs.forEach((l) => {
-                        next[l.id] = true;
-                      });
-                      setExpandedLogs(next);
-                    }}
-                    className="px-2 py-0.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 border-r border-slate-200 cursor-pointer"
+                    onClick={() => setBatchPrintOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-semibold cursor-pointer shadow-2xs"
+                    title="Batch export multiple logs to a single PDF / print document"
                   >
-                    Expand All
+                    <Printer className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Batch Print / PDF</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next: Record<string, boolean> = {};
-                      sortedDailyLogs.forEach((l) => {
-                        next[l.id] = false;
-                      });
-                      setExpandedLogs(next);
-                    }}
-                    className="px-2 py-0.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
-                  >
-                    Collapse All
-                  </button>
-                </div>
+                  <div className="inline-flex rounded-md border border-slate-200 bg-white overflow-hidden text-[11px] font-medium">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next: Record<string, boolean> = {};
+                        sortedDailyLogs.forEach((l) => {
+                          next[l.id] = true;
+                        });
+                        setExpandedLogs(next);
+                      }}
+                      className="px-2 py-0.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 border-r border-slate-200 cursor-pointer"
+                    >
+                      Expand All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next: Record<string, boolean> = {};
+                        sortedDailyLogs.forEach((l) => {
+                          next[l.id] = false;
+                        });
+                        setExpandedLogs(next);
+                      }}
+                      className="px-2 py-0.5 text-slate-600 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                    >
+                      Collapse All
+                    </button>
+                  </div>
+                </>
               )}
               <span className="text-[11px] text-slate-500 hidden sm:inline">
                 Stored offline on device
@@ -3323,6 +3336,13 @@ export function DailyLogsView({
         onSave={handleSaveModalTarget}
         onDelete={handleDeleteModalTarget}
       />
+
+      {batchPrintOpen && (
+        <DailyLogBatchPrintModal
+          project={project}
+          onClose={() => setBatchPrintOpen(false)}
+        />
+      )}
     </div>
   );
 }
