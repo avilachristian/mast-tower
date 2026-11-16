@@ -1079,7 +1079,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     importProjectAsNew: (jsonText) => {
       const parsed = JSON.parse(jsonText) as MastProjectState;
       if (!parsed || !Array.isArray(parsed.foundations) || parsed.foundations.length !== 13) {
-        throw new Error('Invalid Mast 2 project JSON file (expected 13 foundations).');
+        throw new Error('Invalid Mast Tower project JSON file (expected 13 foundations).');
       }
       const s = get();
       const record: SavedProjectRecord = {
@@ -2067,7 +2067,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     importProjectJson: (jsonText) => {
       const parsed = JSON.parse(jsonText) as MastProjectState;
       if (!parsed || !Array.isArray(parsed.foundations) || parsed.foundations.length !== 13) {
-        throw new Error('Invalid Mast 2 project JSON file (expected 13 foundations).');
+        throw new Error('Invalid Mast Tower project JSON file (expected 13 foundations).');
       }
       const cleaned = stripLegacyBoilerplateNotes(parsed);
       set((s) => ({

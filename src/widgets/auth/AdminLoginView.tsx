@@ -54,7 +54,7 @@ export function AdminLoginView() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-slate-900">
-                Mast 2 Tower — Admin Portal
+                Mast Tower — Admin Portal
               </h1>
               <p className="text-xs text-slate-500 mt-1">
                 Sign in to create projects, log daily site reports, upload photos to R2, and control what clients see.

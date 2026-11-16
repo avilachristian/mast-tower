@@ -61,7 +61,7 @@ function pwaOfflinePlugin(): Plugin {
         rel === 'index.html' ? '/' : encodeURI(`/${rel}`)
       );
 
-      const swSource = `/* Auto-generated offline service worker for Mast 2 Tower */
+      const swSource = `/* Auto-generated offline service worker for Mast Tower */
 const CACHE_PREFIX = 'mast2-pwa-';
 const CACHE_NAME = '${'mast2-pwa-'}' + '${buildId}';
 const IMAGE_CACHE_NAME = 'mast2-images-v1';

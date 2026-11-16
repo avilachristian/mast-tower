@@ -1,6 +1,6 @@
 {
-  "name": "Mast 2 Tower — Project Field Reporting System",
-  "short_name": "Mast 2 Tower",
+  "name": "Mast Tower — Project Field Reporting System",
+  "short_name": "Mast Tower",
   "description": "Offline-capable field reporting, foundation & vertical mast inspection, daily logs, and PDF report generator.",
   "start_url": "/",
   "scope": "/",
