@@ -62,6 +62,7 @@ export const DEFAULT_CLIENT_SHOWCASE_SETTINGS: ClientShowcaseSettings = {
   phaseMode: 'both',
   showPhotos: true,
   showReports: true,
+  show3DModel: true,
 };
 
 export function slugifyProjectSlug(value: string, fallbackId = 'project'): string {
@@ -100,6 +101,7 @@ export function resolveClientShowcaseSettings(
         : 'both',
     showPhotos: raw?.showPhotos ?? true,
     showReports: raw?.showReports ?? true,
+    show3DModel: raw?.show3DModel ?? true,
   };
 }
 

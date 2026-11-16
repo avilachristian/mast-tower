@@ -352,7 +352,11 @@ export function CloudSyncPanel({
   );
 }
 
-export function CloudSyncControls() {
+export function CloudSyncControls({
+  inlinePanel = false,
+}: {
+  inlinePanel?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const {
@@ -394,10 +398,10 @@ export function CloudSyncControls() {
           : 'border-emerald-200 bg-emerald-50 text-emerald-800';
 
   return (
-    <div ref={containerRef} className="relative flex items-center">
+    <div ref={containerRef} className={inlinePanel ? 'w-full' : 'relative flex items-center'}>
       {/* Split Control: 1-Click Sync Active Project + Schedule/Settings Trigger */}
       <div
-        className={`inline-flex items-center rounded-lg sm:rounded-md border overflow-hidden shadow-2xs ${pillTone}`}
+        className={`${inlinePanel ? 'flex w-full justify-between' : 'inline-flex'} items-center rounded-lg sm:rounded-md border overflow-hidden shadow-2xs ${pillTone}`}
       >
         <button
           type="button"
@@ -455,15 +459,24 @@ export function CloudSyncControls() {
       </div>
 
       {/* Sync Settings & Queue Popover */}
-      {open && (
-        <div
-          role="dialog"
-          aria-label="Cloud Sync Settings"
-          className="fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-1.5 z-50 w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-slate-200 bg-white shadow-xl text-slate-800 p-3.5"
-        >
-          <CloudSyncPanel onActionComplete={() => setOpen(false)} />
-        </div>
-      )}
+      {open &&
+        (inlinePanel ? (
+          <div
+            role="dialog"
+            aria-label="Cloud Sync Settings"
+            className="mt-2 border border-stone-300 bg-white text-neutral-900 p-3"
+          >
+            <CloudSyncPanel onActionComplete={() => setOpen(false)} />
+          </div>
+        ) : (
+          <div
+            role="dialog"
+            aria-label="Cloud Sync Settings"
+            className="fixed sm:absolute right-2 sm:right-0 top-14 sm:top-full sm:mt-1.5 z-50 w-[min(22rem,calc(100vw-1rem))] rounded-xl border border-slate-200 bg-white shadow-xl text-slate-800 p-3.5"
+          >
+            <CloudSyncPanel onActionComplete={() => setOpen(false)} />
+          </div>
+        ))}
     </div>
   );
 }

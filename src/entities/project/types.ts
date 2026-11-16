@@ -602,6 +602,8 @@ export interface ClientShowcaseSettings {
   phaseMode: ClientShowcasePhaseMode;
   showPhotos: boolean;
   showReports: boolean;
+  /** Defaults to true when omitted for backward compatibility. */
+  show3DModel?: boolean;
 }
 
 export type ProjectSyncStatus = 'synced' | 'pending' | 'conflict' | 'local_only';

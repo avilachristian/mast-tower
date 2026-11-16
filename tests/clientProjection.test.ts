@@ -236,7 +236,7 @@ describe('Client Showcase Sanitized Projection', () => {
     expect(serialized).not.toContain('45678.9');
   });
 
-  it('respects phaseMode, showPhotos, and showReports visibility toggles', () => {
+  it('respects phaseMode, showPhotos, showReports, and show3DModel visibility toggles', () => {
     const state = createSampleMast2Project();
     state.dailyLogs = [
       {
@@ -275,12 +275,14 @@ describe('Client Showcase Sanitized Projection', () => {
         phaseMode: 'foundation',
         showPhotos: false,
         showReports: false,
+        show3DModel: false,
       },
       state,
     });
 
     expect(dtoBothOff.verticalMastSummary).toBeUndefined();
     expect(dtoBothOff.highlights).toEqual([]);
+    expect(dtoBothOff.settings.show3DModel).toBe(false);
 
     // showReports on while showPhotos off -> text log kept for PDF report, photos stripped
     const dtoReportsOnly = buildClientShowcaseDto({
@@ -299,6 +301,7 @@ describe('Client Showcase Sanitized Projection', () => {
     expect(dtoReportsOnly.highlights).toHaveLength(1);
     expect(dtoReportsOnly.highlights[0].activitiesSummary).toBe('Excavation works.');
     expect(dtoReportsOnly.highlights[0].photos).toEqual([]);
+    expect(dtoReportsOnly.settings.show3DModel).toBe(true);
 
     expect(slugifyProjectSlug('Site #01 — Cebu North!', 'fallback')).toBe(
       'site-01-cebu-north'
@@ -309,6 +312,7 @@ describe('Client Showcase Sanitized Projection', () => {
     });
     expect(defaults.phaseMode).toBe('both');
     expect(defaults.showReports).toBe(true);
+    expect(defaults.show3DModel).toBe(true);
   });
 
   it('strips legacy unused schedule and schedulePhaseId data when loading saved workspaces', () => {

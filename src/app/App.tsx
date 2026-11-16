@@ -37,6 +37,7 @@ export function App() {
   const authStatus = useAuthStore((s) => s.status);
   const checkSession = useAuthStore((s) => s.checkSession);
   const projectBrowserOpen = useUiStore((s) => s.projectBrowserOpen);
+  const adminUiStyle = useUiStore((s) => s.adminUiStyle);
 
   useEffect(() => {
     if (route.kind !== 'admin') return;
@@ -44,6 +45,19 @@ export function App() {
       void checkSession();
     }
   }, [route.kind, authStatus, checkSession]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const rootEl = document.documentElement;
+    if (route.kind === 'admin' && adminUiStyle === 'swiss') {
+      rootEl.dataset.adminStyle = 'swiss';
+    } else {
+      delete rootEl.dataset.adminStyle;
+    }
+    return () => {
+      delete rootEl.dataset.adminStyle;
+    };
+  }, [route.kind, adminUiStyle]);
 
   const showAdminBottomNav =
     route.kind === 'admin' && authStatus === 'authenticated' && !projectBrowserOpen;

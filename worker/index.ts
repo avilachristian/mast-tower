@@ -156,6 +156,7 @@ function rowToSavedProjectRecord(row: ProjectRow): SavedProjectRecord {
       phaseMode: rawSettings.phaseMode ?? 'both',
       showPhotos: rawSettings.showPhotos ?? true,
       showReports: rawSettings.showReports ?? true,
+      show3DModel: rawSettings.show3DModel ?? true,
     },
   });
 
@@ -1008,6 +1009,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
           phaseMode: 'both',
           showPhotos: true,
           showReports: true,
+          show3DModel: true,
         }),
         ...(body.clientSettings ?? {}),
       },
@@ -1136,6 +1138,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
           phaseMode: 'both',
           showPhotos: true,
           showReports: true,
+          show3DModel: true,
         }),
         ...patch,
       },

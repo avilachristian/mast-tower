@@ -170,7 +170,11 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
 
   const lastFetchAtRef = useRef<number>(0);
   const lastCachedSigRef = useRef<string | null>(null);
-  const lastSyncedDiagramRef = useRef<{ id: string; phaseMode: string } | null>(null);
+  const lastSyncedDiagramRef = useRef<{
+    id: string;
+    phaseMode: string;
+    show3DModel: boolean;
+  } | null>(null);
 
   const loadProjects = useCallback(
     async (isManualRefresh = false, silent = false) => {
@@ -306,9 +310,13 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     return projects.find((p) => p.featured) ?? projects[0];
   }, [projects, slug]);
 
-  // Reset diagram selections on project switch and keep active diagram mode valid when phaseMode updates
+  const show3DModel = activeDto?.settings.show3DModel !== false;
+
+  // Reset diagram selections on project switch and keep active diagram mode valid when phaseMode or 3D visibility updates
   useEffect(() => {
     if (!activeDto) return;
+
+    const allow3D = activeDto.settings.show3DModel !== false;
 
     const resolveDefaultMode = (dto: ClientProjectShowcaseDto): 'foundation' | 'vertical_mast' => {
       if (dto.settings.phaseMode === 'vertical_mast') {
@@ -331,23 +339,29 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
     if (isNewProject) {
       setDiagramMode(resolveDefaultMode(activeDto));
       const firstFoundation = activeDto.foundations[0]?.id ?? 'PF-0';
+      const defaultMastAnchor =
+        activeDto.foundations.find((f) => f.id === 'PF-0')?.id ?? firstFoundation;
       setSelectedFoundationId(firstFoundation);
       setSelectedMastTarget({ kind: 'section', id: 'S01' });
-      setSelectedGuyAnchorId(undefined);
+      setSelectedGuyAnchorId(defaultMastAnchor);
       setSelected3DTarget({ kind: 'foundation', foundationId: firstFoundation });
       setLightboxIndex(null);
       setProgressReportTarget(null);
       setDailyLogPrintOpen(false);
       setDailyLogInitialId(null);
-    } else if (phaseChanged) {
-      setDiagramMode((current) =>
-        current === '3d_model' ? '3d_model' : resolveDefaultMode(activeDto)
-      );
+    } else if (phaseChanged || !allow3D) {
+      setDiagramMode((current) => {
+        if (current === '3d_model') {
+          return allow3D ? '3d_model' : resolveDefaultMode(activeDto);
+        }
+        return phaseChanged ? resolveDefaultMode(activeDto) : current;
+      });
     }
 
     lastSyncedDiagramRef.current = {
       id: activeDto.id,
       phaseMode: activeDto.settings.phaseMode,
+      show3DModel: allow3D,
     };
   }, [activeDto]);
 
@@ -448,9 +462,107 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
   }, [activeDto, selectedGuyAnchorId]);
 
   const highlightedAnchorIds = useMemo(() => {
-    if (!selectedGuyLayer) return [];
-    return Object.values(selectedGuyLayer.anchorIds);
-  }, [selectedGuyLayer]);
+    if (selectedGuyLayer) {
+      return Object.values(selectedGuyLayer.anchorIds);
+    }
+    if (selectedTowerSection && vmOverview) {
+      if (selectedTowerSection.guyLayerIds.length > 0) {
+        const anchors = new Set<string>();
+        for (const layerId of selectedTowerSection.guyLayerIds) {
+          const layer = vmOverview.vm.guyLayers.find((g) => g.id === layerId);
+          if (layer) {
+            Object.values(layer.anchorIds).forEach((aid) => anchors.add(aid));
+          }
+        }
+        if (anchors.size > 0) return Array.from(anchors);
+      }
+      return ['PF-0'];
+    }
+    return [];
+  }, [selectedGuyLayer, selectedTowerSection, vmOverview]);
+
+  const handleSelectMastTarget = useCallback(
+    (target: MastSelectionTarget) => {
+      setSelectedMastTarget(target);
+      if (target.kind === 'section') {
+        setSelected3DTarget({ kind: 'section', sectionId: target.id });
+        if (vmOverview) {
+          const sec = vmOverview.vm.sections.find((s) => s.id === target.id);
+          const linkedLayers = (sec?.guyLayerIds ?? [])
+            .map((layerId) => vmOverview.vm.guyLayers.find((l) => l.id === layerId))
+            .filter((l): l is NonNullable<typeof l> => Boolean(l));
+          const linkedAnchorIds = linkedLayers.flatMap((l) => Object.values(l.anchorIds));
+          if (linkedAnchorIds.length > 0) {
+            setSelectedGuyAnchorId((prev) =>
+              prev && linkedAnchorIds.includes(prev) ? prev : linkedLayers[0].anchorIds.I
+            );
+          } else {
+            setSelectedGuyAnchorId('PF-0');
+          }
+        }
+      } else if (target.kind === 'guy_layer') {
+        setSelected3DTarget({ kind: 'guy_layer', guyLayerId: target.id });
+        const layer = vmOverview?.vm.guyLayers.find((l) => l.id === target.id);
+        if (layer) {
+          const layerAnchorIds = Object.values(layer.anchorIds);
+          setSelectedGuyAnchorId((prev) =>
+            prev && layerAnchorIds.includes(prev) ? prev : layer.anchorIds.I
+          );
+        }
+      }
+    },
+    [vmOverview]
+  );
+
+  const handleSelectMastAnchor = useCallback(
+    (foundationId: string) => {
+      setSelectedGuyAnchorId(foundationId);
+      setSelectedFoundationId(foundationId);
+
+      if (foundationId === 'PF-0') {
+        setSelectedMastTarget({ kind: 'section', id: 'S01' });
+        setSelected3DTarget({ kind: 'foundation', foundationId: 'PF-0' });
+        return;
+      }
+
+      if (!vmOverview) return;
+      const matchingLayers = vmOverview.vm.guyLayers.filter((g) =>
+        Object.values(g.anchorIds).includes(foundationId)
+      );
+      if (matchingLayers.length === 0) {
+        setSelected3DTarget({ kind: 'foundation', foundationId });
+        return;
+      }
+
+      let chosenLayer = matchingLayers[0];
+      if (selectedMastTarget.kind === 'guy_layer') {
+        const currentIdx = matchingLayers.findIndex((g) => g.id === selectedMastTarget.id);
+        if (currentIdx >= 0) {
+          chosenLayer =
+            selectedGuyAnchorId === foundationId
+              ? matchingLayers[(currentIdx + 1) % matchingLayers.length]
+              : matchingLayers[currentIdx];
+        }
+      } else if (selectedMastTarget.kind === 'section') {
+        const sec = vmOverview.vm.sections.find((s) => s.id === selectedMastTarget.id);
+        const linkedMatch = sec
+          ? matchingLayers.find((g) => sec.guyLayerIds.includes(g.id))
+          : undefined;
+        if (linkedMatch) chosenLayer = linkedMatch;
+      }
+
+      setSelectedMastTarget({ kind: 'guy_layer', id: chosenLayer.id });
+      const matchedSector = (['I', 'II', 'III'] as const).find(
+        (sec) => chosenLayer.anchorIds[sec] === foundationId
+      );
+      setSelected3DTarget({
+        kind: 'guy_layer',
+        guyLayerId: chosenLayer.id,
+        sector: matchedSector,
+      });
+    },
+    [vmOverview, selectedMastTarget, selectedGuyAnchorId]
+  );
 
   const handleSelect3D = useCallback(
     (target: Tower3DSelectionTarget | null) => {
@@ -924,7 +1036,9 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-900 pb-2">
                 <div>
                   <h2 className="text-sm font-mono uppercase tracking-widest font-bold text-neutral-950">
-                    02 · Interactive Engineering Drawings &amp; 3D Model
+                    {show3DModel
+                      ? '02 · Interactive Engineering Drawings & 3D Model'
+                      : '02 · Interactive 2D Engineering Drawings'}
                   </h2>
                   <p className="text-xs text-neutral-600 mt-0.5">
                     Select any foundation pad, mast section, or guy cable level below to inspect live telemetry.
@@ -960,21 +1074,23 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                       Mast &amp; Guying
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => setDiagramMode('3d_model')}
-                    className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider cursor-pointer transition-colors ${
-                      diagramMode === '3d_model'
-                        ? 'bg-neutral-950 text-white'
-                        : 'border border-stone-300 text-neutral-700 hover:text-neutral-950 hover:border-neutral-950'
-                    }`}
-                  >
-                    3D Model
-                  </button>
+                  {show3DModel && (
+                    <button
+                      type="button"
+                      onClick={() => setDiagramMode('3d_model')}
+                      className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider cursor-pointer transition-colors ${
+                        diagramMode === '3d_model'
+                          ? 'bg-neutral-950 text-white'
+                          : 'border border-stone-300 text-neutral-700 hover:text-neutral-950 hover:border-neutral-950'
+                      }`}
+                    >
+                      3D Model
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {diagramMode === '3d_model' ? (
+              {show3DModel && diagramMode === '3d_model' ? (
                 <div className="space-y-6">
                   <Suspense
                     fallback={
@@ -1229,16 +1345,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                       frameless
                       verticalMast={vmOverview.vm}
                       selectedTarget={selectedMastTarget}
-                      onSelectTarget={(target) => {
-                        setSelectedMastTarget(target);
-                        if (target.kind === 'section') {
-                          setSelected3DTarget({ kind: 'section', sectionId: target.id });
-                        } else if (target.kind === 'guy_layer') {
-                          setSelected3DTarget({ kind: 'guy_layer', guyLayerId: target.id });
-                          const layer = vmOverview.vm.guyLayers.find((l) => l.id === target.id);
-                          if (layer) setSelectedGuyAnchorId(layer.anchorIds.I);
-                        }
-                      }}
+                      onSelectTarget={handleSelectMastTarget}
                       title="Vertical Mast & 16-Layer Guying Elevation"
                       subtitle="Click any tower section (S01–S41) or guy layer (L01–L16)"
                       enableVerticalScale
@@ -1252,12 +1359,12 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                       frameless
                       foundations={renderProject.foundations}
                       anchorGuyStates={vmOverview.anchorGuyStates}
-                      selectedId={selectedGuyAnchorId}
+                      selectedId={selectedGuyAnchorId ?? highlightedAnchorIds[0] ?? 'PF-0'}
                       highlightedIds={highlightedAnchorIds}
-                      onSelect={setSelectedGuyAnchorId}
+                      onSelect={handleSelectMastAnchor}
                       calloutTitle="GUY ANCHOR"
                       title="Ground Anchor Guying Connectivity Plan"
-                      subtitle="Colors indicate guy cable levels anchored at each pad"
+                      subtitle="Click any anchor pad to inspect linked guy levels & mast section"
                     />
 
                     {/* Selected Mast / Guy Layer / Anchor Telemetry Ledger */}

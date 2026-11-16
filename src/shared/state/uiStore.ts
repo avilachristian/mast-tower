@@ -34,6 +34,34 @@ export type MastSelectionTarget = {
 export type PrintPaperSize = 'A4' | 'A3' | 'letter' | 'legal';
 export type PrintOrientation = 'portrait' | 'landscape';
 export type MastVerticalScale = 1 | 1.5 | 2 | 3;
+export type AdminUiStyle = 'classic' | 'swiss';
+
+export const ADMIN_UI_STYLE_STORAGE_KEY = 'mast2-admin-ui-style-v1';
+
+export function readSavedAdminUiStyle(
+  storage?: Pick<Storage, 'getItem'> | null
+): AdminUiStyle {
+  if (!storage) return 'classic';
+  try {
+    return storage.getItem(ADMIN_UI_STYLE_STORAGE_KEY) === 'swiss'
+      ? 'swiss'
+      : 'classic';
+  } catch {
+    return 'classic';
+  }
+}
+
+export function persistAdminUiStyle(
+  style: AdminUiStyle,
+  storage?: Pick<Storage, 'setItem'> | null
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(ADMIN_UI_STYLE_STORAGE_KEY, style);
+  } catch {
+    // Ignore storage quota or private-mode errors
+  }
+}
 
 const firstLaunchIdbWriter = createCoalescedIdbWriter<string>(FIRST_LAUNCH_COMPLETED_KEY);
 let uiHydrationPromise: Promise<void> | null = null;
@@ -77,6 +105,7 @@ interface UiState {
   printOrientation: PrintOrientation;
   mastOrderViolation: VerticalMastOrderViolation | null;
   foundationOrderViolation: FoundationChecklistViolation | null;
+  adminUiStyle: AdminUiStyle;
 
   setActiveAppTab: (tab: ActiveAppTab) => void;
   setManpowerSubTab: (subTab: ManpowerSubTab) => void;
@@ -96,6 +125,7 @@ interface UiState {
   setFoundationOrderViolation: (
     violation: FoundationChecklistViolation | null
   ) => void;
+  setAdminUiStyle: (style: AdminUiStyle) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -116,6 +146,9 @@ export const useUiStore = create<UiState>((set) => ({
   printOrientation: 'portrait',
   mastOrderViolation: null,
   foundationOrderViolation: null,
+  adminUiStyle: readSavedAdminUiStyle(
+    typeof window !== 'undefined' ? window.localStorage : null
+  ),
 
   setActiveAppTab: (tab) => set({ activeAppTab: tab }),
   setManpowerSubTab: (manpowerSubTab) => set({ manpowerSubTab }),
@@ -187,5 +220,12 @@ export const useUiStore = create<UiState>((set) => ({
   setMastOrderViolation: (mastOrderViolation) => set({ mastOrderViolation }),
   setFoundationOrderViolation: (foundationOrderViolation) =>
     set({ foundationOrderViolation }),
+  setAdminUiStyle: (adminUiStyle) => {
+    persistAdminUiStyle(
+      adminUiStyle,
+      typeof window !== 'undefined' ? window.localStorage : null
+    );
+    set({ adminUiStyle });
+  },
 }));
 

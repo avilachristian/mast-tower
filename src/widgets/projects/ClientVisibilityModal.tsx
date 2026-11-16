@@ -59,6 +59,7 @@ export function ClientVisibilityModal({
   const [phaseMode, setPhaseMode] = useState<ClientShowcasePhaseMode>('both');
   const [showPhotos, setShowPhotos] = useState(true);
   const [showReports, setShowReports] = useState(true);
+  const [show3DModel, setShow3DModel] = useState(true);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -70,6 +71,7 @@ export function ClientVisibilityModal({
     setPhaseMode(resolved.phaseMode);
     setShowPhotos(resolved.showPhotos);
     setShowReports(resolved.showReports);
+    setShow3DModel(resolved.show3DModel ?? true);
     setCopied(false);
   }, [open, projectId]);
 
@@ -102,6 +104,7 @@ export function ClientVisibilityModal({
     phaseMode,
     showPhotos,
     showReports,
+    show3DModel,
   });
 
   const handleSave = async (e: React.FormEvent) => {
@@ -386,6 +389,15 @@ export function ClientVisibilityModal({
                     className="rounded border-slate-300 text-sky-600"
                   />
                   <span>Allow Client Progress &amp; Daily Log Reports (PDF)</span>
+                </label>
+                <label className="inline-flex items-center gap-2 cursor-pointer text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={show3DModel}
+                    onChange={(e) => setShow3DModel(e.target.checked)}
+                    className="rounded border-slate-300 text-sky-600"
+                  />
+                  <span>Show Interactive 3D Tower Model</span>
                 </label>
               </div>
             </div>

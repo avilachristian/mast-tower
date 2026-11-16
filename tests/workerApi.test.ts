@@ -706,11 +706,46 @@ describe('Cloudflare Worker API Integration', () => {
     const visibleRes = await app.request('/api/client/projects', undefined, env);
     const visibleBodyText = await visibleRes.text();
     const visibleJson = JSON.parse(visibleBodyText) as {
-      projects: Array<{ slug: string; projectName: string }>;
+      projects: Array<{
+        slug: string;
+        projectName: string;
+        settings: { show3DModel?: boolean };
+      }>;
     };
     expect(visibleJson.projects).toHaveLength(1);
     expect(visibleJson.projects[0].slug).toBe('private-relay');
+    expect(visibleJson.projects[0].settings.show3DModel).toBe(true);
     expect(visibleBodyText).not.toContain('INTERNAL_SECRET');
+
+    // Disable 3D model for client via PATCH and verify both client DTO and admin record persist it
+    const hide3DRes = await app.request(
+      '/api/admin/projects/proj-1/visibility',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ show3DModel: false }),
+      },
+      env
+    );
+    expect(hide3DRes.status).toBe(200);
+
+    const hidden3DClientRes = await app.request('/api/client/projects', undefined, env);
+    const hidden3DClientJson = (await hidden3DClientRes.json()) as {
+      projects: Array<{ settings: { show3DModel?: boolean } }>;
+    };
+    expect(hidden3DClientJson.projects[0].settings.show3DModel).toBe(false);
+
+    const adminListRes = await app.request(
+      '/api/admin/projects',
+      { headers: { Cookie: cookie } },
+      env
+    );
+    const adminListJson = (await adminListRes.json()) as {
+      projects: Array<{ id: string; clientSettings?: { show3DModel?: boolean } }>;
+    };
+    expect(
+      adminListJson.projects.find((p) => p.id === 'proj-1')?.clientSettings?.show3DModel
+    ).toBe(false);
   });
 
   it('enforces R2 warning at <= 1 GB equiv, blocks uploads at < 100 MB equiv, serves images, and cleans orphaned media', async () => {
