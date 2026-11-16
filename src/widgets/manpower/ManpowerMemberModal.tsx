@@ -28,7 +28,16 @@ export function ManpowerMemberModal({
   onClose,
   onSave,
 }: ManpowerMemberModalProps) {
-  const rateConfig = useProjectStore((s) => resolveHaulingRateConfig(s.project));
+  const creditBlockKg = useProjectStore(
+    (s) => s.project.haulingRateConfig?.creditBlockKg
+  );
+  const ratePerBlockPhp = useProjectStore(
+    (s) => s.project.haulingRateConfig?.ratePerBlockPhp
+  );
+  const rateConfig = resolveHaulingRateConfig({
+    creditBlockKg,
+    ratePerBlockPhp,
+  });
   const [category, setCategory] = useState<ManpowerCategory>(defaultCategory);
   const [name, setName] = useState('');
   const [position, setPosition] = useState<WorkerRole>('Laborer');

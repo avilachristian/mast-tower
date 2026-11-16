@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Plus, Scale, Trash2, Truck, X } from 'lucide-react';
 import {
   computeHaulerCreditLedgers,
+  computeHaulingBlockCredits,
   resolveCentralMaterials,
   resolveHaulingRateConfig,
   suggestHaulingMaterialCategory,
@@ -176,14 +177,22 @@ export function HaulingTripModal({
   );
 
   const previewEffectiveKg = Number((priorExcessKg + tripTotalKg).toFixed(2));
-  const previewCredits = Math.floor(
-    previewEffectiveKg / rateConfig.creditBlockKg
+  const previewCredits = computeHaulingBlockCredits(
+    previewEffectiveKg,
+    rateConfig.creditBlockKg
   );
   const previewPayoutPhp = Number(
     (previewCredits * rateConfig.ratePerBlockPhp).toFixed(2)
   );
-  const previewExcessAfter = Number(
-    (previewEffectiveKg - previewCredits * rateConfig.creditBlockKg).toFixed(2)
+  const previewExcessAfter = Math.max(
+    0,
+    Number(
+      (
+        (Math.round(previewEffectiveKg * 100) -
+          previewCredits * Math.round(rateConfig.creditBlockKg * 100)) /
+        100
+      ).toFixed(2)
+    )
   );
 
   if (!open) return null;

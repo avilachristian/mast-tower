@@ -12,6 +12,7 @@ import type {
   ReportDetailsSpec,
 } from '@/entities/project/types';
 import { resizeLogoFileToDataUrl } from '@/shared/lib/imageUpload';
+import { useFeedbackStore } from '@/shared/state/feedbackStore';
 
 export interface SignatoryOverrideSlot {
   name?: string;
@@ -174,35 +175,56 @@ export function ReportSignoffOverrideProvider({
 }) {
   const [overrides, setOverrides] = useState<ReportSignoffOverrideState>({});
 
+  const customPreparedBy = customDefaults?.preparedBy;
+  const customPreparedTitle = customDefaults?.preparedTitle;
+  const customPreparedSig = customDefaults?.preparedSignatureUrl;
+  const customVerifiedBy = customDefaults?.verifiedBy;
+  const customVerifiedSig = customDefaults?.verifiedSignatureUrl;
+  const customCheckedBy = customDefaults?.checkedBy;
+  const customCheckedTitle = customDefaults?.checkedTitle;
+  const customCheckedSig = customDefaults?.checkedSignatureUrl;
+  const customApprovedBy = customDefaults?.approvedBy;
+  const customApprovedTitle = customDefaults?.approvedTitle;
+  const customApprovedSig = customDefaults?.approvedSignatureUrl;
+
   const defaults = useMemo<ReportSignoffDefaults>(() => {
     const rd = project.reportDetails ?? {};
     return {
       preparedBy:
-        customDefaults?.preparedBy !== undefined
-          ? customDefaults.preparedBy
+        customPreparedBy !== undefined
+          ? customPreparedBy
           : rd.preparedBy?.trim() || project.preparedBy?.trim() || '',
-      preparedTitle:
-        customDefaults?.preparedTitle ?? rd.preparedTitle?.trim() ?? '',
+      preparedTitle: customPreparedTitle ?? rd.preparedTitle?.trim() ?? '',
       preparedSignatureUrl:
-        customDefaults?.preparedSignatureUrl !== undefined
-          ? customDefaults.preparedSignatureUrl
+        customPreparedSig !== undefined
+          ? customPreparedSig
           : rd.preparedSignatureUrl?.trim() || undefined,
-      verifiedBy: customDefaults?.verifiedBy ?? '',
-      verifiedSignatureUrl: customDefaults?.verifiedSignatureUrl,
-      checkedBy: customDefaults?.checkedBy ?? rd.checkedBy?.trim() ?? '',
-      checkedTitle:
-        customDefaults?.checkedTitle ?? rd.checkedTitle?.trim() ?? '',
+      verifiedBy: customVerifiedBy ?? '',
+      verifiedSignatureUrl: customVerifiedSig,
+      checkedBy: customCheckedBy ?? rd.checkedBy?.trim() ?? '',
+      checkedTitle: customCheckedTitle ?? rd.checkedTitle?.trim() ?? '',
       checkedSignatureUrl:
-        customDefaults?.checkedSignatureUrl ??
-        (rd.checkedSignatureUrl?.trim() || undefined),
-      approvedBy: customDefaults?.approvedBy ?? rd.approvedBy?.trim() ?? '',
-      approvedTitle:
-        customDefaults?.approvedTitle ?? rd.approvedTitle?.trim() ?? '',
+        customCheckedSig ?? (rd.checkedSignatureUrl?.trim() || undefined),
+      approvedBy: customApprovedBy ?? rd.approvedBy?.trim() ?? '',
+      approvedTitle: customApprovedTitle ?? rd.approvedTitle?.trim() ?? '',
       approvedSignatureUrl:
-        customDefaults?.approvedSignatureUrl ??
-        (rd.approvedSignatureUrl?.trim() || undefined),
+        customApprovedSig ?? (rd.approvedSignatureUrl?.trim() || undefined),
     };
-  }, [project, customDefaults]);
+  }, [
+    project.preparedBy,
+    project.reportDetails,
+    customPreparedBy,
+    customPreparedTitle,
+    customPreparedSig,
+    customVerifiedBy,
+    customVerifiedSig,
+    customCheckedBy,
+    customCheckedTitle,
+    customCheckedSig,
+    customApprovedBy,
+    customApprovedTitle,
+    customApprovedSig,
+  ]);
 
   const contextValue = useMemo<ReportSignoffOverrideContextValue | null>(() => {
     if (!enabled) return null;
@@ -331,8 +353,19 @@ export function SignatoriesOverridePanel({
     file?: File | null
   ) => {
     if (!file) return;
-    const dataUrl = await resizeLogoFileToDataUrl(file);
-    setRoleOverride(role, { signatureUrl: dataUrl });
+    try {
+      const dataUrl = await resizeLogoFileToDataUrl(file);
+      setRoleOverride(role, { signatureUrl: dataUrl });
+    } catch (err) {
+      useFeedbackStore.getState().pushToast({
+        tone: 'warning',
+        title: 'Unable to Read Signature',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'Selected file could not be loaded as an image.',
+      });
+    }
   };
 
   const roles: {

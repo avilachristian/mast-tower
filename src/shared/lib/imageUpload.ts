@@ -65,7 +65,7 @@ export function resizeLogoFileToDataUrl(file: File): Promise<string> {
     reader.onload = () => {
       const rawUrl = String(reader.result || '');
       if (!rawUrl.startsWith('data:image/')) {
-        resolve(rawUrl);
+        reject(new Error('Please select a valid image file (PNG, JPG, WebP, or SVG).'));
         return;
       }
       if (file.type === 'image/svg+xml') {
@@ -90,7 +90,7 @@ export function resizeLogoFileToDataUrl(file: File): Promise<string> {
         const keepPng = file.type === 'image/png' || file.type === 'image/webp';
         resolve(canvas.toDataURL(keepPng ? 'image/png' : 'image/jpeg', 0.88));
       };
-      img.onerror = () => resolve(rawUrl);
+      img.onerror = () => reject(new Error('Unsupported or corrupted image format.'));
       img.src = rawUrl;
     };
     reader.readAsDataURL(file);
@@ -166,11 +166,25 @@ export async function uploadOrStageProjectImage(params: {
     return null;
   }
 
-  const dataUrl =
-    category === 'logo' || category === 'signature'
-      ? await resizeLogoFileToDataUrl(file)
-      : await readAndResizeImageFile(file, maxDimension, quality);
-  const blob = await dataUrlToBlob(dataUrl);
+  let dataUrl: string;
+  let blob: Blob;
+  try {
+    dataUrl =
+      category === 'logo' || category === 'signature'
+        ? await resizeLogoFileToDataUrl(file)
+        : await readAndResizeImageFile(file, maxDimension, quality);
+    blob = await dataUrlToBlob(dataUrl);
+  } catch (err) {
+    feedback.pushToast({
+      tone: 'warning',
+      title: 'Unable to Read Image',
+      message:
+        err instanceof Error
+          ? err.message
+          : 'Selected file could not be loaded as an image.',
+    });
+    return null;
+  }
 
   if (quotaStore.status) {
     const projects = useProjectStore.getState().projects;

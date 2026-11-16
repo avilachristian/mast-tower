@@ -26,17 +26,35 @@ export function resolveHaulingRateConfig(
       ? source.haulingRateConfig
       : (source as Partial<HaulingRateConfig> | null | undefined);
   const parsedKg = Number(raw?.creditBlockKg);
+  const roundedKg = Math.round(parsedKg * 100) / 100;
   const parsedRate = Number(raw?.ratePerBlockPhp);
+  const roundedRate = Math.round(parsedRate * 100) / 100;
   return {
     creditBlockKg:
-      Number.isFinite(parsedKg) && parsedKg > 0
-        ? Math.round(parsedKg * 100) / 100
+      Number.isFinite(roundedKg) && roundedKg > 0
+        ? roundedKg
         : HAULING_CREDIT_BLOCK_KG,
     ratePerBlockPhp:
-      Number.isFinite(parsedRate) && parsedRate >= 0
-        ? Math.round(parsedRate * 100) / 100
+      Number.isFinite(roundedRate) && roundedRate >= 0
+        ? roundedRate
         : HAULING_RATE_PER_BLOCK_PHP,
   };
+}
+
+/**
+ * Computes completed whole credit blocks using scaled centi-kg integer division
+ * to avoid IEEE-754 floating-point off-by-one truncation on decimal thresholds.
+ */
+export function computeHaulingBlockCredits(
+  effectiveKg: number,
+  creditBlockKg: number
+): number {
+  const safeEffectiveCentiKg = Math.max(
+    0,
+    Math.round(round2(effectiveKg) * 100)
+  );
+  const safeBlockCentiKg = Math.max(1, Math.round(round2(creditBlockKg) * 100));
+  return Math.floor(safeEffectiveCentiKg / safeBlockCentiKg);
 }
 
 function round2(n: number): number {
@@ -378,7 +396,7 @@ export function computeHaulerCreditLedgers(
     const totalKg = round2(group.items.reduce((sum, i) => sum + (Number(i.totalKg) || 0), 0));
     const priorExcessKg = excessByHauler.get(hKey) ?? 0;
     const effectiveKg = round2(totalKg + priorExcessKg);
-    const creditsEarned = Math.floor(effectiveKg / creditBlockKg);
+    const creditsEarned = computeHaulingBlockCredits(effectiveKg, creditBlockKg);
     const payoutEarnedPhp = round2(creditsEarned * ratePerBlockPhp);
     const excessAfterKg = round2(effectiveKg - creditsEarned * creditBlockKg);
 

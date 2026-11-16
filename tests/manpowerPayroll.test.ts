@@ -3,6 +3,7 @@ import {
   HAULING_CREDIT_BLOCK_KG,
   HAULING_RATE_PER_BLOCK_PHP,
   computeHaulerCreditLedgers,
+  computeHaulingBlockCredits,
   resolveHaulingRateConfig,
 } from '@/entities/project/haulingInventory';
 import {
@@ -487,6 +488,14 @@ describe('Manpower roster and Civil Works / Individual Hauler payroll', () => {
       creditBlockKg: HAULING_CREDIT_BLOCK_KG,
       ratePerBlockPhp: HAULING_RATE_PER_BLOCK_PHP,
     });
+    expect(
+      resolveHaulingRateConfig({ creditBlockKg: 0.001, ratePerBlockPhp: 500 })
+    ).toEqual({
+      creditBlockKg: HAULING_CREDIT_BLOCK_KG,
+      ratePerBlockPhp: 500,
+    });
+    expect(computeHaulingBlockCredits(8.7, 2.9)).toBe(3);
+    expect(computeHaulingBlockCredits(0.3, 0.1)).toBe(3);
 
     // Update project hauler rate to 1,500 PHP per 100 kg
     useProjectStore.getState().updateHaulingRateConfig({

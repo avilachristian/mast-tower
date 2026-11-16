@@ -36,12 +36,12 @@ export function HaulingRateConfigControl({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedKg = Number(draftKg);
-    const parsedPay = Number(draftPay);
-    if (!Number.isFinite(parsedKg) || parsedKg <= 0) {
+    const parsedKg = Math.round(Number(draftKg) * 100) / 100;
+    const parsedPay = Math.round(Number(draftPay) * 100) / 100;
+    if (!Number.isFinite(parsedKg) || parsedKg < 0.01) {
       pushToast({
         tone: 'warning',
-        message: 'Weight threshold (kg) must be greater than 0.',
+        message: 'Weight threshold (kg) must be at least 0.01 kg.',
       });
       return;
     }
@@ -123,7 +123,7 @@ export function HaulingRateConfigControl({
         </label>
         <input
           type="number"
-          min={0.1}
+          min={0.01}
           step="any"
           aria-label="Hauler block weight threshold (kg)"
           value={draftKg}
