@@ -22,7 +22,13 @@ function collectFilesRecursively(dir: string, rootDir = dir): string[] {
       files.push(...collectFilesRecursively(fullPath, rootDir));
     } else if (entry.isFile()) {
       const rel = path.relative(rootDir, fullPath).split(path.sep).join('/');
-      if (rel !== 'sw.js' && rel !== 'version.json' && !rel.endsWith('.map')) {
+      if (
+        rel !== 'sw.js' &&
+        rel !== 'version.json' &&
+        !rel.endsWith('.map') &&
+        !rel.endsWith('.woff') &&
+        !rel.startsWith('models/')
+      ) {
         files.push(rel);
       }
     }
@@ -59,6 +65,8 @@ function pwaOfflinePlugin(): Plugin {
 const CACHE_PREFIX = 'mast2-pwa-';
 const CACHE_NAME = '${'mast2-pwa-'}' + '${buildId}';
 const IMAGE_CACHE_NAME = 'mast2-images-v1';
+const MODEL_CACHE_NAME = 'mast2-models-v1';
+const MAX_IMAGE_CACHE_ENTRIES = 120;
 const APP_VERSION = '${APP_VERSION}';
 const BUILD_ID = '${buildId}';
 const PRECACHE_URLS = ${JSON.stringify(precacheUrls, null, 2)};
@@ -128,11 +136,23 @@ self.addEventListener('fetch', (event) => {
       caches.open(IMAGE_CACHE_NAME).then(async (cache) => {
         const cached = await cache.match(request);
         if (cached) return cached;
-        const networkResponse = await fetch(request);
-        if (networkResponse.ok) {
-          cache.put(request, networkResponse.clone());
+        try {
+          const networkResponse = await fetch(request);
+          if (networkResponse.ok) {
+            await cache.put(request, networkResponse.clone());
+            const keys = await cache.keys();
+            if (keys.length > MAX_IMAGE_CACHE_ENTRIES) {
+              await Promise.all(
+                keys
+                  .slice(0, keys.length - MAX_IMAGE_CACHE_ENTRIES)
+                  .map((key) => cache.delete(key))
+              );
+            }
+          }
+          return networkResponse;
+        } catch {
+          return new Response('Offline', { status: 504, statusText: 'Offline' });
         }
-        return networkResponse;
       })
     );
     return;
@@ -142,18 +162,37 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (request.mode === 'navigate') {
+  if (url.pathname.startsWith('/models/')) {
     event.respondWith(
-      caches.open(CACHE_NAME).then(async (cache) => {
-        const cachedIndex = await cache.match('/');
-        if (cachedIndex) return cachedIndex;
+      caches.open(MODEL_CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) return cached;
         try {
           const networkResponse = await fetch(request);
-          if (networkResponse.ok && !networkResponse.redirected) {
-            cache.put('/', networkResponse.clone());
+          if (networkResponse.ok && networkResponse.type === 'basic') {
+            await cache.put(request, networkResponse.clone());
           }
           return networkResponse;
         } catch {
+          return new Response('Offline', { status: 504, statusText: 'Offline' });
+        }
+      })
+    );
+    return;
+  }
+
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        try {
+          const networkResponse = await fetch(request);
+          if (networkResponse.ok && !networkResponse.redirected) {
+            await cache.put('/', networkResponse.clone());
+          }
+          return networkResponse;
+        } catch {
+          const cachedIndex = await cache.match('/');
+          if (cachedIndex) return cachedIndex;
           return new Response('Offline — open the app once while online to finish caching.', {
             status: 503,
             headers: { 'Content-Type': 'text/plain; charset=utf-8' },
@@ -215,9 +254,6 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
-  },
-  optimizeDeps: {
-    include: ['jspdf', 'html-to-image'],
   },
   resolve: {
     alias: {

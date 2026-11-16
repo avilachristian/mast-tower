@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Copy } from 'lucide-react';
 import {
@@ -68,21 +68,55 @@ export function DailyLogPrintModal({
     project.reportDetails?.documentTitle?.trim() ||
     `Daily Construction Log - Day ${log.dayNumber} (${log.date}) - ${projectName}`;
 
-  const activityRows = getDailyLogActivityRows(log);
-  const materialRows = getDailyLogMaterialRows(log);
-  const equipmentRows = getDailyLogEquipmentRows(log);
-  const delayRows = getDailyLogDelayRows(log);
-  const visitorRows = getDailyLogVisitorRows(log);
-  const safetyRows = getDailyLogSafetyRows(log);
-  const documentationRows = log.documentationItems ?? [];
-  const workedIds = Array.from(
-    new Set([
-      ...log.foundationsWorked,
-      ...(log.activities ?? [])
-        .map((a) => a.foundationId)
-        .filter((id): id is string => Boolean(id)),
-    ])
+  const activityRows = useMemo(() => getDailyLogActivityRows(log), [log]);
+  const materialRows = useMemo(() => getDailyLogMaterialRows(log), [log]);
+  const equipmentRows = useMemo(() => getDailyLogEquipmentRows(log), [log]);
+  const delayRows = useMemo(() => getDailyLogDelayRows(log), [log]);
+  const visitorRows = useMemo(() => getDailyLogVisitorRows(log), [log]);
+  const safetyRows = useMemo(() => getDailyLogSafetyRows(log), [log]);
+  const documentationRows = useMemo(
+    () => log.documentationItems ?? [],
+    [log.documentationItems]
   );
+  const workedIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...log.foundationsWorked,
+          ...(log.activities ?? [])
+            .map((a) => a.foundationId)
+            .filter((id): id is string => Boolean(id)),
+        ])
+      ),
+    [log.foundationsWorked, log.activities]
+  );
+  const verticalMastView = useMemo(() => {
+    if (project.projectType !== 'vertical_mast') return null;
+    const { vm, projectedAnchorStatuses, anchorGuyStates } =
+      buildVerticalMastOverviewData(project);
+    const mappedFoundations = project.foundations.map((f) => ({
+      ...f,
+      status: projectedAnchorStatuses.get(f.id) ?? 'completed',
+    }));
+    const firstGuy = workedIds.find((id) => id.startsWith('L'));
+    const firstSec = workedIds.find((id) => id.startsWith('S'));
+    const target: MastSelectionTarget = firstGuy
+      ? { kind: 'guy_layer', id: firstGuy }
+      : { kind: 'section', id: firstSec ?? 'S01' };
+    const firstGuyLayer = firstGuy
+      ? vm.guyLayers.find((g) => g.id === firstGuy)
+      : undefined;
+    const highlightedAnchors = firstGuyLayer
+      ? Object.values(firstGuyLayer.anchorIds)
+      : workedIds;
+    return {
+      vm,
+      anchorGuyStates,
+      mappedFoundations,
+      target,
+      highlightedAnchors,
+    };
+  }, [project, workedIds]);
 
   const handleCopyText = async () => {
     try {
@@ -174,45 +208,24 @@ export function DailyLogPrintModal({
                   )
                 </div>
                 <div className="flex-1 min-h-[340px] sm:min-h-[380px] pdf-desktop:min-h-[380px] flex items-stretch justify-stretch">
-                  {project.projectType === 'vertical_mast' ? (
-                    (() => {
-                      const { vm, projectedAnchorStatuses, anchorGuyStates } =
-                        buildVerticalMastOverviewData(project);
-                      const mappedFoundations = project.foundations.map((f) => ({
-                        ...f,
-                        status: projectedAnchorStatuses.get(f.id) ?? 'completed',
-                      }));
-                      const firstGuy = workedIds.find((id) => id.startsWith('L'));
-                      const firstSec = workedIds.find((id) => id.startsWith('S'));
-                      const target: MastSelectionTarget = firstGuy
-                        ? { kind: 'guy_layer', id: firstGuy }
-                        : { kind: 'section', id: firstSec ?? 'S01' };
-                      const firstGuyLayer = firstGuy
-                        ? vm.guyLayers.find((g) => g.id === firstGuy)
-                        : undefined;
-                      const highlightedAnchors = firstGuyLayer
-                        ? Object.values(firstGuyLayer.anchorIds)
-                        : workedIds;
-                      return (
-                        <div className="grid grid-cols-2 gap-1.5 w-full">
-                          <VerticalMastElevation2D
-                            verticalMast={vm}
-                            selectedTarget={target}
-                            compact
-                            fillParent
-                          />
-                          <GroundAnchorPlan2D
-                            foundations={mappedFoundations}
-                            anchorGuyStates={anchorGuyStates}
-                            highlightedIds={highlightedAnchors}
-                            calloutTitle="CURRENT WORK"
-                            compact
-                            hideHeader
-                            fillParent
-                          />
-                        </div>
-                      );
-                    })()
+                  {verticalMastView ? (
+                    <div className="grid grid-cols-2 gap-1.5 w-full">
+                      <VerticalMastElevation2D
+                        verticalMast={verticalMastView.vm}
+                        selectedTarget={verticalMastView.target}
+                        compact
+                        fillParent
+                      />
+                      <GroundAnchorPlan2D
+                        foundations={verticalMastView.mappedFoundations}
+                        anchorGuyStates={verticalMastView.anchorGuyStates}
+                        highlightedIds={verticalMastView.highlightedAnchors}
+                        calloutTitle="CURRENT WORK"
+                        compact
+                        hideHeader
+                        fillParent
+                      />
+                    </div>
                   ) : (
                     <GroundAnchorPlan2D
                       foundations={project.foundations}

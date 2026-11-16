@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ApiError, apiClient, type AdminUserDto } from '@/shared/api/client';
 
 const ADMIN_SESSION_CACHE_KEY = 'mast2-admin-session-cache-v1';
+const OFFLINE_SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type AuthStatus = 'unknown' | 'authenticated' | 'unauthenticated';
 
@@ -17,9 +18,17 @@ function readCachedAdminSession(): CachedAdminSession | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<CachedAdminSession>;
     if (parsed?.user?.id && parsed?.user?.username) {
+      const parsedTime = parsed.cachedAt ? Date.parse(parsed.cachedAt) : Number.NaN;
+      if (
+        !Number.isFinite(parsedTime) ||
+        Date.now() - parsedTime > OFFLINE_SESSION_MAX_AGE_MS
+      ) {
+        window.localStorage.removeItem(ADMIN_SESSION_CACHE_KEY);
+        return null;
+      }
       return {
         user: parsed.user,
-        cachedAt: parsed.cachedAt || new Date().toISOString(),
+        cachedAt: parsed.cachedAt!,
       };
     }
   } catch {

@@ -109,20 +109,45 @@ export function ClientVisibilityModal({
     if (syncAction) return;
     const nextSettings = buildCurrentSettings();
     const hadUnsavedStateEdits = doesRecordNeedSync(record);
-    updateProjectClientSettings(record.id, nextSettings);
+    updateProjectClientSettings(record.id, nextSettings, { skipAutoSync: true });
     setSyncAction('save');
+    let synced = false;
+    let errorMessage: string | null = null;
     try {
-      await syncClientVisibilityPatch(record.id, nextSettings, hadUnsavedStateEdits);
+      synced = await syncClientVisibilityPatch(
+        record.id,
+        nextSettings,
+        hadUnsavedStateEdits
+      );
+    } catch (err) {
+      errorMessage =
+        err instanceof Error ? err.message : 'Cloud visibility sync failed.';
     } finally {
       setSyncAction(null);
     }
-    pushToast({
-      tone: 'success',
-      title: enabled ? 'Published to Client Showcase' : 'Hidden from Client Showcase',
-      message: enabled
-        ? `"${displayName}" is now visible to clients at /p/${cleanSlug}.`
-        : `"${displayName}" is now private (Admin only).`,
-    });
+    if (errorMessage) {
+      pushToast({
+        tone: 'error',
+        title: 'Visibility Sync Failed',
+        message: `${errorMessage} Settings were saved locally and will retry on next sync.`,
+      });
+    } else if (!synced) {
+      pushToast({
+        tone: 'warning',
+        title: 'Saved Locally Only (Pending Cloud Sync)',
+        message: enabled
+          ? `"${displayName}" visibility was saved locally, but cloud Showcase could not be updated right now.`
+          : `"${displayName}" privacy update was saved locally and is queued for cloud sync.`,
+      });
+    } else {
+      pushToast({
+        tone: 'success',
+        title: enabled ? 'Published to Client Showcase' : 'Hidden from Client Showcase',
+        message: enabled
+          ? `"${displayName}" is now visible to clients at /p/${cleanSlug}.`
+          : `"${displayName}" is now private (Admin only).`,
+      });
+    }
     onClose();
   };
 
@@ -130,11 +155,32 @@ export function ClientVisibilityModal({
     if (syncAction) return;
     const nextSettings = buildCurrentSettings();
     const hadUnsavedStateEdits = doesRecordNeedSync(record);
-    updateProjectClientSettings(record.id, nextSettings);
+    updateProjectClientSettings(record.id, nextSettings, { skipAutoSync: true });
     setSyncAction('open');
     try {
-      await syncClientVisibilityPatch(record.id, nextSettings, hadUnsavedStateEdits);
-      await syncPendingChangesForClientPreview(record.id);
+      const visibilitySynced = await syncClientVisibilityPatch(
+        record.id,
+        nextSettings,
+        hadUnsavedStateEdits
+      );
+      const pendingSynced = await syncPendingChangesForClientPreview(record.id);
+      if (!visibilitySynced || !pendingSynced) {
+        pushToast({
+          tone: 'warning',
+          title: 'Cloud Sync Pending',
+          message:
+            'Could not finish syncing to cloud before opening. Client view may show the last synced snapshot until synced.',
+        });
+      }
+    } catch (err) {
+      pushToast({
+        tone: 'warning',
+        title: 'Cloud Sync Incomplete',
+        message:
+          err instanceof Error
+            ? `${err.message} Opening client view with latest synced data.`
+            : 'Could not sync all pending edits before opening client view.',
+      });
     } finally {
       setSyncAction(null);
     }

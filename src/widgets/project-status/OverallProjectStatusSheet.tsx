@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   buildOverallProjectStatusReportData,
   formatDateWithWeekday,
@@ -19,9 +20,12 @@ export function OverallProjectStatusSheet({
   onSelectFoundation?: (id: string) => void;
   clientSafe?: boolean;
 }) {
-  const overview = buildOverallProjectStatusReportData(project);
+  const overview = useMemo(
+    () => buildOverallProjectStatusReportData(project),
+    [project]
+  );
   const { metrics, stageCounts, sectorSummaries, foundationRows } = overview;
-  const reportDetails = resolveReportDetails(project);
+  const reportDetails = useMemo(() => resolveReportDetails(project), [project]);
 
   return (
     <div className="bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2">

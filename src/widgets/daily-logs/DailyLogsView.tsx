@@ -216,6 +216,7 @@ export function DailyLogsView({
   const [projectName, setProjectName] = useState(project.projectName);
   const [location, setLocation] = useState(project.location);
   const [preparedBy, setPreparedBy] = useState(project.preparedBy);
+  const [metaTouched, setMetaTouched] = useState(false);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [dayNumber, setDayNumber] = useState(nextDayNum);
   const [dayNumberTouched, setDayNumberTouched] = useState(false);
@@ -269,6 +270,34 @@ export function DailyLogsView({
     [project.haulingLogs, date]
   );
 
+  const materialsSeedProject = useMemo(
+    () => ({
+      projectType: project.projectType,
+      centralMaterials: project.centralMaterials,
+      haulingLogs: project.haulingLogs,
+      dailyLogs: project.dailyLogs,
+    }),
+    [
+      project.projectType,
+      project.centralMaterials,
+      project.haulingLogs,
+      project.dailyLogs,
+    ]
+  );
+
+  useEffect(() => {
+    if (editingLogId || metaTouched) return;
+    setProjectName(project.projectName);
+    setLocation(project.location);
+    setPreparedBy(project.preparedBy);
+  }, [
+    editingLogId,
+    metaTouched,
+    project.projectName,
+    project.location,
+    project.preparedBy,
+  ]);
+
   useEffect(() => {
     if (editingLogId || dayNumberTouched) return;
     setDayNumber(nextDayNum);
@@ -278,13 +307,13 @@ export function DailyLogsView({
     if (editingLogId || materialsTouched) return;
     setMaterialsOnSite(
       buildCentralizedDailyLogMaterials(
-        project,
+        materialsSeedProject,
         prevLogForDraft,
         date,
         computeDailyLogMaterialRemaining
       )
     );
-  }, [editingLogId, materialsTouched, prevLogForDraft, project, date]);
+  }, [editingLogId, materialsTouched, prevLogForDraft, materialsSeedProject, date]);
 
   useEffect(() => {
     if (editingLogId || workersTouched) return;
@@ -310,6 +339,7 @@ export function DailyLogsView({
     setEditingLogId(null);
     setDayNumberTouched(false);
     setMaterialsTouched(false);
+    setMetaTouched(false);
     setProjectName(project.projectName);
     setLocation(project.location);
     setPreparedBy(project.preparedBy);
@@ -342,6 +372,7 @@ export function DailyLogsView({
     setEditingLogId(log.id);
     setDayNumberTouched(true);
     setMaterialsTouched(true);
+    setMetaTouched(true);
     setProjectName(log.projectName ?? project.projectName);
     setLocation(log.location ?? project.location);
     setPreparedBy(log.preparedBy ?? project.preparedBy);
@@ -1069,7 +1100,10 @@ export function DailyLogsView({
                     type="text"
                     required
                     value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
+                    onChange={(e) => {
+                      setMetaTouched(true);
+                      setProjectName(e.target.value);
+                    }}
                     placeholder="e.g. Guyed Mast Tower – Mast 2"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 font-medium text-slate-900 focus:border-sky-500 focus:outline-none"
                   />
@@ -1112,7 +1146,10 @@ export function DailyLogsView({
                   <input
                     type="text"
                     value={location}
-                    onChange={(e) => setLocation(e.target.value)}
+                    onChange={(e) => {
+                      setMetaTouched(true);
+                      setLocation(e.target.value);
+                    }}
                     placeholder="e.g. Mt. Labo, Camarines Norte"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 text-slate-800 focus:border-sky-500 focus:outline-none"
                   />
@@ -1122,7 +1159,10 @@ export function DailyLogsView({
                   <input
                     type="text"
                     value={preparedBy}
-                    onChange={(e) => setPreparedBy(e.target.value)}
+                    onChange={(e) => {
+                      setMetaTouched(true);
+                      setPreparedBy(e.target.value);
+                    }}
                     placeholder="Site Engineer / Foreman"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 text-slate-800 focus:border-sky-500 focus:outline-none"
                   />

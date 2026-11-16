@@ -6,7 +6,10 @@ export const SESSION_COOKIE_NAME = 'mast_admin_session';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const PBKDF2_ITERATIONS = 100_000;
 const MAX_FAILED_LOGIN_ATTEMPTS = 8;
+export const MAX_FAILED_IP_ATTEMPTS = 24;
 const LOCKOUT_MS = 15 * 60 * 1000;
+
+const seededDbs = new WeakSet<object>();
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -107,6 +110,9 @@ export async function verifyPassword(
  * and ADMIN_USERNAME + ADMIN_PASSWORD secrets are configured on the Worker.
  */
 export async function ensureSeededAdminUser(env: Env): Promise<void> {
+  const dbKey = env.DB as unknown as object;
+  if (seededDbs.has(dbKey)) return;
+
   const username = env.ADMIN_USERNAME?.trim().toLowerCase();
   const password = env.ADMIN_PASSWORD;
   if (!username || !password) return;
@@ -115,7 +121,10 @@ export async function ensureSeededAdminUser(env: Env): Promise<void> {
     'SELECT COUNT(*) AS cnt FROM admin_users'
   ).first<{ cnt: number }>();
 
-  if ((countRow?.cnt ?? 0) > 0) return;
+  if ((countRow?.cnt ?? 0) > 0) {
+    seededDbs.add(dbKey);
+    return;
+  }
 
   const now = new Date().toISOString();
   const passwordHash = await hashPassword(password);
@@ -128,6 +137,8 @@ export async function ensureSeededAdminUser(env: Env): Promise<void> {
   )
     .bind(id, username, displayName, passwordHash, now, now)
     .run();
+
+  seededDbs.add(dbKey);
 }
 
 export async function checkLoginRateLimit(
@@ -156,7 +167,8 @@ export async function checkLoginRateLimit(
 
 export async function recordFailedLoginAttempt(
   env: Env,
-  ipKey: string
+  ipKey: string,
+  maxAttempts = MAX_FAILED_LOGIN_ATTEMPTS
 ): Promise<void> {
   const row = await env.DB.prepare(
     'SELECT attempts FROM login_attempts WHERE ip_key = ?'
@@ -166,7 +178,7 @@ export async function recordFailedLoginAttempt(
 
   const nextAttempts = (row?.attempts ?? 0) + 1;
   const lockedUntil =
-    nextAttempts >= MAX_FAILED_LOGIN_ATTEMPTS
+    nextAttempts >= maxAttempts
       ? new Date(Date.now() + LOCKOUT_MS).toISOString()
       : null;
 

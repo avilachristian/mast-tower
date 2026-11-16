@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { formatDateWithWeekday } from '@/entities/project/calculations';
 import type { MastProjectState } from '@/entities/project/types';
 import {
@@ -32,13 +33,17 @@ export function OverallVerticalMastStatusSheet({
     anchorRingSummaries,
     projectedAnchorStatuses,
     anchorGuyStates,
-  } = buildVerticalMastOverviewData(project);
+  } = useMemo(() => buildVerticalMastOverviewData(project), [project]);
 
-  const reportDetails = resolveReportDetails(project);
-  const mappedFoundations = project.foundations.map((f) => ({
-    ...f,
-    status: projectedAnchorStatuses.get(f.id) ?? f.status,
-  }));
+  const reportDetails = useMemo(() => resolveReportDetails(project), [project]);
+  const mappedFoundations = useMemo(
+    () =>
+      project.foundations.map((f) => ({
+        ...f,
+        status: projectedAnchorStatuses.get(f.id) ?? f.status,
+      })),
+    [project.foundations, projectedAnchorStatuses]
+  );
 
   return (
     <div className="bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2">

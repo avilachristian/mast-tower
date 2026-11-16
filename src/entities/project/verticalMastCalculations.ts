@@ -69,10 +69,10 @@ export interface AnchorRingGuySummary {
   avgProgressPct: number;
 }
 
-export function computeVerticalMastMetrics(
-  state: MastProjectState
+function computeVerticalMastMetricsFromVm(
+  state: MastProjectState,
+  vm: VerticalMastState
 ): VerticalMastMetrics {
-  const vm = resolveVerticalMastState(state);
   const sectionSum = vm.sections.reduce(
     (sum, s) => sum + TOWER_SECTION_STATUS_META[s.status].pct,
     0
@@ -138,6 +138,12 @@ export function computeVerticalMastMetrics(
   };
 }
 
+export function computeVerticalMastMetrics(
+  state: MastProjectState
+): VerticalMastMetrics {
+  return computeVerticalMastMetricsFromVm(state, resolveVerticalMastState(state));
+}
+
 export function buildVerticalMastOverviewData(state: MastProjectState): {
   vm: VerticalMastState;
   metrics: VerticalMastMetrics;
@@ -150,7 +156,7 @@ export function buildVerticalMastOverviewData(state: MastProjectState): {
   anchorGuyStates: Record<string, AnchorGuyNodeState>;
 } {
   const vm = resolveVerticalMastState(state);
-  const metrics = computeVerticalMastMetrics(state);
+  const metrics = computeVerticalMastMetricsFromVm(state, vm);
 
   const sectionStageCounts = SIMPLIFIED_TOWER_SECTION_STATUSES.map((status) => {
     const matching = vm.sections.filter((s) => s.status === status);

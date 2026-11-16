@@ -21,8 +21,8 @@ export type UpdateCheckStatus =
   | 'error';
 
 const JUST_UPDATED_SESSION_KEY = 'mast2-pwa-just-updated-v1';
-const AUTO_CHECK_MIN_INTERVAL_MS = 60_000;
-const PERIODIC_CHECK_INTERVAL_MS = 15 * 60_000;
+const AUTO_CHECK_MIN_INTERVAL_MS = 10 * 60_000;
+const PERIODIC_CHECK_INTERVAL_MS = 60 * 60_000;
 
 export const APP_VERSION =
   typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.0.0';
@@ -206,7 +206,7 @@ export const usePwaStore = create<PwaState>((set, get) => ({
     set({ checkStatus: 'checking', errorMessage: null });
 
     try {
-      await swRegistration.update();
+      let shouldUpdateSw = false;
 
       // Check version.json directly with cache bypassed so Cloudflare edge caches don't hide updates.
       try {
@@ -216,8 +216,8 @@ export const usePwaStore = create<PwaState>((set, get) => ({
         if (res.ok) {
           const remote = (await res.json()) as Partial<PwaBuildInfo>;
           const currentId = get().currentBuild.buildId;
-          if (remote.buildId && currentId && remote.buildId !== currentId) {
-            await swRegistration.update();
+          if (!currentId || (remote.buildId && remote.buildId !== currentId)) {
+            shouldUpdateSw = true;
           }
           if (remote.version && remote.buildId) {
             set({
@@ -231,9 +231,16 @@ export const usePwaStore = create<PwaState>((set, get) => ({
                   : get().pendingBuild,
             });
           }
+        } else {
+          shouldUpdateSw = true;
         }
       } catch {
-        // Ignore version.json fetch error; swRegistration.update() still handles SW checks.
+        // Fallback to direct swRegistration.update() if version.json couldn't be read.
+        shouldUpdateSw = true;
+      }
+
+      if (manual || shouldUpdateSw) {
+        await swRegistration.update();
       }
 
       if (swRegistration.installing) {

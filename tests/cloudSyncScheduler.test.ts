@@ -492,4 +492,115 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
         .project.verticalMast?.sections.find((s) => s.id === 'S03')?.installedDate
     ).toBeUndefined();
   });
+
+  it('preserves partial R2 upload URLs in projectStore when a subsequent image upload fails', async () => {
+    const rec = makeRecord('proj-partial-r2', 'pending');
+    const photo1 = 'data:image/jpeg;base64,aGVsbG8x';
+    const photo2 = 'data:image/jpeg;base64,aGVsbG8y';
+    rec.state.foundations[0].inspectionChecklist = {
+      exc_dimensions: {
+        status: 'Passed',
+        remarks: 'first',
+        photoDataUrl: photo1,
+        photoName: 'one.jpg',
+      },
+      rebar_spacing: {
+        status: 'Passed',
+        remarks: 'second',
+        photoDataUrl: photo2,
+        photoName: 'two.jpg',
+      },
+    };
+    useProjectStore.setState({
+      projects: [rec],
+      activeProjectId: 'proj-partial-r2',
+      project: rec.state,
+    });
+
+    const uploadSpy = vi
+      .spyOn(apiClient, 'uploadImageToR2')
+      .mockResolvedValueOnce({
+        objectKey: 'projects/proj-partial-r2/inspection/one.jpg',
+        url: '/api/images/projects/proj-partial-r2/inspection/one.jpg',
+        sizeBytes: 123,
+        storage: MOCK_STORAGE,
+      })
+      .mockRejectedValueOnce(new Error('Network blip during 2nd upload'));
+
+    const saveSpy = vi.spyOn(apiClient, 'saveAdminProject');
+
+    const ok = await syncSingleProjectToCloud('proj-partial-r2');
+    expect(ok).toBe(false);
+    expect(uploadSpy).toHaveBeenCalledTimes(2);
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    const updatedRec = useProjectStore
+      .getState()
+      .projects.find((p) => p.id === 'proj-partial-r2');
+    const checklist = updatedRec?.state.foundations[0].inspectionChecklist;
+    // 1st photo must already be swapped to its R2 URL; 2nd stays inline for retry
+    expect(checklist?.exc_dimensions?.photoDataUrl).toBe(
+      '/api/images/projects/proj-partial-r2/inspection/one.jpg'
+    );
+    expect(checklist?.rebar_spacing?.photoDataUrl).toBe(photo2);
+    expect(
+      useProjectStore.getState().project.foundations[0].inspectionChecklist
+        ?.exc_dimensions?.photoDataUrl
+    ).toBe('/api/images/projects/proj-partial-r2/inspection/one.jpg');
+  });
+
+  it('enforces 7-day offline admin session TTL and purges stale cached session', async () => {
+    const store = new Map<string, string>();
+    const mockStorage: Storage = {
+      get length() {
+        return store.size;
+      },
+      clear: () => store.clear(),
+      getItem: (k) => store.get(k) ?? null,
+      key: (i) => Array.from(store.keys())[i] ?? null,
+      removeItem: (k) => {
+        store.delete(k);
+      },
+      setItem: (k, v) => {
+        store.set(k, v);
+      },
+    };
+    vi.stubGlobal('localStorage', mockStorage);
+    (globalThis as { window: { localStorage?: Storage } }).window.localStorage =
+      mockStorage;
+
+    const expiredAt = new Date(
+      Date.now() - (7 * 24 * 60 * 60 * 1000 + 60_000)
+    ).toISOString();
+    mockStorage.setItem(
+      'mast2-admin-session-cache-v1',
+      JSON.stringify({
+        user: { id: 'adm-1', username: 'admin', displayName: 'Admin' },
+        cachedAt: expiredAt,
+      })
+    );
+
+    vi.spyOn(apiClient, 'getSession').mockRejectedValue(
+      new TypeError('Network unreachable')
+    );
+
+    const expiredOk = await useAuthStore.getState().checkSession();
+    expect(expiredOk).toBe(false);
+    expect(useAuthStore.getState().status).toBe('unauthenticated');
+    expect(mockStorage.getItem('mast2-admin-session-cache-v1')).toBeNull();
+
+    // Fresh cached session within 7-day window succeeds offline
+    const freshAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    mockStorage.setItem(
+      'mast2-admin-session-cache-v1',
+      JSON.stringify({
+        user: { id: 'adm-1', username: 'admin', displayName: 'Admin' },
+        cachedAt: freshAt,
+      })
+    );
+    const freshOk = await useAuthStore.getState().checkSession();
+    expect(freshOk).toBe(true);
+    expect(useAuthStore.getState().status).toBe('authenticated');
+    expect(useAuthStore.getState().offlineCached).toBe(true);
+  });
 });

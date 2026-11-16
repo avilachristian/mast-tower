@@ -1,9 +1,15 @@
 import { apiClient } from '@/shared/api/client';
-import { DEFAULT_REPORT_LOGOS } from '@/shared/assets/defaultLogos';
+import {
+  collectInlineImageRefs,
+  replaceInlineImageUrlsInState,
+  type InlineImageCapableState,
+} from '@/shared/lib/inlineImageRefs';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useStorageQuotaStore } from '@/shared/state/storageQuotaStore';
 import { canAcceptUpload, formatStorageBytes } from '@/shared/storage/r2Quota';
+
+export { replaceInlineImageUrlsInState, type InlineImageCapableState };
 
 /**
  * Reads an uploaded image File and downscales it (max 960px dimension) into a
@@ -95,137 +101,6 @@ export interface UploadedImageResult {
   url: string;
   name: string;
   queuedOffline: boolean;
-}
-
-export interface InlineImageCapableState {
-  foundations: Array<{
-    inspectionChecklist?: Record<
-      string,
-      { photoDataUrl?: string; photoName?: string } | undefined
-    >;
-  }>;
-  verticalMast?: {
-    sections: Array<{
-      inspectionChecklist?: Record<
-        string,
-        { photoDataUrl?: string; photoName?: string } | undefined
-      >;
-    }>;
-    guyLayers: Array<{
-      inspectionChecklist?: Record<
-        string,
-        { photoDataUrl?: string; photoName?: string } | undefined
-      >;
-    }>;
-  };
-  dailyLogs: Array<{
-    documentationItems?: Array<{ photoDataUrl?: string; photoName?: string }>;
-  }>;
-  reportDetails?: {
-    logos?: {
-      left?: { dataUrl: string; caption?: string };
-      center?: { dataUrl: string; caption?: string };
-      right?: { dataUrl: string; caption?: string };
-    };
-  };
-}
-
-interface InlineImageRef {
-  category: 'inspection' | 'daily_log' | 'logo';
-  nameHint: string;
-  getValue: () => string | undefined;
-  setValue: (next: string) => void;
-}
-
-function collectInlineImageRefs(state: InlineImageCapableState): InlineImageRef[] {
-  const refs: InlineImageRef[] = [];
-
-  for (const f of state.foundations ?? []) {
-    if (!f.inspectionChecklist) continue;
-    for (const [key, entry] of Object.entries(f.inspectionChecklist)) {
-      if (entry?.photoDataUrl && entry.photoDataUrl.startsWith('data:image/')) {
-        refs.push({
-          category: 'inspection',
-          nameHint: entry.photoName || `foundation-${key}.jpg`,
-          getValue: () => entry.photoDataUrl,
-          setValue: (next) => {
-            entry.photoDataUrl = next;
-          },
-        });
-      }
-    }
-  }
-
-  for (const sec of state.verticalMast?.sections ?? []) {
-    if (!sec.inspectionChecklist) continue;
-    for (const [key, entry] of Object.entries(sec.inspectionChecklist)) {
-      if (entry?.photoDataUrl && entry.photoDataUrl.startsWith('data:image/')) {
-        refs.push({
-          category: 'inspection',
-          nameHint: entry.photoName || `mast-sec-${key}.jpg`,
-          getValue: () => entry.photoDataUrl,
-          setValue: (next) => {
-            entry.photoDataUrl = next;
-          },
-        });
-      }
-    }
-  }
-
-  for (const layer of state.verticalMast?.guyLayers ?? []) {
-    if (!layer.inspectionChecklist) continue;
-    for (const [key, entry] of Object.entries(layer.inspectionChecklist)) {
-      if (entry?.photoDataUrl && entry.photoDataUrl.startsWith('data:image/')) {
-        refs.push({
-          category: 'inspection',
-          nameHint: entry.photoName || `mast-layer-${key}.jpg`,
-          getValue: () => entry.photoDataUrl,
-          setValue: (next) => {
-            entry.photoDataUrl = next;
-          },
-        });
-      }
-    }
-  }
-
-  for (const log of state.dailyLogs ?? []) {
-    for (const doc of log.documentationItems ?? []) {
-      if (doc.photoDataUrl && doc.photoDataUrl.startsWith('data:image/')) {
-        refs.push({
-          category: 'daily_log',
-          nameHint: doc.photoName || 'daily-doc.jpg',
-          getValue: () => doc.photoDataUrl,
-          setValue: (next) => {
-            doc.photoDataUrl = next;
-          },
-        });
-      }
-    }
-  }
-
-  const logos = state.reportDetails?.logos;
-  if (logos) {
-    for (const slot of ['left', 'center', 'right'] as const) {
-      const item = logos[slot];
-      const defaultUrl = DEFAULT_REPORT_LOGOS[slot]?.dataUrl;
-      if (
-        item?.dataUrl &&
-        item.dataUrl.startsWith('data:image/') &&
-        item.dataUrl !== defaultUrl
-      ) {
-        refs.push({
-          category: 'logo',
-          nameHint: `logo-${slot}.png`,
-          getValue: () => item.dataUrl,
-          setValue: (next) => {
-            item.dataUrl = next;
-          },
-        });
-      }
-    }
-  }
-
-  return refs;
 }
 
 export function estimateDataUrlBytes(dataUrl: string): number {
@@ -335,14 +210,19 @@ export async function uploadOrStageProjectImage(params: {
 /**
  * Uploads any inline `data:image/...` strings embedded in a MastProjectState to R2,
  * returning an updated state where those URLs point to `/api/images/...`.
- * Invoked when manual Sync or the periodic Sync timer runs.
+ * Optional `uploadedUrlMap` records each uploaded dataUrl -> URL immediately so callers
+ * can recover partial batch uploads if a subsequent photo or project save fails.
  */
 export async function uploadInlineImagesInProjectState<
   T extends InlineImageCapableState,
->(projectId: string, state: T): Promise<{ nextState: T; uploadedCount: number }> {
+>(
+  projectId: string,
+  state: T,
+  uploadedUrlMap?: Map<string, string>
+): Promise<{ nextState: T; uploadedCount: number }> {
   const cloned = JSON.parse(JSON.stringify(state)) as T;
   const refs = collectInlineImageRefs(cloned);
-  const cache = new Map<string, string>();
+  const cache = uploadedUrlMap ?? new Map<string, string>();
   let uploadedCount = 0;
 
   for (const ref of refs) {

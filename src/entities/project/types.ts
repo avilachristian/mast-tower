@@ -672,6 +672,14 @@ export type ClientFoundationSummary = Pick<
   resolvedDims?: FoundationResolvedDims;
 };
 
+export interface PublicProjectSummary {
+  id: string;
+  slug: string;
+  projectName: string;
+  location: string;
+  featured: boolean;
+}
+
 export interface ClientProjectShowcaseDto {
   id: string;
   slug: string;

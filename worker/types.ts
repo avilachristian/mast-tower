@@ -21,9 +21,18 @@ export interface ProjectRow {
   client_featured: number;
   client_settings_json: string;
   state_json: string;
+  client_dto_json?: string | null;
   version: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface PublicProjectSummary {
+  id: string;
+  slug: string;
+  projectName: string;
+  location: string;
+  featured: boolean;
 }
 
 export interface AdminUserRow {

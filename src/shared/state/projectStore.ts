@@ -39,6 +39,7 @@ import {
   type VerticalMastOrderViolation,
 } from '@/entities/project/verticalMastValidation';
 import { useUiStore } from '@/shared/state/uiStore';
+import { replaceInlineImageUrlsInState } from '@/shared/lib/inlineImageRefs';
 import {
   createCoalescedIdbWriter,
   idbGet,
@@ -223,7 +224,22 @@ function createFallbackWorkspace(): WorkspacePayload {
   return { activeProjectId: fallback.id, projects: [fallback] };
 }
 
-const workspaceIdbWriter = createCoalescedIdbWriter<WorkspacePayload>(WORKSPACE_STORAGE_KEY);
+const workspaceIdbWriter = createCoalescedIdbWriter<WorkspacePayload>(
+  WORKSPACE_STORAGE_KEY,
+  { debounceMs: 450 }
+);
+let workspaceFlushListenersRegistered = false;
+if (typeof window !== 'undefined' && !workspaceFlushListenersRegistered) {
+  workspaceFlushListenersRegistered = true;
+  window.addEventListener('pagehide', () => {
+    void workspaceIdbWriter.flush();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      void workspaceIdbWriter.flush();
+    }
+  });
+}
 let hydrationPromise: Promise<void> | null = null;
 
 export interface ProjectSyncHooks {
@@ -278,6 +294,53 @@ function commitActiveProject(
   persistWorkspace(s.activeProjectId, projects);
   activeSyncHooks.onProjectMutated?.(s.activeProjectId);
   return { project: nextProject, projects };
+}
+
+function applyFoundationStatusToRecord(
+  f: FoundationRecord,
+  status: FoundationStatus,
+  today: string
+): FoundationRecord {
+  const spec = resolveFoundationSpec(f.type, f.customSpecs);
+  const checklist = checklistFromStatus(status);
+  const isPoured =
+    status === 'concreted' || status === 'curing' || status === 'completed';
+  return {
+    ...f,
+    status,
+    checklist,
+    pourDate: isPoured ? f.pourDate || today : f.pourDate,
+    completedDate: status === 'completed' ? f.completedDate || today : undefined,
+    actualCementBagsUsed:
+      isPoured && f.actualCementBagsUsed === 0
+        ? spec.cementBags
+        : f.actualCementBagsUsed,
+    actualSandBagsUsed:
+      isPoured && f.actualSandBagsUsed === 0
+        ? spec.sandBags
+        : f.actualSandBagsUsed,
+    actualGravelBagsUsed:
+      isPoured && f.actualGravelBagsUsed === 0
+        ? spec.gravelBags
+        : f.actualGravelBagsUsed,
+  };
+}
+
+function applyFoundationCustomSpecsPatch(
+  f: FoundationRecord,
+  patch: Partial<FoundationCustomSpecs>
+): FoundationRecord {
+  const merged: FoundationCustomSpecs = {
+    ...(f.customSpecs ?? {}),
+    ...patch,
+  };
+  const cleaned = Object.fromEntries(
+    Object.entries(merged).filter(([, value]) => value !== undefined)
+  ) as FoundationCustomSpecs;
+  return {
+    ...f,
+    customSpecs: Object.keys(cleaned).length > 0 ? cleaned : undefined,
+  };
 }
 
 type InspectionHolder = {
@@ -572,6 +635,24 @@ interface ProjectStore {
       >
     >
   ) => void;
+  updateFoundationBatch: (
+    id: string,
+    batch: {
+      status?: FoundationStatus;
+      detailsPatch?: Partial<
+        Pick<
+          FoundationRecord,
+          | 'pourDate'
+          | 'completedDate'
+          | 'actualCementBagsUsed'
+          | 'actualSandBagsUsed'
+          | 'actualGravelBagsUsed'
+          | 'notes'
+        >
+      >;
+      customSpecsPatch?: Partial<FoundationCustomSpecs>;
+    }
+  ) => void;
   updateFoundationInspectionItem: (
     id: string,
     key: FoundationInspectionItemKey,
@@ -750,7 +831,12 @@ interface ProjectStore {
   // Online Cloud Sync & Client Showcase Visibility Actions
   updateProjectClientSettings: (
     projectId: string,
-    patch: Partial<ClientShowcaseSettings>
+    patch: Partial<ClientShowcaseSettings>,
+    options?: { skipAutoSync?: boolean }
+  ) => void;
+  applyUploadedImageUrls: (
+    projectId: string,
+    urlMap: ReadonlyMap<string, string>
   ) => void;
   applyCloudWorkspace: (cloudProjects: SavedProjectRecord[]) => void;
   applyCloudSyncResult: (
@@ -1017,25 +1103,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     updateFoundationStatus: (id, status) =>
       set((s) => {
         const today = new Date().toISOString().slice(0, 10);
-        const foundations = s.project.foundations.map((f) => {
-          if (f.id !== id) return f;
-          const spec = resolveFoundationSpec(f.type, f.customSpecs);
-          const checklist = checklistFromStatus(status);
-          const isPoured = status === 'concreted' || status === 'curing' || status === 'completed';
-          return {
-            ...f,
-            status,
-            checklist,
-            pourDate: isPoured ? f.pourDate || today : f.pourDate,
-            completedDate: status === 'completed' ? f.completedDate || today : undefined,
-            actualCementBagsUsed:
-              isPoured && f.actualCementBagsUsed === 0 ? spec.cementBags : f.actualCementBagsUsed,
-            actualSandBagsUsed:
-              isPoured && f.actualSandBagsUsed === 0 ? spec.sandBags : f.actualSandBagsUsed,
-            actualGravelBagsUsed:
-              isPoured && f.actualGravelBagsUsed === 0 ? spec.gravelBags : f.actualGravelBagsUsed,
-          };
-        });
+        const foundations = s.project.foundations.map((f) =>
+          f.id === id ? applyFoundationStatusToRecord(f, status, today) : f
+        );
         const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
         return commitActiveProject(s, next);
       }),
@@ -1090,6 +1160,27 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const foundations = s.project.foundations.map((f) =>
           f.id === id ? { ...f, ...patch } : f
         );
+        const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
+        return commitActiveProject(s, next);
+      }),
+
+    updateFoundationBatch: (id, batch) =>
+      set((s) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const foundations = s.project.foundations.map((f) => {
+          if (f.id !== id) return f;
+          let updated: FoundationRecord = f;
+          if (batch.customSpecsPatch) {
+            updated = applyFoundationCustomSpecsPatch(updated, batch.customSpecsPatch);
+          }
+          if (batch.status !== undefined) {
+            updated = applyFoundationStatusToRecord(updated, batch.status, today);
+          }
+          if (batch.detailsPatch) {
+            updated = { ...updated, ...batch.detailsPatch };
+          }
+          return updated;
+        });
         const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
         return commitActiveProject(s, next);
       }),
@@ -1267,20 +1358,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     updateFoundationCustomSpecs: (id, patch) =>
       set((s) => {
         const today = new Date().toISOString().slice(0, 10);
-        const foundations = s.project.foundations.map((f) => {
-          if (f.id !== id) return f;
-          const merged: FoundationCustomSpecs = {
-            ...(f.customSpecs ?? {}),
-            ...patch,
-          };
-          const cleaned = Object.fromEntries(
-            Object.entries(merged).filter(([, value]) => value !== undefined)
-          ) as FoundationCustomSpecs;
-          return {
-            ...f,
-            customSpecs: Object.keys(cleaned).length > 0 ? cleaned : undefined,
-          };
-        });
+        const foundations = s.project.foundations.map((f) =>
+          f.id === id ? applyFoundationCustomSpecsPatch(f, patch) : f
+        );
         const next: MastProjectState = { ...s.project, lastUpdated: today, foundations };
         return commitActiveProject(s, next);
       }),
@@ -2461,7 +2541,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return commitActiveProject(s, { ...s.project, lastUpdated: today, verticalMast: nextVm });
       }),
 
-    updateProjectClientSettings: (projectId, patch) => {
+    updateProjectClientSettings: (projectId, patch, options) => {
       let resolvedNext: ClientShowcaseSettings | null = null;
       let hadUnsavedStateEdits = false;
       set((s) => {
@@ -2496,7 +2576,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         persistWorkspace(s.activeProjectId, projects);
         return { projects };
       });
-      if (resolvedNext) {
+      if (resolvedNext && !options?.skipAutoSync) {
         activeSyncHooks.onClientSettingsChanged?.(
           projectId,
           resolvedNext,
@@ -2504,6 +2584,35 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         );
       }
     },
+
+    applyUploadedImageUrls: (projectId, urlMap) =>
+      set((s) => {
+        if (urlMap.size === 0) return s;
+        let nextActiveState: MastProjectState | undefined;
+        let anyChanged = false;
+        const projects = s.projects.map((p) => {
+          if (p.id !== projectId) return p;
+          const { nextState, replacedCount } = replaceInlineImageUrlsInState(
+            p.state,
+            urlMap
+          );
+          if (replacedCount === 0) return p;
+          anyChanged = true;
+          if (s.activeProjectId === projectId) {
+            nextActiveState = nextState;
+          }
+          return {
+            ...p,
+            state: nextState,
+          };
+        });
+        if (!anyChanged) return s;
+        persistWorkspace(s.activeProjectId, projects);
+        return {
+          projects,
+          ...(nextActiveState ? { project: nextActiveState } : {}),
+        };
+      }),
 
     applyCloudWorkspace: (cloudProjects) =>
       set((s) => {

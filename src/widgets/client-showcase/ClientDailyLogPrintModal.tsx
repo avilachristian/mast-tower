@@ -53,25 +53,40 @@ export function ClientDailyLogPrintModal({
   renderProject: MastProjectState;
   initialHighlightId?: string | null;
 }) {
-  const highlights = dto.highlights ?? [];
+  const highlights = useMemo(() => dto.highlights ?? [], [dto.highlights]);
   const [selectedId, setSelectedId] = useState<string>('');
   const { dialogMaxWidthClass, sheetWidthPx } = usePrintPageSetup(open);
   const sheetRef = useRef<HTMLDivElement>(null);
+  const lastOpenInitKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
-    if (
-      initialHighlightId &&
-      highlights.some((h) => h.id === initialHighlightId)
-    ) {
-      setSelectedId(initialHighlightId);
+    if (!open) {
+      lastOpenInitKeyRef.current = null;
       return;
     }
-    setSelectedId((prev) =>
-      prev && highlights.some((h) => h.id === prev)
-        ? prev
-        : (highlights[0]?.id ?? '')
-    );
+    const initKey = initialHighlightId ?? '__default__';
+    const isOpeningNew = lastOpenInitKeyRef.current !== initKey;
+    lastOpenInitKeyRef.current = initKey;
+
+    setSelectedId((prev) => {
+      if (
+        isOpeningNew &&
+        initialHighlightId &&
+        highlights.some((h) => h.id === initialHighlightId)
+      ) {
+        return initialHighlightId;
+      }
+      if (prev && highlights.some((h) => h.id === prev)) {
+        return prev;
+      }
+      if (
+        initialHighlightId &&
+        highlights.some((h) => h.id === initialHighlightId)
+      ) {
+        return initialHighlightId;
+      }
+      return highlights[0]?.id ?? '';
+    });
   }, [open, initialHighlightId, highlights]);
 
   useEffect(() => {

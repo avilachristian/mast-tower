@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Banknote,
   Check,
@@ -139,20 +139,45 @@ export function HaulerPayrollPanel({
     ]
   );
 
+  const periodKey = `${periodType}:${periodBounds.startDate}:${periodBounds.endDate}`;
+  const lastInitPeriodKeyRef = useRef<string>('');
+
   useEffect(() => {
-    setCustomTitle('');
-    setPayoutOverrides({});
-    const nextSel: Record<string, boolean> = {};
-    for (const row of preview.rows) {
-      nextSel[row.haulerName] =
-        row.tripsCompleted > 0 || row.overallBalanceDuePhp > 0;
+    const periodChanged = lastInitPeriodKeyRef.current !== periodKey;
+    if (periodChanged) {
+      lastInitPeriodKeyRef.current = periodKey;
+      setCustomTitle('');
+      setPayoutOverrides({});
+      const nextSel: Record<string, boolean> = {};
+      for (const row of preview.rows) {
+        nextSel[row.haulerName] =
+          row.tripsCompleted > 0 || row.overallBalanceDuePhp > 0;
+      }
+      setSelectedHaulers(nextSel);
+      return;
     }
-    setSelectedHaulers(nextSel);
-  }, [periodType, periodBounds.startDate, periodBounds.endDate]);
+
+    setSelectedHaulers((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const row of preview.rows) {
+        if (!(row.haulerName in next)) {
+          next[row.haulerName] =
+            row.tripsCompleted > 0 || row.overallBalanceDuePhp > 0;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [periodKey, preview.rows]);
 
   const effectiveItems = useMemo<HaulerPayrollLineItem[]>(() => {
     return preview.rows
-      .filter((row) => selectedHaulers[row.haulerName] ?? true)
+      .filter(
+        (row) =>
+          selectedHaulers[row.haulerName] ??
+          (row.tripsCompleted > 0 || row.overallBalanceDuePhp > 0)
+      )
       .map((row) => {
         const override = payoutOverrides[row.haulerName];
         const payoutReleasedPhp =

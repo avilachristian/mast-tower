@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   CheckCircle2,
@@ -40,14 +40,14 @@ export function ProjectStatusView({ project }: { project: MastProjectState }) {
 
   const selectFoundation = useProjectStore((s) => s.selectFoundation);
   const updateFoundationStatus = useProjectStore((s) => s.updateFoundationStatus);
-  const updateFoundationDetails = useProjectStore((s) => s.updateFoundationDetails);
-  const updateFoundationCustomSpecs = useProjectStore(
-    (s) => s.updateFoundationCustomSpecs
-  );
+  const updateFoundationBatch = useProjectStore((s) => s.updateFoundationBatch);
   const setActiveAppTab = useUiStore((s) => s.setActiveAppTab);
   const setOverallReportOpen = useUiStore((s) => s.setOverallReportOpen);
 
-  const overview = buildOverallProjectStatusReportData(project);
+  const overview = useMemo(
+    () => buildOverallProjectStatusReportData(project),
+    [project]
+  );
   const { metrics, stageCounts, sectorSummaries, foundationRows } = overview;
 
   const editingRow = editingRowId
@@ -88,12 +88,12 @@ export function ProjectStatusView({ project }: { project: MastProjectState }) {
     const targetFoundation = project.foundations.find(
       (item) => item.id === editingRowId
     );
-    updateFoundationStatus(editingRowId, draftStatus);
-    updateFoundationDetails(editingRowId, {
+    const detailsPatch = {
       pourDate: draftPourDate.trim() || undefined,
       completedDate: draftCompletedDate.trim() || undefined,
       notes: draftNotes,
-    });
+    };
+    let customSpecsPatch: Parameters<typeof updateFoundationBatch>[1]['customSpecsPatch'];
     if (targetFoundation) {
       const defaults = FOUNDATION_SPECS[targetFoundation.type];
       const len = Number.parseFloat(draftLengthM);
@@ -119,7 +119,7 @@ export function ProjectStatusView({ project }: { project: MastProjectState }) {
         Math.abs(validOver - defaults.overburdenDepthM) <= 1e-6 &&
         Math.abs(validLean - defaults.leanThicknessM) <= 1e-6;
 
-      updateFoundationCustomSpecs(editingRowId, {
+      customSpecsPatch = {
         lengthM: Math.abs(validLen - defaults.lengthM) > 1e-6 ? validLen : undefined,
         widthM: Math.abs(validWid - defaults.widthM) > 1e-6 ? validWid : undefined,
         thicknessM:
@@ -141,8 +141,14 @@ export function ProjectStatusView({ project }: { project: MastProjectState }) {
               leanConcreteVolume: undefined,
               excavationDepth: undefined,
             }),
-      });
+      };
     }
+
+    updateFoundationBatch(editingRowId, {
+      status: draftStatus,
+      detailsPatch,
+      customSpecsPatch,
+    });
     setEditingRowId(null);
   };
 

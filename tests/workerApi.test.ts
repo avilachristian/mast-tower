@@ -53,8 +53,12 @@ function createMockR2Bucket() {
         },
       };
     },
-    async delete(key: string) {
-      objects.delete(key);
+    async delete(keyOrKeys: string | string[]) {
+      if (Array.isArray(keyOrKeys)) {
+        for (const k of keyOrKeys) objects.delete(k);
+      } else {
+        objects.delete(keyOrKeys);
+      }
     },
     async list() {
       return {
@@ -75,14 +79,42 @@ function createMockR2Bucket() {
   };
 }
 
-function createMockD1(): D1Database {
+function createMockEdgeCache() {
+  const store = new Map<string, Response>();
+  const cache = {
+    async match(req: RequestInfo | URL) {
+      const url = typeof req === 'string' ? req : req instanceof URL ? req.toString() : req.url;
+      const hit = store.get(url);
+      return hit ? hit.clone() : undefined;
+    },
+    async put(req: RequestInfo | URL, res: Response) {
+      const url = typeof req === 'string' ? req : req instanceof URL ? req.toString() : req.url;
+      store.set(url, res.clone());
+    },
+    async delete(req: RequestInfo | URL) {
+      const url = typeof req === 'string' ? req : req instanceof URL ? req.toString() : req.url;
+      return store.delete(url);
+    },
+  };
+  return {
+    cache: cache as unknown as Cache,
+    size: () => store.size,
+  };
+}
+
+function createMockD1() {
   const projects = new Map<string, Record<string, unknown>>();
   const mediaObjects = new Map<string, Record<string, unknown>>();
+  const projectMedia = new Set<string>(); // `${project_id}::${object_key}`
+  const storageCounters = { id: 1, total_bytes: 0, object_count: 0, updated_at: '' };
+  let hasStorageCounter = true;
   const adminUsers = new Map<string, Record<string, unknown>>();
   const adminSessions = new Map<string, Record<string, unknown>>();
   const loginAttempts = new Map<string, Record<string, unknown>>();
+  let queryCount = 0;
 
   const execSql = (rawSql: string, params: unknown[]) => {
+    queryCount += 1;
     const sql = rawSql.replace(/\s+/g, ' ').trim();
 
     if (sql.startsWith('SELECT COUNT(*) AS cnt FROM admin_users')) {
@@ -163,6 +195,25 @@ function createMockD1(): D1Database {
       adminSessions.delete(String(params[0]));
       return { rows: [] };
     }
+    if (sql.includes("json_extract(client_dto_json, '$.projectName')") && sql.includes('FROM projects WHERE client_visible = 1 ORDER BY')) {
+      const list = Array.from(projects.values())
+        .filter((p) => Number(p.client_visible) === 1)
+        .sort((a, b) => Number(b.client_featured) - Number(a.client_featured))
+        .map((p) => {
+          const dto = p.client_dto_json ? JSON.parse(String(p.client_dto_json)) : null;
+          return {
+            id: p.id,
+            slug: p.slug,
+            name: p.name,
+            client_featured: p.client_featured,
+            version: p.version,
+            updated_at: p.updated_at,
+            dto_project_name: dto?.projectName ?? null,
+            dto_location: dto?.location ?? null,
+          };
+        });
+      return { rows: list };
+    }
     if (sql.includes('FROM projects WHERE client_visible = 1 ORDER BY')) {
       const list = Array.from(projects.values())
         .filter((p) => Number(p.client_visible) === 1)
@@ -185,23 +236,32 @@ function createMockD1(): D1Database {
       );
       return { rows: found ? [{ id: found.id }] : [] };
     }
-    if (sql.startsWith('SELECT id, client_settings_json FROM projects WHERE client_featured = 1 AND id != ?')) {
+    if (sql.startsWith('SELECT id, slug, client_settings_json, client_dto_json FROM projects WHERE client_featured = 1 AND id != ?')) {
       const [activeId] = params;
       const rows = Array.from(projects.values())
         .filter((p) => Number(p.client_featured) === 1 && p.id !== activeId)
         .map((p) => ({
           id: p.id,
+          slug: p.slug,
           client_settings_json: p.client_settings_json,
+          client_dto_json: p.client_dto_json,
         }));
       return { rows };
     }
-    if (sql.startsWith('UPDATE projects SET client_featured = 0, client_settings_json = ? WHERE id = ?')) {
-      const [json, id] = params;
+    if (sql.startsWith('UPDATE projects SET client_featured = 0, client_settings_json = ?, client_dto_json = ? WHERE id = ?')) {
+      const [json, dtoJson, id] = params;
       const row = projects.get(String(id));
       if (row) {
         row.client_featured = 0;
         row.client_settings_json = json;
+        row.client_dto_json = dtoJson;
       }
+      return { rows: [] };
+    }
+    if (sql.startsWith('UPDATE projects SET client_dto_json = ? WHERE id = ?')) {
+      const [dtoJson, id] = params;
+      const row = projects.get(String(id));
+      if (row) row.client_dto_json = dtoJson;
       return { rows: [] };
     }
     if (sql.startsWith('SELECT * FROM projects ORDER BY updated_at DESC')) {
@@ -228,6 +288,7 @@ function createMockD1(): D1Database {
         client_featured,
         client_settings_json,
         state_json,
+        client_dto_json,
         created_at,
         updated_at,
       ] = params;
@@ -240,6 +301,7 @@ function createMockD1(): D1Database {
         client_featured,
         client_settings_json,
         state_json,
+        client_dto_json,
         version: 1,
         created_at,
         updated_at,
@@ -255,6 +317,7 @@ function createMockD1(): D1Database {
         client_featured,
         client_settings_json,
         state_json,
+        client_dto_json,
         version,
         updated_at,
         id,
@@ -269,6 +332,7 @@ function createMockD1(): D1Database {
           client_featured,
           client_settings_json,
           state_json,
+          client_dto_json,
           version,
           updated_at,
         });
@@ -276,8 +340,16 @@ function createMockD1(): D1Database {
       return { rows: [] };
     }
     if (sql.startsWith('UPDATE projects SET slug = ?, client_visible = ?')) {
-      const [slug, client_visible, client_featured, client_settings_json, updated_at, id] =
-        params;
+      const [
+        slug,
+        client_visible,
+        client_featured,
+        client_settings_json,
+        client_dto_json,
+        version,
+        updated_at,
+        id,
+      ] = params;
       const row = projects.get(String(id));
       if (row) {
         Object.assign(row, {
@@ -285,14 +357,45 @@ function createMockD1(): D1Database {
           client_visible,
           client_featured,
           client_settings_json,
-          version: Number(row.version) + 1,
+          client_dto_json,
+          version,
           updated_at,
         });
       }
       return { rows: [] };
     }
     if (sql.startsWith('DELETE FROM projects WHERE id = ?')) {
-      projects.delete(String(params[0]));
+      const pid = String(params[0]);
+      projects.delete(pid);
+      for (const entry of Array.from(projectMedia)) {
+        if (entry.startsWith(`${pid}::`)) projectMedia.delete(entry);
+      }
+      return { rows: [] };
+    }
+    if (sql.startsWith('SELECT total_bytes AS usedBytes, object_count AS objectCount FROM storage_counters WHERE id = 1')) {
+      return { rows: hasStorageCounter ? [{ usedBytes: storageCounters.total_bytes, objectCount: storageCounters.object_count }] : [] };
+    }
+    if (sql.startsWith('INSERT INTO storage_counters') && sql.includes('total_bytes = total_bytes + excluded.total_bytes')) {
+      const [bytes, updatedAt] = params;
+      hasStorageCounter = true;
+      storageCounters.total_bytes += Number(bytes);
+      storageCounters.object_count += 1;
+      storageCounters.updated_at = String(updatedAt);
+      return { rows: [] };
+    }
+    if (sql.startsWith('INSERT INTO storage_counters')) {
+      const [bytes, count, updatedAt] = params;
+      hasStorageCounter = true;
+      storageCounters.total_bytes = Number(bytes);
+      storageCounters.object_count = Number(count);
+      storageCounters.updated_at = String(updatedAt);
+      return { rows: [] };
+    }
+    if (sql.startsWith('UPDATE storage_counters SET total_bytes = MAX(0, total_bytes - ?)')) {
+      const [freed, cnt, updatedAt] = params;
+      storageCounters.total_bytes = Math.max(0, storageCounters.total_bytes - Number(freed));
+      storageCounters.object_count = Math.max(0, storageCounters.object_count - Number(cnt));
+      storageCounters.updated_at = String(updatedAt);
       return { rows: [] };
     }
     if (sql.includes('SUM(size_bytes)')) {
@@ -302,6 +405,14 @@ function createMockD1(): D1Database {
       }
       return { rows: [{ usedBytes, objectCount: mediaObjects.size }] };
     }
+    if (sql.startsWith('SELECT object_key, size_bytes FROM media_objects WHERE object_key IN')) {
+      const keySet = new Set(params.map(String));
+      return {
+        rows: Array.from(mediaObjects.values())
+          .filter((m) => keySet.has(String(m.object_key)))
+          .map((m) => ({ object_key: m.object_key, size_bytes: m.size_bytes })),
+      };
+    }
     if (sql.startsWith('SELECT object_key, size_bytes FROM media_objects')) {
       return {
         rows: Array.from(mediaObjects.values()).map((m) => ({
@@ -310,18 +421,50 @@ function createMockD1(): D1Database {
         })),
       };
     }
+    if (sql.startsWith('SELECT m.object_key FROM media_objects m WHERE m.created_at < ?')) {
+      const cutoff = String(params[0]);
+      const linked = new Set<string>();
+      for (const entry of projectMedia) {
+        linked.add(entry.split('::').slice(1).join('::'));
+      }
+      return {
+        rows: Array.from(mediaObjects.values())
+          .filter((m) => String(m.created_at) < cutoff && !linked.has(String(m.object_key)))
+          .map((m) => ({ object_key: m.object_key })),
+      };
+    }
     if (sql.startsWith('INSERT INTO media_objects') || sql.startsWith('INSERT OR IGNORE INTO media_objects')) {
       const [object_key, project_id, category, content_type, size_bytes, original_name, created_at] =
         params;
-      mediaObjects.set(String(object_key), {
-        object_key,
-        project_id,
-        category,
-        content_type,
-        size_bytes,
-        original_name,
-        created_at,
-      });
+      if (!mediaObjects.has(String(object_key))) {
+        mediaObjects.set(String(object_key), {
+          object_key,
+          project_id,
+          category,
+          content_type,
+          size_bytes,
+          original_name,
+          created_at,
+        });
+      }
+      return { rows: [] };
+    }
+    if (sql.startsWith('UPDATE media_objects SET project_id = NULL WHERE project_id = ?')) {
+      const pid = String(params[0]);
+      for (const m of mediaObjects.values()) {
+        if (m.project_id === pid) m.project_id = null;
+      }
+      return { rows: [] };
+    }
+    if (sql.startsWith('UPDATE media_objects SET project_id = ? WHERE object_key IN')) {
+      const project_id = params[0];
+      const keys = new Set(params.slice(1, -1).map(String));
+      for (const k of keys) {
+        const m = mediaObjects.get(k);
+        if (m && (m.project_id === null || m.project_id !== project_id)) {
+          m.project_id = project_id;
+        }
+      }
       return { rows: [] };
     }
     if (sql.startsWith('UPDATE media_objects SET project_id = ? WHERE object_key = ?')) {
@@ -336,16 +479,54 @@ function createMockD1(): D1Database {
       if (m) m.size_bytes = size_bytes;
       return { rows: [] };
     }
+    if (sql.startsWith('DELETE FROM media_objects WHERE object_key IN')) {
+      for (const k of params) mediaObjects.delete(String(k));
+      return { rows: [] };
+    }
     if (sql.startsWith('DELETE FROM media_objects WHERE object_key = ?')) {
       mediaObjects.delete(String(params[0]));
       return { rows: [] };
     }
-    if (sql.startsWith('SELECT COUNT(*) AS cnt FROM projects WHERE state_json LIKE ?')) {
-      const needle = String(params[0]).replace(/^%|%$/g, '');
-      const cnt = Array.from(projects.values()).filter((p) =>
-        String(p.state_json).includes(needle)
-      ).length;
-      return { rows: [{ cnt }] };
+    if (sql.startsWith('SELECT object_key FROM project_media WHERE project_id = ?')) {
+      const pid = String(params[0]);
+      const prefix = `${pid}::`;
+      return {
+        rows: Array.from(projectMedia)
+          .filter((e) => e.startsWith(prefix))
+          .map((e) => ({ object_key: e.slice(prefix.length) })),
+      };
+    }
+    if (sql.startsWith('SELECT DISTINCT object_key FROM project_media WHERE object_key IN')) {
+      const keySet = new Set(params.map(String));
+      const matched = new Set<string>();
+      for (const entry of projectMedia) {
+        const key = entry.split('::').slice(1).join('::');
+        if (keySet.has(key)) matched.add(key);
+      }
+      return { rows: Array.from(matched).map((object_key) => ({ object_key })) };
+    }
+    if (sql.startsWith('INSERT OR IGNORE INTO project_media')) {
+      const pid = String(params[0]);
+      for (const k of params.slice(1)) {
+        if (mediaObjects.has(String(k))) {
+          projectMedia.add(`${pid}::${String(k)}`);
+        }
+      }
+      return { rows: [] };
+    }
+    if (sql.startsWith('DELETE FROM project_media WHERE project_id = ? AND object_key IN')) {
+      const pid = String(params[0]);
+      for (const k of params.slice(1)) {
+        projectMedia.delete(`${pid}::${String(k)}`);
+      }
+      return { rows: [] };
+    }
+    if (sql.startsWith('DELETE FROM project_media WHERE project_id = ?')) {
+      const prefix = `${String(params[0])}::`;
+      for (const e of Array.from(projectMedia)) {
+        if (e.startsWith(prefix)) projectMedia.delete(e);
+      }
+      return { rows: [] };
     }
 
     throw new Error(`Unhandled SQL in mock D1: ${sql}`);
@@ -365,17 +546,36 @@ function createMockD1(): D1Database {
       execSql(sql, bound);
       return { results: [], success: true, meta: {} };
     },
+    _execSync: () => {
+      const { rows } = execSql(sql, bound);
+      return { results: rows, success: true, meta: {} };
+    },
   });
 
   return {
     prepare: (sql: string) => makeStmt(sql),
-  } as unknown as D1Database;
+    async batch(statements: Array<ReturnType<typeof makeStmt>>) {
+      return statements.map((s) => s._execSync());
+    },
+    getQueryCount: () => queryCount,
+    seedRawMedia: (row: Record<string, unknown>) => {
+      mediaObjects.set(String(row.object_key), row);
+    },
+    seedLegacyProjectWithoutDto: (row: Record<string, unknown>) => {
+      projects.set(String(row.id), row);
+    },
+  } as unknown as D1Database & {
+    getQueryCount: () => number;
+    seedRawMedia: (row: Record<string, unknown>) => void;
+    seedLegacyProjectWithoutDto: (row: Record<string, unknown>) => void;
+  };
 }
 
 function makeTestEnv(overrides: Partial<Env> = {}) {
   const mockR2 = createMockR2Bucket();
+  const mockD1 = createMockD1();
   const env: Env = {
-    DB: createMockD1(),
+    DB: mockD1,
     IMAGES_BUCKET: mockR2.bucket,
     ADMIN_USERNAME: 'admin',
     ADMIN_PASSWORD: 'StrongPassword123!',
@@ -385,7 +585,7 @@ function makeTestEnv(overrides: Partial<Env> = {}) {
     R2_BLOCK_REMAINING_BYTES: '1000',
     ...overrides,
   };
-  return { env, mockR2 };
+  return { env, mockR2, mockD1 };
 }
 
 function extractSessionCookie(res: Response): string {
@@ -614,5 +814,241 @@ describe('Cloudflare Worker API Integration', () => {
     expect(delJson.deletedMediaCount).toBe(1);
     expect(delJson.storage.usedBytes).toBe(0);
     expect(mockR2.keys()).toHaveLength(0);
+  });
+
+  it('serves precomputed client_dto_json with Edge Cache hits, 304 ETag, and cache invalidation on writes', async () => {
+    const mockCache = createMockEdgeCache();
+    const cachedApp = createWorkerApp({ edgeCache: mockCache.cache });
+    const { env, mockD1 } = makeTestEnv();
+
+    const loginRes = await cachedApp.request(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'StrongPassword123!' }),
+      },
+      env
+    );
+    const cookie = extractSessionCookie(loginRes);
+
+    const state = createSampleMast2Project();
+    state.projectName = 'Edge Cached Site';
+    await cachedApp.request(
+      '/api/admin/projects',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({
+          id: 'proj-edge',
+          state,
+          clientSettings: { enabled: true, featured: true, slug: 'edge-site' },
+        }),
+      },
+      env
+    );
+
+    const qBeforeList = mockD1.getQueryCount();
+    const res1 = await cachedApp.request('/api/client/projects/edge-site', undefined, env);
+    expect(res1.status).toBe(200);
+    expect(res1.headers.get('Cache-Control')).toContain('s-maxage=300');
+    const etag1 = res1.headers.get('ETag')!;
+    expect(etag1).toBeTruthy();
+    const body1 = (await res1.json()) as {
+      project: { projectName: string };
+      availableProjects: Array<{ id: string; slug: string; featured: boolean }>;
+    };
+    expect(body1.project.projectName).toBe('Edge Cached Site');
+    expect(body1.availableProjects).toHaveLength(1);
+    expect(mockD1.getQueryCount()).toBeGreaterThan(qBeforeList);
+
+    // Second GET with Edge Cache hit skips D1 completely and honors If-None-Match 304
+    const qBeforeHit = mockD1.getQueryCount();
+    const res304 = await cachedApp.request(
+      '/api/client/projects/edge-site',
+      { headers: { 'If-None-Match': etag1 } },
+      env
+    );
+    expect(res304.status).toBe(304);
+    expect(mockD1.getQueryCount()).toBe(qBeforeHit);
+
+    // Admin update invalidates edge cache and produces fresh ETag & payload
+    state.projectName = 'Edge Cached Site Updated';
+    const putRes = await cachedApp.request(
+      '/api/admin/projects/proj-edge',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ state }),
+      },
+      env
+    );
+    expect(putRes.status).toBe(200);
+
+    const resAfterUpdate = await cachedApp.request(
+      '/api/client/projects/edge-site',
+      { headers: { 'If-None-Match': etag1 } },
+      env
+    );
+    expect(resAfterUpdate.status).toBe(200);
+    expect(resAfterUpdate.headers.get('ETag')).not.toBe(etag1);
+    const body2 = (await resAfterUpdate.json()) as { project: { projectName: string } };
+    expect(body2.project.projectName).toBe('Edge Cached Site Updated');
+  });
+
+  it('preserves shared media across duplicated projects using project_media and prunes >24h unlinked uploads on reconcile', async () => {
+    const mockCache = createMockEdgeCache();
+    const cachedApp = createWorkerApp({ edgeCache: mockCache.cache });
+    const { env, mockR2, mockD1 } = makeTestEnv();
+
+    const loginRes = await cachedApp.request(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'StrongPassword123!' }),
+      },
+      env
+    );
+    const cookie = extractSessionCookie(loginRes);
+
+    // Upload 1 active image (used by proj-a and duplicated proj-b)
+    const form = new FormData();
+    form.append('projectId', 'proj-a');
+    form.append('category', 'daily_log');
+    form.append('file', new File([new Uint8Array(500)], 'shared.jpg', { type: 'image/jpeg' }));
+    const upRes = await cachedApp.request(
+      '/api/admin/images/upload',
+      { method: 'POST', headers: { Cookie: cookie }, body: form },
+      env
+    );
+    const upJson = (await upRes.json()) as { url: string; objectKey: string };
+
+    // Also test 304 on /api/images/*
+    const imgHit1 = await cachedApp.request(upJson.url, undefined, env);
+    expect(imgHit1.status).toBe(200);
+    const imgEtag = imgHit1.headers.get('ETag')!;
+    const qBeforeImg304 = mockD1.getQueryCount();
+    const imgHit304 = await cachedApp.request(
+      upJson.url,
+      { headers: { 'If-None-Match': imgEtag } },
+      env
+    );
+    expect(imgHit304.status).toBe(304);
+    expect(mockD1.getQueryCount()).toBe(qBeforeImg304);
+
+    const makeStateWithPhoto = (name: string) => {
+      const s = createSampleMast2Project();
+      s.projectName = name;
+      s.dailyLogs = [
+        {
+          id: 'dl-1',
+          date: '2026-01-10',
+          dayNumber: 1,
+          weather: 'Sunny',
+          activitiesSummary: 'Photo',
+          foundationsWorked: [],
+          workers: [],
+          totalWorkers: 0,
+          totalManHours: 0,
+          cementUsedBags: 0,
+          sandUsedBags: 0,
+          gravelUsedBags: 0,
+          documentationItems: [{ id: 'doc-1', photoDataUrl: upJson.url, description: 'test' }],
+          issuesOrDelays: '',
+        },
+      ];
+      return s;
+    };
+
+    await cachedApp.request(
+      '/api/admin/projects',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ id: 'proj-a', state: makeStateWithPhoto('Proj A') }),
+      },
+      env
+    );
+    await cachedApp.request(
+      '/api/admin/projects',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ id: 'proj-b', state: makeStateWithPhoto('Proj B') }),
+      },
+      env
+    );
+
+    // Deleting proj-a keeps shared R2 image intact because proj-b still references it in project_media
+    const delA = await cachedApp.request(
+      '/api/admin/projects/proj-a',
+      { method: 'DELETE', headers: { Cookie: cookie } },
+      env
+    );
+    const delAJson = (await delA.json()) as { deletedMediaCount: number };
+    expect(delAJson.deletedMediaCount).toBe(0);
+    expect(mockR2.keys()).toEqual([upJson.objectKey]);
+
+    // Seed a stale (>24h) unlinked orphan object in R2 & media_objects, verify reconcile sweeps only the stale orphan
+    const staleKey = 'projects/tmp/daily_log/stale-orphan.jpg';
+    await mockR2.bucket.put(staleKey, new Uint8Array(400), {
+      httpMetadata: { contentType: 'image/jpeg' },
+    });
+    mockD1.seedRawMedia({
+      object_key: staleKey,
+      project_id: null,
+      category: 'daily_log',
+      content_type: 'image/jpeg',
+      size_bytes: 400,
+      original_name: 'stale.jpg',
+      created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+    });
+
+    const recRes = await cachedApp.request(
+      '/api/admin/storage/reconcile',
+      { method: 'POST', headers: { Cookie: cookie } },
+      env
+    );
+    expect(recRes.status).toBe(200);
+    const recJson = (await recRes.json()) as {
+      storage: { usedBytes: number; objectCount: number };
+    };
+    expect(recJson.storage.usedBytes).toBe(500);
+    expect(recJson.storage.objectCount).toBe(1);
+    expect(mockR2.keys()).toEqual([upJson.objectKey]);
+  });
+
+  it('throttles username enumeration from a single IP using IP-wide login_attempts limit', async () => {
+    const { env } = makeTestEnv();
+    for (let i = 0; i < 24; i++) {
+      const res = await app.request(
+        '/api/auth/login',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'CF-Connecting-IP': '203.0.113.9',
+          },
+          body: JSON.stringify({ username: `spray-user-${i}`, password: 'bad-password' }),
+        },
+        env
+      );
+      expect(res.status).toBe(401);
+    }
+
+    const blockedRes = await app.request(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'CF-Connecting-IP': '203.0.113.9',
+        },
+        body: JSON.stringify({ username: 'admin', password: 'StrongPassword123!' }),
+      },
+      env
+    );
+    expect(blockedRes.status).toBe(429);
   });
 });

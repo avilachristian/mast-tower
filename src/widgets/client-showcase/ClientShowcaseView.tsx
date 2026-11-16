@@ -27,6 +27,7 @@ import { STATUS_META } from '@/entities/project/mast2Baseline';
 import type {
   ClientDailyHighlightDto,
   ClientProjectShowcaseDto,
+  PublicProjectSummary,
 } from '@/entities/project/types';
 import {
   ANCHOR_GUY_STAGE_META,
@@ -40,21 +41,35 @@ import { navigateTo } from '@/shared/lib/router';
 import type { MastSelectionTarget } from '@/shared/state/uiStore';
 import { idbGet, idbSet } from '@/shared/storage/indexedDb';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
-import { OverallVerticalMastStatusPrintModal } from '@/widgets/mast-tower/OverallVerticalMastStatusPrintModal';
 import { VerticalMastElevation2D } from '@/widgets/mast-tower/VerticalMastElevation2D';
-import { OverallProjectStatusPrintModal } from '@/widgets/project-status/OverallProjectStatusPrintModal';
-import { ClientDailyLogPrintModal } from './ClientDailyLogPrintModal';
 import type { Tower3DSelectionTarget } from './tower3dGeometry';
 
 const LazyMastTower3DShowcase = lazy(() =>
   import('./MastTower3DShowcase').then((m) => ({ default: m.MastTower3DShowcase })),
 );
+const LazyOverallProjectStatusPrintModal = lazy(() =>
+  import('@/widgets/project-status/OverallProjectStatusPrintModal').then((m) => ({
+    default: m.OverallProjectStatusPrintModal,
+  })),
+);
+const LazyOverallVerticalMastStatusPrintModal = lazy(() =>
+  import('@/widgets/mast-tower/OverallVerticalMastStatusPrintModal').then((m) => ({
+    default: m.OverallVerticalMastStatusPrintModal,
+  })),
+);
+const LazyClientDailyLogPrintModal = lazy(() =>
+  import('./ClientDailyLogPrintModal').then((m) => ({
+    default: m.ClientDailyLogPrintModal,
+  })),
+);
 
 const CLIENT_SHOWCASE_CACHE_KEY = 'mast2-client-showcase-cache-v1';
+const SILENT_REFRESH_MIN_INTERVAL_MS = 120_000;
 
 interface CachedShowcaseSnapshot {
   updatedAt: string;
   projects: ClientProjectShowcaseDto[];
+  availableProjects?: PublicProjectSummary[];
 }
 
 interface GalleryPhotoItem {
@@ -111,6 +126,7 @@ function getClientSectionStatusLabel(status: keyof typeof TOWER_SECTION_STATUS_M
 
 export function ClientShowcaseView({ slug }: { slug?: string }) {
   const [projects, setProjects] = useState<ClientProjectShowcaseDto[]>([]);
+  const [availableProjects, setAvailableProjects] = useState<PublicProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,6 +169,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
   }, []);
 
   const lastFetchAtRef = useRef<number>(0);
+  const lastCachedSigRef = useRef<string | null>(null);
   const lastSyncedDiagramRef = useRef<{ id: string; phaseMode: string } | null>(null);
 
   const loadProjects = useCallback(
@@ -167,23 +184,79 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
       }
       setError(null);
 
+      const cacheKey = slug
+        ? `${CLIENT_SHOWCASE_CACHE_KEY}:${slug}`
+        : CLIENT_SHOWCASE_CACHE_KEY;
+
       try {
-        const response = await apiClient.fetchClientProjects();
-        const list = Array.isArray(response.projects) ? response.projects : [];
+        let list: ClientProjectShowcaseDto[] = [];
+        let avail: PublicProjectSummary[] = [];
+
+        if (slug) {
+          const response = await apiClient.fetchClientProject(slug);
+          list = response.project ? [response.project] : [];
+          avail =
+            Array.isArray(response.availableProjects) &&
+            response.availableProjects.length > 0
+              ? response.availableProjects
+              : list.map((p) => ({
+                  id: p.id,
+                  slug: p.slug,
+                  projectName: p.projectName,
+                  location: p.location,
+                  featured: p.featured,
+                }));
+        } else {
+          const response = await apiClient.fetchClientProjects();
+          list = Array.isArray(response.projects) ? response.projects : [];
+          avail = list.map((p) => ({
+            id: p.id,
+            slug: p.slug,
+            projectName: p.projectName,
+            location: p.location,
+            featured: p.featured,
+          }));
+        }
+
         setProjects(list);
+        setAvailableProjects(avail);
         setUsingCachedSnapshot(false);
         setCachedAt(null);
 
-        await idbSet<CachedShowcaseSnapshot>(CLIENT_SHOWCASE_CACHE_KEY, {
-          updatedAt: new Date().toISOString(),
-          projects: list,
-        });
+        const nextSig = `${list.map((p) => `${p.id}:${p.updatedAt}`).join('|')}::${avail.map((a) => `${a.id}:${a.slug}:${a.featured}`).join(',')}`;
+        if (nextSig !== lastCachedSigRef.current) {
+          lastCachedSigRef.current = nextSig;
+          await idbSet<CachedShowcaseSnapshot>(cacheKey, {
+            updatedAt: new Date().toISOString(),
+            projects: list,
+            availableProjects: avail,
+          });
+        }
       } catch (err) {
-        const cached = await idbGet<CachedShowcaseSnapshot>(CLIENT_SHOWCASE_CACHE_KEY);
-        if (cached && Array.isArray(cached.projects) && cached.projects.length > 0) {
-          setProjects(cached.projects);
+        const cached =
+          (await idbGet<CachedShowcaseSnapshot>(cacheKey)) ??
+          (slug ? await idbGet<CachedShowcaseSnapshot>(CLIENT_SHOWCASE_CACHE_KEY) : undefined);
+        const cachedList = Array.isArray(cached?.projects) ? cached.projects : [];
+        const matchedList =
+          slug && cachedList.length > 0
+            ? cachedList.filter((p) => p.slug === slug || p.id === slug)
+            : cachedList;
+
+        if (matchedList.length > 0) {
+          setProjects(matchedList);
+          setAvailableProjects(
+            cached?.availableProjects && cached.availableProjects.length > 0
+              ? cached.availableProjects
+              : cachedList.map((p) => ({
+                  id: p.id,
+                  slug: p.slug,
+                  projectName: p.projectName,
+                  location: p.location,
+                  featured: p.featured,
+                }))
+          );
           setUsingCachedSnapshot(true);
-          setCachedAt(cached.updatedAt);
+          setCachedAt(cached?.updatedAt ?? null);
         } else if (!silent) {
           const message =
             err instanceof ApiError
@@ -198,7 +271,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
         }
       }
     },
-    []
+    [slug]
   );
 
   useEffect(() => {
@@ -207,21 +280,19 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
 
   useEffect(() => {
     const maybeSilentRefresh = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
         return;
       }
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         return;
       }
-      if (Date.now() - lastFetchAtRef.current < 5000) {
+      if (Date.now() - lastFetchAtRef.current < SILENT_REFRESH_MIN_INTERVAL_MS) {
         return;
       }
       void loadProjects(false, true);
     };
-    window.addEventListener('focus', maybeSilentRefresh);
     document.addEventListener('visibilitychange', maybeSilentRefresh);
     return () => {
-      window.removeEventListener('focus', maybeSilentRefresh);
       document.removeEventListener('visibilitychange', maybeSilentRefresh);
     };
   }, [loadProjects]);
@@ -549,7 +620,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                 <span className="shrink-0 text-emerald-700 font-semibold">Live</span>
               </div>
 
-              {projects.length > 1 && (
+              {availableProjects.length > 1 && (
                 <div className="space-y-1">
                   <label
                     htmlFor="client-project-select"
@@ -564,7 +635,7 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
                     onChange={(e) => navigateTo(`/p/${encodeURIComponent(e.target.value)}`)}
                     className="w-full rounded-none border border-stone-400 bg-[#F7F6F2] px-2.5 py-1.5 text-xs font-medium text-neutral-900 focus:outline-none focus:border-neutral-950 cursor-pointer"
                   >
-                    {projects.map((p) => (
+                    {availableProjects.map((p) => (
                       <option key={p.id} value={p.slug}>
                         {p.projectName} ({p.location || 'Site'})
                       </option>
@@ -1606,33 +1677,35 @@ export function ClientShowcaseView({ slug }: { slug?: string }) {
 
       {/* Client-Safe Print / PDF Report Modals (Controlled by Admin showReports setting) */}
       {activeDto && renderProject && activeDto.settings.showReports && (
-        <>
-          <OverallProjectStatusPrintModal
-            open={
-              progressReportTarget === 'foundation' &&
-              activeDto.settings.phaseMode !== 'vertical_mast'
-            }
-            onClose={() => setProgressReportTarget(null)}
-            project={renderProject}
-            clientSafe
-          />
-          <OverallVerticalMastStatusPrintModal
-            open={
-              progressReportTarget === 'vertical_mast' &&
-              activeDto.settings.phaseMode !== 'foundation'
-            }
-            onClose={() => setProgressReportTarget(null)}
-            project={renderProject}
-            clientSafe
-          />
-          <ClientDailyLogPrintModal
-            open={dailyLogPrintOpen}
-            onClose={() => setDailyLogPrintOpen(false)}
-            dto={activeDto}
-            renderProject={renderProject}
-            initialHighlightId={dailyLogInitialId}
-          />
-        </>
+        <Suspense fallback={null}>
+          {progressReportTarget === 'foundation' &&
+            activeDto.settings.phaseMode !== 'vertical_mast' && (
+              <LazyOverallProjectStatusPrintModal
+                open
+                onClose={() => setProgressReportTarget(null)}
+                project={renderProject}
+                clientSafe
+              />
+            )}
+          {progressReportTarget === 'vertical_mast' &&
+            activeDto.settings.phaseMode !== 'foundation' && (
+              <LazyOverallVerticalMastStatusPrintModal
+                open
+                onClose={() => setProgressReportTarget(null)}
+                project={renderProject}
+                clientSafe
+              />
+            )}
+          {dailyLogPrintOpen && (
+            <LazyClientDailyLogPrintModal
+              open
+              onClose={() => setDailyLogPrintOpen(false)}
+              dto={activeDto}
+              renderProject={renderProject}
+              initialHighlightId={dailyLogInitialId}
+            />
+          )}
+        </Suspense>
       )}
 
       {/* Architectural Fullscreen Photo Lightbox (Sharp Geometry) */}

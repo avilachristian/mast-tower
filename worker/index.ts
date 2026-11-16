@@ -17,11 +17,13 @@ import {
   createAdminSession,
   destroySessionFromRequest,
   getSessionUserFromRequest,
+  MAX_FAILED_IP_ATTEMPTS,
   recordFailedLoginAttempt,
   requireAdmin,
   setSessionCookie,
 } from './auth';
 import {
+  chunkArray,
   cleanupOrphanedMediaKeys,
   extractMediaKeysFromProjectState,
   getR2StorageStatus,
@@ -31,7 +33,95 @@ import {
   uploadImageToR2,
   type MediaCategory,
 } from './r2Service';
-import type { AdminSessionUser, Env, ProjectRow } from './types';
+import type {
+  AdminSessionUser,
+  Env,
+  ProjectRow,
+  PublicProjectSummary,
+} from './types';
+import type { ClientProjectShowcaseDto } from '../src/entities/project/types';
+
+export interface WorkerAppOptions {
+  edgeCache?: Cache | null;
+}
+
+const PUBLIC_CLIENT_CACHE_CONTROL = 'public, max-age=30, s-maxage=300';
+
+function getEdgeCache(options?: WorkerAppOptions): Cache | null {
+  if (options && 'edgeCache' in options) {
+    return options.edgeCache ?? null;
+  }
+  const cacheStorage = (globalThis as { caches?: { default?: Cache } }).caches;
+  return cacheStorage?.default ?? null;
+}
+
+function runInBackground(
+  c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  task: Promise<unknown>
+): void {
+  try {
+    c.executionCtx.waitUntil(task.catch(() => undefined));
+  } catch {
+    void task.catch(() => undefined);
+  }
+}
+
+function buildCanonicalCacheRequest(requestUrl: string, pathnameOverride?: string): Request {
+  const url = new URL(requestUrl);
+  if (pathnameOverride) {
+    url.pathname = pathnameOverride;
+  }
+  url.search = '';
+  return new Request(url.toString(), { method: 'GET' });
+}
+
+function normalizeEtagToken(tag: string): string {
+  return tag.trim().replace(/^W\//i, '');
+}
+
+function matchesIfNoneMatch(headerValue: string | undefined, etag: string): boolean {
+  if (!headerValue) return false;
+  if (headerValue.trim() === '*') return true;
+  const target = normalizeEtagToken(etag);
+  return headerValue
+    .split(',')
+    .some((part) => normalizeEtagToken(part) === target);
+}
+
+async function computeWeakOrStrongEtag(seed: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(seed)
+  );
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 24);
+  return `"${hex}"`;
+}
+
+async function purgeCacheKeys(
+  edgeCache: Cache | null,
+  requestUrl: string,
+  pathnames: Iterable<string>
+): Promise<void> {
+  if (!edgeCache) return;
+  const uniquePaths = Array.from(new Set(Array.from(pathnames).filter(Boolean)));
+  await Promise.all(
+    uniquePaths.map((p) =>
+      edgeCache.delete(buildCanonicalCacheRequest(requestUrl, p)).catch(() => false)
+    )
+  );
+}
+
+function projectPathsForInvalidation(identifiers: Iterable<string | null | undefined>): string[] {
+  const paths = ['/api/client/projects'];
+  for (const raw of identifiers) {
+    const clean = raw?.trim();
+    if (!clean) continue;
+    paths.push(`/api/client/projects/${encodeURIComponent(clean)}`);
+  }
+  return paths;
+}
 
 type AppContext = {
   Bindings: Env;
@@ -106,39 +196,154 @@ async function ensureUniqueSlug(
 async function clearOtherFeaturedProjects(
   env: Env,
   activeFeaturedId: string
-): Promise<void> {
+): Promise<Array<{ id: string; slug: string | null }>> {
   const rows = await env.DB.prepare(
-    'SELECT id, client_settings_json FROM projects WHERE client_featured = 1 AND id != ?'
+    'SELECT id, slug, client_settings_json, client_dto_json FROM projects WHERE client_featured = 1 AND id != ?'
   )
     .bind(activeFeaturedId)
-    .all<{ id: string; client_settings_json: string }>();
+    .all<{
+      id: string;
+      slug: string | null;
+      client_settings_json: string;
+      client_dto_json?: string | null;
+    }>();
 
-  for (const row of rows.results ?? []) {
-    const parsed = parseJsonSafe<Partial<ClientShowcaseSettings>>(
+  const list = rows.results ?? [];
+  if (list.length === 0) return [];
+
+  const statements = list.map((row) => {
+    const parsedSettings = parseJsonSafe<Partial<ClientShowcaseSettings>>(
       row.client_settings_json,
       {}
     );
-    const updated = JSON.stringify({ ...parsed, featured: false });
-    await env.DB.prepare(
-      'UPDATE projects SET client_featured = 0, client_settings_json = ? WHERE id = ?'
-    )
-      .bind(updated, row.id)
-      .run();
+    const updatedSettings = JSON.stringify({ ...parsedSettings, featured: false });
+
+    let updatedDtoJson: string | null = null;
+    if (row.client_dto_json) {
+      const parsedDto = parseJsonSafe<ClientProjectShowcaseDto | null>(
+        row.client_dto_json,
+        null
+      );
+      if (parsedDto) {
+        updatedDtoJson = JSON.stringify({
+          ...parsedDto,
+          featured: false,
+          settings: {
+            ...parsedDto.settings,
+            featured: false,
+          },
+        });
+      }
+    }
+
+    return env.DB.prepare(
+      'UPDATE projects SET client_featured = 0, client_settings_json = ?, client_dto_json = ? WHERE id = ?'
+    ).bind(updatedSettings, updatedDtoJson ?? row.client_dto_json ?? null, row.id);
+  });
+
+  for (const batch of chunkArray(statements, 50)) {
+    await env.DB.batch(batch);
   }
+
+  return list.map((r) => ({ id: r.id, slug: r.slug }));
 }
 
 async function linkProjectMediaKeys(
   env: Env,
   projectId: string,
-  keys: Iterable<string>
+  nextKeys: Set<string>
 ): Promise<void> {
-  for (const key of keys) {
-    await env.DB.prepare(
-      'UPDATE media_objects SET project_id = ? WHERE object_key = ? AND (project_id IS NULL OR project_id != ?)'
-    )
-      .bind(projectId, key, projectId)
-      .run();
+  const existingRows = await env.DB.prepare(
+    'SELECT object_key FROM project_media WHERE project_id = ?'
+  )
+    .bind(projectId)
+    .all<{ object_key: string }>();
+
+  const existingLinked = new Set(
+    (existingRows.results ?? []).map((r) => r.object_key)
+  );
+
+  const keysToAdd: string[] = [];
+  for (const key of nextKeys) {
+    if (!existingLinked.has(key)) keysToAdd.push(key);
   }
+
+  const keysToRemove: string[] = [];
+  for (const key of existingLinked) {
+    if (!nextKeys.has(key)) keysToRemove.push(key);
+  }
+
+  if (keysToAdd.length === 0 && keysToRemove.length === 0) {
+    return;
+  }
+
+  const statements: ReturnType<Env['DB']['prepare']>[] = [];
+
+  for (const chunk of chunkArray(keysToAdd, 70)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    statements.push(
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO project_media (project_id, object_key)
+         SELECT ?, object_key FROM media_objects WHERE object_key IN (${placeholders})`
+      ).bind(projectId, ...chunk),
+      env.DB.prepare(
+        `UPDATE media_objects
+         SET project_id = ?
+         WHERE object_key IN (${placeholders}) AND (project_id IS NULL OR project_id != ?)`
+      ).bind(projectId, ...chunk, projectId)
+    );
+  }
+
+  for (const chunk of chunkArray(keysToRemove, 70)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    statements.push(
+      env.DB.prepare(
+        `DELETE FROM project_media WHERE project_id = ? AND object_key IN (${placeholders})`
+      ).bind(projectId, ...chunk)
+    );
+  }
+
+  for (const batch of chunkArray(statements, 50)) {
+    await env.DB.batch(batch);
+  }
+}
+
+function buildPrecomputedClientDtoJson(params: {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+  clientSettings: ClientShowcaseSettings;
+  state: MastProjectState;
+}): string {
+  return JSON.stringify(
+    buildClientShowcaseDto({
+      id: params.id,
+      createdAt: params.createdAt,
+      updatedAt: params.updatedAt,
+      version: params.version,
+      syncStatus: 'synced',
+      clientSettings: params.clientSettings,
+      state: params.state,
+    })
+  );
+}
+
+function extractClientDtoFromRow(row: ProjectRow): {
+  dto: ClientProjectShowcaseDto;
+  needsBackfill: boolean;
+} {
+  if (row.client_dto_json) {
+    const parsed = parseJsonSafe<ClientProjectShowcaseDto | null>(
+      row.client_dto_json,
+      null
+    );
+    if (parsed && parsed.id && Array.isArray(parsed.foundations)) {
+      return { dto: parsed, needsBackfill: false };
+    }
+  }
+  const dto = buildClientShowcaseDto(rowToSavedProjectRecord(row));
+  return { dto, needsBackfill: true };
 }
 
 function isValidProjectStatePayload(value: unknown): value is MastProjectState {
@@ -151,43 +356,160 @@ function isValidProjectStatePayload(value: unknown): value is MastProjectState {
   );
 }
 
-export function createWorkerApp() {
+export function createWorkerApp(options?: WorkerAppOptions) {
   const app = new Hono<AppContext>();
+  const edgeCache = getEdgeCache(options);
 
   app.get('/api/health', (c) =>
     c.json({ ok: true, timestamp: new Date().toISOString() })
   );
 
   // ---------------------------------------------------------------------------
-  // Public Client Showcase Endpoints (Strictly Sanitized DTOs)
+  // Public Client Showcase Endpoints (Precomputed Sanitized DTOs + Edge Cache)
   // ---------------------------------------------------------------------------
   app.get('/api/client/projects', async (c) => {
+    const cacheReq = buildCanonicalCacheRequest(c.req.url, '/api/client/projects');
+    const ifNoneMatch = c.req.header('If-None-Match');
+
+    if (edgeCache) {
+      const cached = await edgeCache.match(cacheReq);
+      if (cached) {
+        const cachedEtag = cached.headers.get('ETag');
+        if (cachedEtag && matchesIfNoneMatch(ifNoneMatch, cachedEtag)) {
+          return new Response(null, {
+            status: 304,
+            headers: {
+              ETag: cachedEtag,
+              'Cache-Control': PUBLIC_CLIENT_CACHE_CONTROL,
+            },
+          });
+        }
+        return new Response(cached.body, {
+          status: cached.status,
+          headers: cached.headers,
+        });
+      }
+    }
+
     const result = await c.env.DB.prepare(
-      `SELECT * FROM projects
+      `SELECT id, slug, name, project_type, client_visible, client_featured, version,
+              created_at, updated_at, client_dto_json,
+              CASE WHEN client_dto_json IS NULL THEN client_settings_json ELSE NULL END AS client_settings_json,
+              CASE WHEN client_dto_json IS NULL THEN state_json ELSE NULL END AS state_json
+       FROM projects
        WHERE client_visible = 1
        ORDER BY client_featured DESC, updated_at DESC`
     ).all<ProjectRow>();
 
-    const projects = (result.results ?? []).map((row) =>
-      buildClientShowcaseDto(rowToSavedProjectRecord(row))
-    );
+    const rows = result.results ?? [];
+    const backfillStmts: ReturnType<Env['DB']['prepare']>[] = [];
+    const projects = rows.map((row) => {
+      const { dto, needsBackfill } = extractClientDtoFromRow(row);
+      if (needsBackfill) {
+        backfillStmts.push(
+          c.env.DB.prepare('UPDATE projects SET client_dto_json = ? WHERE id = ?').bind(
+            JSON.stringify(dto),
+            row.id
+          )
+        );
+      }
+      return dto;
+    });
 
-    return c.json(
-      { projects },
-      200,
-      { 'Cache-Control': 'no-store' }
-    );
+    if (backfillStmts.length > 0) {
+      for (const batch of chunkArray(backfillStmts, 25)) {
+        runInBackground(c, c.env.DB.batch(batch));
+      }
+    }
+
+    const etagSeed = rows.map((r) => `${r.id}:${r.version}:${r.updated_at}`).join('|');
+    const etag = await computeWeakOrStrongEtag(`list:${etagSeed}`);
+
+    if (matchesIfNoneMatch(ifNoneMatch, etag)) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          'Cache-Control': PUBLIC_CLIENT_CACHE_CONTROL,
+        },
+      });
+    }
+
+    const body = JSON.stringify({ projects });
+    const res = new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json; charset=UTF-8',
+        'Cache-Control': PUBLIC_CLIENT_CACHE_CONTROL,
+        ETag: etag,
+      },
+    });
+
+    if (edgeCache) {
+      runInBackground(c, edgeCache.put(cacheReq, res.clone()));
+    }
+
+    return res;
   });
 
   app.get('/api/client/projects/:idOrSlug', async (c) => {
     const idOrSlug = c.req.param('idOrSlug');
-    const row = await c.env.DB.prepare(
-      `SELECT * FROM projects
-       WHERE client_visible = 1 AND (id = ? OR slug = ?)
-       LIMIT 1`
-    )
-      .bind(idOrSlug, idOrSlug)
-      .first<ProjectRow>();
+    const cacheReq = buildCanonicalCacheRequest(
+      c.req.url,
+      `/api/client/projects/${encodeURIComponent(idOrSlug)}`
+    );
+    const ifNoneMatch = c.req.header('If-None-Match');
+
+    if (edgeCache) {
+      const cached = await edgeCache.match(cacheReq);
+      if (cached) {
+        const cachedEtag = cached.headers.get('ETag');
+        if (cachedEtag && matchesIfNoneMatch(ifNoneMatch, cachedEtag)) {
+          return new Response(null, {
+            status: 304,
+            headers: {
+              ETag: cachedEtag,
+              'Cache-Control': PUBLIC_CLIENT_CACHE_CONTROL,
+            },
+          });
+        }
+        return new Response(cached.body, {
+          status: cached.status,
+          headers: cached.headers,
+        });
+      }
+    }
+
+    const [row, summaryResult] = await Promise.all([
+      c.env.DB.prepare(
+        `SELECT id, slug, name, project_type, client_visible, client_featured, version,
+                created_at, updated_at, client_dto_json,
+                CASE WHEN client_dto_json IS NULL THEN client_settings_json ELSE NULL END AS client_settings_json,
+                CASE WHEN client_dto_json IS NULL THEN state_json ELSE NULL END AS state_json
+         FROM projects
+         WHERE client_visible = 1 AND (id = ? OR slug = ?)
+         LIMIT 1`
+      )
+        .bind(idOrSlug, idOrSlug)
+        .first<ProjectRow>(),
+      c.env.DB.prepare(
+        `SELECT id, slug, name, client_featured, version, updated_at,
+                json_extract(client_dto_json, '$.projectName') AS dto_project_name,
+                json_extract(client_dto_json, '$.location') AS dto_location
+         FROM projects
+         WHERE client_visible = 1
+         ORDER BY client_featured DESC, updated_at DESC`
+      ).all<{
+        id: string;
+        slug: string | null;
+        name: string;
+        client_featured: number;
+        version: number;
+        updated_at: string;
+        dto_project_name?: string | null;
+        dto_location?: string | null;
+      }>(),
+    ]);
 
     if (!row) {
       return c.json(
@@ -196,15 +518,64 @@ export function createWorkerApp() {
       );
     }
 
-    return c.json(
-      { project: buildClientShowcaseDto(rowToSavedProjectRecord(row)) },
-      200,
-      { 'Cache-Control': 'no-store' }
+    const { dto, needsBackfill } = extractClientDtoFromRow(row);
+    if (needsBackfill) {
+      runInBackground(
+        c,
+        c.env.DB.prepare('UPDATE projects SET client_dto_json = ? WHERE id = ?')
+          .bind(JSON.stringify(dto), row.id)
+          .run()
+      );
+    }
+
+    const summaryRows = summaryResult.results ?? [];
+    const availableProjects: PublicProjectSummary[] = summaryRows.map((s) => ({
+      id: s.id,
+      slug: s.slug || s.id,
+      projectName: s.dto_project_name?.trim() || s.name || dto.projectName,
+      location:
+        (s.id === dto.id ? dto.location : s.dto_location?.trim()) || '',
+      featured: Boolean(s.client_featured),
+    }));
+
+    const summarySeed = summaryRows
+      .map((s) => `${s.id}:${s.slug ?? ''}:${s.version}:${s.updated_at}`)
+      .join('|');
+    const etag = await computeWeakOrStrongEtag(
+      `one:${row.id}:${row.version}:${row.updated_at}:${summarySeed}`
     );
+
+    if (matchesIfNoneMatch(ifNoneMatch, etag)) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          'Cache-Control': PUBLIC_CLIENT_CACHE_CONTROL,
+        },
+      });
+    }
+
+    const res = new Response(
+      JSON.stringify({ project: dto, availableProjects }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json; charset=UTF-8',
+          'Cache-Control': PUBLIC_CLIENT_CACHE_CONTROL,
+          ETag: etag,
+        },
+      }
+    );
+
+    if (edgeCache) {
+      runInBackground(c, edgeCache.put(cacheReq, res.clone()));
+    }
+
+    return res;
   });
 
   // ---------------------------------------------------------------------------
-  // Same-Origin Image Serving from R2 (Zero-CORS for Vector PDF Exports)
+  // Same-Origin Image Serving from R2 (Edge Cached + 304 Conditional)
   // ---------------------------------------------------------------------------
   app.get('/api/images/*', async (c) => {
     const pathname = new URL(c.req.url).pathname;
@@ -215,6 +586,29 @@ export function createWorkerApp() {
     );
     if (!objectKey || objectKey.includes('..')) {
       return c.json({ error: 'Invalid image key' }, 400);
+    }
+
+    const ifNoneMatch = c.req.header('If-None-Match');
+    const cacheReq = buildCanonicalCacheRequest(c.req.url);
+
+    if (edgeCache) {
+      const cached = await edgeCache.match(cacheReq);
+      if (cached) {
+        const cachedEtag = cached.headers.get('ETag');
+        if (cachedEtag && matchesIfNoneMatch(ifNoneMatch, cachedEtag)) {
+          return new Response(null, {
+            status: 304,
+            headers: {
+              ETag: cachedEtag,
+              'Cache-Control': 'public, max-age=31536000, immutable',
+            },
+          });
+        }
+        return new Response(cached.body, {
+          status: cached.status,
+          headers: cached.headers,
+        });
+      }
     }
 
     const object = await c.env.IMAGES_BUCKET.get(objectKey);
@@ -232,10 +626,30 @@ export function createWorkerApp() {
     headers.set('ETag', object.httpEtag);
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
 
-    return new Response(object.body as BodyInit, {
+    if (matchesIfNoneMatch(ifNoneMatch, object.httpEtag)) {
+      const bodyStream = object.body as unknown as { cancel?: () => Promise<void> } | null;
+      if (bodyStream && typeof bodyStream.cancel === 'function') {
+        void bodyStream.cancel().catch(() => undefined);
+      }
+      return new Response(null, {
+        status: 304,
+        headers: {
+          ETag: object.httpEtag,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      });
+    }
+
+    const res = new Response(object.body as BodyInit, {
       status: 200,
       headers,
     });
+
+    if (edgeCache) {
+      runInBackground(c, edgeCache.put(cacheReq, res.clone()));
+    }
+
+    return res;
   });
 
   // ---------------------------------------------------------------------------
@@ -268,15 +682,23 @@ export function createWorkerApp() {
       c.req.header('CF-Connecting-IP') ||
       c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ||
       'unknown';
-    const ipKey = `${clientIp}:${username.toLowerCase()}`;
+    const userIpKey = `${clientIp}:${username.toLowerCase()}`;
+    const ipOnlyKey = `ip:${clientIp}`;
 
-    const rate = await checkLoginRateLimit(c.env, ipKey);
-    if (!rate.allowed) {
+    const [ipRate, userRate] = await Promise.all([
+      checkLoginRateLimit(c.env, ipOnlyKey),
+      checkLoginRateLimit(c.env, userIpKey),
+    ]);
+    if (!ipRate.allowed || !userRate.allowed) {
+      const retryAfterSec = Math.max(
+        !ipRate.allowed ? ipRate.retryAfterSec : 0,
+        !userRate.allowed ? userRate.retryAfterSec : 0
+      );
       return c.json(
         {
-          error: `Too many failed sign-in attempts. Please wait ${rate.retryAfterSec} seconds and try again.`,
+          error: `Too many failed sign-in attempts. Please wait ${retryAfterSec} seconds and try again.`,
           code: 'RATE_LIMITED',
-          retryAfterSec: rate.retryAfterSec,
+          retryAfterSec,
         },
         429
       );
@@ -284,14 +706,17 @@ export function createWorkerApp() {
 
     const user = await authenticateAdminCredentials(c.env, username, password);
     if (!user) {
-      await recordFailedLoginAttempt(c.env, ipKey);
+      await Promise.all([
+        recordFailedLoginAttempt(c.env, userIpKey),
+        recordFailedLoginAttempt(c.env, ipOnlyKey, MAX_FAILED_IP_ATTEMPTS),
+      ]);
       return c.json(
         { error: 'Invalid admin username or password.', code: 'INVALID_CREDENTIALS' },
         401
       );
     }
 
-    await clearLoginAttempts(c.env, ipKey);
+    await clearLoginAttempts(c.env, userIpKey);
     const { token } = await createAdminSession(c.env, user.id);
     setSessionCookie(c, token);
 
@@ -376,15 +801,23 @@ export function createWorkerApp() {
       slug: uniqueSlug,
     };
 
-    if (finalSettings.featured) {
-      await clearOtherFeaturedProjects(c.env, id);
-    }
+    const clearedFeatured = finalSettings.featured
+      ? await clearOtherFeaturedProjects(c.env, id)
+      : [];
+    const clientDtoJson = buildPrecomputedClientDtoJson({
+      id,
+      createdAt,
+      updatedAt,
+      version: 1,
+      clientSettings: finalSettings,
+      state: body.state,
+    });
 
     await c.env.DB.prepare(
       `INSERT INTO projects (
          id, slug, name, project_type, client_visible, client_featured,
-         client_settings_json, state_json, version, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+         client_settings_json, state_json, client_dto_json, version, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
     )
       .bind(
         id,
@@ -395,6 +828,7 @@ export function createWorkerApp() {
         finalSettings.featured ? 1 : 0,
         JSON.stringify(finalSettings),
         JSON.stringify(body.state),
+        clientDtoJson,
         createdAt,
         updatedAt
       )
@@ -406,16 +840,33 @@ export function createWorkerApp() {
       extractMediaKeysFromProjectState(body.state)
     );
 
-    const created = await c.env.DB.prepare(
-      'SELECT * FROM projects WHERE id = ?'
-    )
-      .bind(id)
-      .first<ProjectRow>();
+    runInBackground(
+      c,
+      purgeCacheKeys(
+        edgeCache,
+        c.req.url,
+        projectPathsForInvalidation([
+          id,
+          uniqueSlug,
+          ...clearedFeatured.flatMap((r) => [r.id, r.slug]),
+        ])
+      )
+    );
+
+    const createdProject: SavedProjectRecord = {
+      id,
+      createdAt,
+      updatedAt,
+      version: 1,
+      syncStatus: 'synced',
+      clientSettings: finalSettings,
+      state: body.state,
+    };
 
     const storage = await getR2StorageStatus(c.env);
     return c.json(
       {
-        project: created ? rowToSavedProjectRecord(created) : null,
+        project: createdProject,
         storage,
       },
       201
@@ -463,15 +914,23 @@ export function createWorkerApp() {
         ...meta.settings,
         slug: uniqueSlug,
       };
-      if (finalSettings.featured) {
-        await clearOtherFeaturedProjects(c.env, id);
-      }
+      const clearedFeatured = finalSettings.featured
+        ? await clearOtherFeaturedProjects(c.env, id)
+        : [];
+      const clientDtoJson = buildPrecomputedClientDtoJson({
+        id,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+        clientSettings: finalSettings,
+        state: body.state,
+      });
 
       await c.env.DB.prepare(
         `INSERT INTO projects (
            id, slug, name, project_type, client_visible, client_featured,
-           client_settings_json, state_json, version, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+           client_settings_json, state_json, client_dto_json, version, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
       )
         .bind(
           id,
@@ -482,6 +941,7 @@ export function createWorkerApp() {
           finalSettings.featured ? 1 : 0,
           JSON.stringify(finalSettings),
           JSON.stringify(body.state),
+          clientDtoJson,
           now,
           now
         )
@@ -493,14 +953,31 @@ export function createWorkerApp() {
         extractMediaKeysFromProjectState(body.state)
       );
 
-      const savedRow = await c.env.DB.prepare(
-        'SELECT * FROM projects WHERE id = ?'
-      )
-        .bind(id)
-        .first<ProjectRow>();
+      runInBackground(
+        c,
+        purgeCacheKeys(
+          edgeCache,
+          c.req.url,
+          projectPathsForInvalidation([
+            id,
+            uniqueSlug,
+            ...clearedFeatured.flatMap((r) => [r.id, r.slug]),
+          ])
+        )
+      );
+
+      const savedProject: SavedProjectRecord = {
+        id,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+        syncStatus: 'synced',
+        clientSettings: finalSettings,
+        state: body.state,
+      };
       const storage = await getR2StorageStatus(c.env);
       return c.json({
-        project: savedRow ? rowToSavedProjectRecord(savedRow) : null,
+        project: savedProject,
         storage,
       });
     }
@@ -545,9 +1022,9 @@ export function createWorkerApp() {
       slug: uniqueSlug,
     };
 
-    if (finalSettings.featured) {
-      await clearOtherFeaturedProjects(c.env, id);
-    }
+    const clearedFeatured = finalSettings.featured
+      ? await clearOtherFeaturedProjects(c.env, id)
+      : [];
 
     const name =
       body.state.reportDetails?.projectName?.trim() ||
@@ -555,11 +1032,19 @@ export function createWorkerApp() {
       existing.name;
     const projectType = body.state.projectType ?? 'foundation';
     const nextVersion = existing.version + 1;
+    const clientDtoJson = buildPrecomputedClientDtoJson({
+      id,
+      createdAt: existing.created_at,
+      updatedAt: now,
+      version: nextVersion,
+      clientSettings: finalSettings,
+      state: body.state,
+    });
 
     await c.env.DB.prepare(
       `UPDATE projects
        SET slug = ?, name = ?, project_type = ?, client_visible = ?, client_featured = ?,
-           client_settings_json = ?, state_json = ?, version = ?, updated_at = ?
+           client_settings_json = ?, state_json = ?, client_dto_json = ?, version = ?, updated_at = ?
        WHERE id = ?`
     )
       .bind(
@@ -570,6 +1055,7 @@ export function createWorkerApp() {
         finalSettings.featured ? 1 : 0,
         JSON.stringify(finalSettings),
         JSON.stringify(body.state),
+        clientDtoJson,
         nextVersion,
         now,
         id
@@ -588,15 +1074,33 @@ export function createWorkerApp() {
       await cleanupOrphanedMediaKeys(c.env, removedKeys);
     }
 
-    const updatedRow = await c.env.DB.prepare(
-      'SELECT * FROM projects WHERE id = ?'
-    )
-      .bind(id)
-      .first<ProjectRow>();
+    runInBackground(
+      c,
+      purgeCacheKeys(
+        edgeCache,
+        c.req.url,
+        projectPathsForInvalidation([
+          id,
+          existing.slug,
+          uniqueSlug,
+          ...clearedFeatured.flatMap((r) => [r.id, r.slug]),
+        ])
+      )
+    );
+
+    const updatedProject: SavedProjectRecord = {
+      id,
+      createdAt: existing.created_at,
+      updatedAt: now,
+      version: nextVersion,
+      syncStatus: 'synced',
+      clientSettings: finalSettings,
+      state: body.state,
+    };
     const storage = await getR2StorageStatus(c.env);
 
     return c.json({
-      project: updatedRow ? rowToSavedProjectRecord(updatedRow) : null,
+      project: updatedProject,
       storage,
     });
   });
@@ -643,15 +1147,25 @@ export function createWorkerApp() {
     );
     const finalSettings: ClientShowcaseSettings = { ...merged, slug: uniqueSlug };
 
-    if (finalSettings.featured) {
-      await clearOtherFeaturedProjects(c.env, id);
-    }
+    const clearedFeatured = finalSettings.featured
+      ? await clearOtherFeaturedProjects(c.env, id)
+      : [];
 
     const now = new Date().toISOString();
+    const nextVersion = existing.version + 1;
+    const clientDtoJson = buildPrecomputedClientDtoJson({
+      id,
+      createdAt: existing.created_at,
+      updatedAt: now,
+      version: nextVersion,
+      clientSettings: finalSettings,
+      state: prevRecord.state,
+    });
+
     await c.env.DB.prepare(
       `UPDATE projects
        SET slug = ?, client_visible = ?, client_featured = ?, client_settings_json = ?,
-           version = version + 1, updated_at = ?
+           client_dto_json = ?, version = ?, updated_at = ?
        WHERE id = ?`
     )
       .bind(
@@ -659,19 +1173,37 @@ export function createWorkerApp() {
         finalSettings.enabled ? 1 : 0,
         finalSettings.featured ? 1 : 0,
         JSON.stringify(finalSettings),
+        clientDtoJson,
+        nextVersion,
         now,
         id
       )
       .run();
 
-    const updatedRow = await c.env.DB.prepare(
-      'SELECT * FROM projects WHERE id = ?'
-    )
-      .bind(id)
-      .first<ProjectRow>();
+    runInBackground(
+      c,
+      purgeCacheKeys(
+        edgeCache,
+        c.req.url,
+        projectPathsForInvalidation([
+          id,
+          existing.slug,
+          uniqueSlug,
+          ...clearedFeatured.flatMap((r) => [r.id, r.slug]),
+        ])
+      )
+    );
+
+    const updatedProject: SavedProjectRecord = {
+      ...prevRecord,
+      updatedAt: now,
+      version: nextVersion,
+      syncStatus: 'synced',
+      clientSettings: finalSettings,
+    };
 
     return c.json({
-      project: updatedRow ? rowToSavedProjectRecord(updatedRow) : null,
+      project: updatedProject,
     });
   });
 
@@ -690,9 +1222,27 @@ export function createWorkerApp() {
     const record = rowToSavedProjectRecord(existing);
     const candidateKeys = extractMediaKeysFromProjectState(record.state);
 
-    await c.env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(id).run();
+    // Clear project_media and project_id references before deleting project row so shared media in duplicates isn't cascaded away
+    await c.env.DB.batch([
+      c.env.DB.prepare('DELETE FROM project_media WHERE project_id = ?').bind(id),
+      c.env.DB.prepare('UPDATE media_objects SET project_id = NULL WHERE project_id = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(id),
+    ]);
+
     const deletedMediaCount = await cleanupOrphanedMediaKeys(c.env, candidateKeys);
     const storage = await getR2StorageStatus(c.env);
+
+    runInBackground(
+      c,
+      purgeCacheKeys(
+        edgeCache,
+        c.req.url,
+        [
+          ...projectPathsForInvalidation([id, existing.slug]),
+          ...Array.from(candidateKeys).map((k) => `${MEDIA_URL_PREFIX}${encodeURI(k)}`),
+        ]
+      )
+    );
 
     return c.json({ ok: true, deletedMediaCount, storage });
   });
@@ -773,6 +1323,12 @@ export function createWorkerApp() {
     }
 
     const deletedCount = await cleanupOrphanedMediaKeys(c.env, [objectKey]);
+    if (deletedCount > 0) {
+      runInBackground(
+        c,
+        purgeCacheKeys(edgeCache, c.req.url, [`${MEDIA_URL_PREFIX}${encodeURI(objectKey)}`])
+      );
+    }
     const storage = await getR2StorageStatus(c.env);
     return c.json({ deleted: deletedCount > 0, storage });
   });

@@ -2,6 +2,7 @@ import type {
   ClientProjectShowcaseDto,
   ClientShowcaseSettings,
   MastProjectState,
+  PublicProjectSummary,
   SavedProjectRecord,
 } from '@/entities/project/types';
 import type { R2StorageStatus } from '@/shared/storage/r2Quota';
@@ -86,14 +87,19 @@ async function requestJson<T>(
 }
 
 export const apiClient = {
-  // Public Client Showcase
+  // Public Client Showcase (uses 'no-cache' so browser honors ETag / 304 conditional revalidation)
   fetchClientProjects: () =>
-    requestJson<{ projects: ClientProjectShowcaseDto[] }>('/api/client/projects'),
+    requestJson<{ projects: ClientProjectShowcaseDto[] }>('/api/client/projects', {
+      cache: 'no-cache',
+    }),
 
   fetchClientProject: (idOrSlug: string) =>
-    requestJson<{ project: ClientProjectShowcaseDto }>(
-      `/api/client/projects/${encodeURIComponent(idOrSlug)}`
-    ),
+    requestJson<{
+      project: ClientProjectShowcaseDto;
+      availableProjects?: PublicProjectSummary[];
+    }>(`/api/client/projects/${encodeURIComponent(idOrSlug)}`, {
+      cache: 'no-cache',
+    }),
 
   // Admin Auth
   getSession: () =>

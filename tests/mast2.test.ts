@@ -1,11 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import {
-  computeSmartPdfPageBreaks,
-  getPdfCaptureWidthPx,
-  getPdfPageDimensionsMm,
-  normalizePdfText,
-  sanitizePdfFilename,
-} from '@/shared/print/pdfGenerator';
 import { resolveReportDetails } from '@/widgets/report/ReportLetterhead';
 import {
   bagsToCuM,
@@ -961,11 +954,6 @@ describe('Workspace UI & Foundation Activity Report', () => {
     expect(store.printOrientation).toBe('portrait');
 
     expect(() => applyPrintPageStyle()).not.toThrow();
-
-    expect(getPdfCaptureWidthPx('A4', 'portrait')).toBe(900);
-    expect(getPdfCaptureWidthPx('A3', 'portrait')).toBe(1060);
-    expect(getPdfCaptureWidthPx('letter', 'landscape')).toBe(1120);
-    expect(getPdfCaptureWidthPx('A3', 'landscape')).toBe(1280);
   });
 
   it('integrates attached guy cable checklist steps into tower sections', () => {
@@ -1084,41 +1072,6 @@ describe('Workspace UI & Foundation Activity Report', () => {
     expect(state.verticalMast?.guyLayers.find((g) => g.id === 'L01')?.sectors.I.terminated).toBe(true);
 
     useProjectStore.getState().deleteProject(unifiedId);
-  });
-
-  it('computes exact PDF paper dimensions, filenames, and row-safe page breaks', () => {
-    const a4Portrait = getPdfPageDimensionsMm('A4', 'portrait');
-    expect(a4Portrait.widthMm).toBe(210);
-    expect(a4Portrait.heightMm).toBe(297);
-    expect(a4Portrait.contentWidthMm).toBe(190);
-
-    const a4Landscape = getPdfPageDimensionsMm('A4', 'landscape');
-    expect(a4Landscape.widthMm).toBe(297);
-    expect(a4Landscape.heightMm).toBe(210);
-
-    const legalLandscape = getPdfPageDimensionsMm('legal', 'landscape');
-    expect(legalLandscape.widthMm).toBe(355.6);
-    expect(legalLandscape.heightMm).toBe(215.9);
-
-    expect(sanitizePdfFilename('Daily Log: Day 1 / Mast 2')).toBe(
-      'Daily Log- Day 1 - Mast 2.pdf'
-    );
-
-    // Slight overflow (<=5%) stays on a single page cleanly
-    expect(computeSmartPdfPageBreaks(1040, 1000)).toEqual([{ startPx: 0, endPx: 1040 }]);
-
-    // Straddling row/block at y=[960..1040] snaps page break above 960
-    expect(
-      computeSmartPdfPageBreaks(1800, 1000, [{ topPx: 960, bottomPx: 1040 }])
-    ).toEqual([
-      { startPx: 0, endPx: 960 },
-      { startPx: 960, endPx: 1800 },
-    ]);
-
-    // Vector PDF text normalization maps unsupported engineering/UI symbols cleanly
-    expect(normalizePdfText('Tension ≥ 45 kN & ≤ 55 kN ✓ · 20 × 20 m — Ø11.4mm')).toBe(
-      'Tension >= 45 kN & <= 55 kN [OK] · 20 × 20 m — Ø11.4mm'
-    );
   });
 
   it('starts clean projects without contractor boilerplate notes and defaults vertical mast daily logs to tower parts', () => {

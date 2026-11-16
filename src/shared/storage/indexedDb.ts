@@ -91,16 +91,21 @@ export async function idbDelete(key: string): Promise<void> {
 }
 
 /**
- * Serializes and coalesces rapid IndexedDB writes for a given key so fast
- * consecutive edits never race and always finish with the latest snapshot.
+ * Serializes, optionally debounces, and coalesces rapid IndexedDB writes for a given key
+ * so typing/sliders do not saturate structured-clone I/O while always finishing with the latest snapshot.
  */
-export function createCoalescedIdbWriter<T>(key: string): {
+export function createCoalescedIdbWriter<T>(
+  key: string,
+  options: { debounceMs?: number } = {}
+): {
   enqueue: (value: T) => void;
   flush: () => Promise<void>;
 } {
+  const debounceMs = Math.max(0, options.debounceMs ?? 0);
   let pendingValue: T | undefined;
   let hasPending = false;
   let activePromise: Promise<void> | null = null;
+  let timerId: ReturnType<typeof setTimeout> | null = null;
 
   const pump = async () => {
     while (hasPending) {
@@ -131,10 +136,27 @@ export function createCoalescedIdbWriter<T>(key: string): {
       if (!isIndexedDbAvailable()) return;
       pendingValue = value;
       hasPending = true;
-      ensureRunning();
+      if (debounceMs > 0) {
+        if (timerId !== null) {
+          clearTimeout(timerId);
+        }
+        timerId = setTimeout(() => {
+          timerId = null;
+          ensureRunning();
+        }, debounceMs);
+      } else {
+        ensureRunning();
+      }
     },
     flush: async () => {
-      if (activePromise) {
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      if (hasPending) {
+        ensureRunning();
+      }
+      while (activePromise) {
         await activePromise;
       }
     },

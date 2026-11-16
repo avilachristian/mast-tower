@@ -9,6 +9,19 @@ import type { Env } from './types';
 
 export const MEDIA_URL_PREFIX = '/api/images/';
 export const MAX_SINGLE_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB max per single upload
+const SQL_IN_CHUNK_SIZE = 75;
+const D1_BATCH_CHUNK_SIZE = 50;
+const R2_DELETE_BATCH_SIZE = 500;
+const ORPHAN_UNLINKED_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  if (items.length === 0) return [];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 export type MediaCategory = 'inspection' | 'daily_log' | 'logo';
 
@@ -99,6 +112,15 @@ export function extractMediaKeysFromProjectState(
 }
 
 export async function getR2StorageStatus(env: Env): Promise<R2StorageStatus> {
+  const counter = await env.DB.prepare(
+    'SELECT total_bytes AS usedBytes, object_count AS objectCount FROM storage_counters WHERE id = 1'
+  ).first<{ usedBytes: number; objectCount: number }>();
+
+  if (counter) {
+    const limits = resolveR2QuotaLimits(env);
+    return evaluateR2Quota(counter.usedBytes ?? 0, counter.objectCount ?? 0, limits);
+  }
+
   const row = await env.DB.prepare(
     'SELECT COALESCE(SUM(size_bytes), 0) AS usedBytes, COUNT(*) AS objectCount FROM media_objects'
   ).first<{ usedBytes: number; objectCount: number }>();
@@ -107,9 +129,26 @@ export async function getR2StorageStatus(env: Env): Promise<R2StorageStatus> {
   return evaluateR2Quota(row?.usedBytes ?? 0, row?.objectCount ?? 0, limits);
 }
 
+async function recomputeStorageCounters(env: Env): Promise<void> {
+  const row = await env.DB.prepare(
+    'SELECT COALESCE(SUM(size_bytes), 0) AS usedBytes, COUNT(*) AS objectCount FROM media_objects'
+  ).first<{ usedBytes: number; objectCount: number }>();
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO storage_counters (id, total_bytes, object_count, updated_at)
+     VALUES (1, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       total_bytes = excluded.total_bytes,
+       object_count = excluded.object_count,
+       updated_at = excluded.updated_at`
+  )
+    .bind(row?.usedBytes ?? 0, row?.objectCount ?? 0, now)
+    .run();
+}
+
 /**
- * Scans the actual R2 bucket via list() to synchronize D1's media_objects accounting table
- * in case objects were modified outside the Worker API.
+ * Scans the actual R2 bucket via list() to synchronize D1's media_objects accounting table,
+ * prunes stale unlinked temporary uploads older than 24 hours, and refreshes storage_counters.
  */
 export async function reconcileR2BucketUsage(env: Env): Promise<R2StorageStatus> {
   const bucketObjects = new Map<
@@ -141,11 +180,13 @@ export async function reconcileR2BucketUsage(env: Env): Promise<R2StorageStatus>
     (existingRows.results ?? []).map((r) => [r.object_key, r.size_bytes])
   );
 
+  const statements: ReturnType<Env['DB']['prepare']>[] = [];
+
   for (const existingKey of existingMap.keys()) {
     if (!bucketObjects.has(existingKey)) {
-      await env.DB.prepare('DELETE FROM media_objects WHERE object_key = ?')
-        .bind(existingKey)
-        .run();
+      statements.push(
+        env.DB.prepare('DELETE FROM media_objects WHERE object_key = ?').bind(existingKey)
+      );
     }
   }
 
@@ -155,21 +196,55 @@ export async function reconcileR2BucketUsage(env: Env): Promise<R2StorageStatus>
       const parts = key.split('/');
       const projectId = parts[0] === 'projects' && parts[1] ? parts[1] : null;
       const category = parts[2] || 'daily_log';
-      await env.DB.prepare(
-        `INSERT OR IGNORE INTO media_objects (object_key, project_id, category, content_type, size_bytes, original_name, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-        .bind(key, projectId, category, meta.contentType, meta.size, null, meta.uploaded)
-        .run();
+      statements.push(
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO media_objects (object_key, project_id, category, content_type, size_bytes, original_name, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(key, projectId, category, meta.contentType, meta.size, null, meta.uploaded)
+      );
     } else if (knownSize !== meta.size) {
-      await env.DB.prepare(
-        'UPDATE media_objects SET size_bytes = ? WHERE object_key = ?'
-      )
-        .bind(meta.size, key)
-        .run();
+      statements.push(
+        env.DB.prepare(
+          'UPDATE media_objects SET size_bytes = ? WHERE object_key = ?'
+        ).bind(meta.size, key)
+      );
     }
   }
 
+  for (const batch of chunkArray(statements, D1_BATCH_CHUNK_SIZE)) {
+    await env.DB.batch(batch);
+  }
+
+  // Sweep stale unlinked uploads older than 24h (never referenced by project_media)
+  const cutoffIso = new Date(Date.now() - ORPHAN_UNLINKED_TTL_MS).toISOString();
+  const staleRows = await env.DB.prepare(
+    `SELECT m.object_key
+     FROM media_objects m
+     WHERE m.created_at < ?
+       AND NOT EXISTS (
+         SELECT 1 FROM project_media pm WHERE pm.object_key = m.object_key
+       )`
+  )
+    .bind(cutoffIso)
+    .all<{ object_key: string }>();
+
+  const staleKeys = (staleRows.results ?? []).map((r) => r.object_key).filter(Boolean);
+  if (staleKeys.length > 0) {
+    for (const r2Chunk of chunkArray(staleKeys, R2_DELETE_BATCH_SIZE)) {
+      await env.IMAGES_BUCKET.delete(r2Chunk);
+    }
+    const delStmts = chunkArray(staleKeys, SQL_IN_CHUNK_SIZE).map((chunk) => {
+      const placeholders = chunk.map(() => '?').join(', ');
+      return env.DB.prepare(
+        `DELETE FROM media_objects WHERE object_key IN (${placeholders})`
+      ).bind(...chunk);
+    });
+    for (const batch of chunkArray(delStmts, D1_BATCH_CHUNK_SIZE)) {
+      await env.DB.batch(batch);
+    }
+  }
+
+  await recomputeStorageCounters(env);
   return getR2StorageStatus(env);
 }
 
@@ -247,20 +322,34 @@ export async function uploadImageToR2(
     .bind(safeProjectId)
     .first<{ ok: number }>();
 
-  await env.DB.prepare(
-    `INSERT INTO media_objects (object_key, project_id, category, content_type, size_bytes, original_name, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  )
-    .bind(
-      objectKey,
-      projectExists ? safeProjectId : null,
-      params.category,
-      normalizedMime,
-      sizeBytes,
-      params.originalName?.slice(0, 180) ?? null,
-      now
-    )
-    .run();
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO media_objects (object_key, project_id, category, content_type, size_bytes, original_name, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        objectKey,
+        projectExists ? safeProjectId : null,
+        params.category,
+        normalizedMime,
+        sizeBytes,
+        params.originalName?.slice(0, 180) ?? null,
+        now
+      ),
+      env.DB.prepare(
+        `INSERT INTO storage_counters (id, total_bytes, object_count, updated_at)
+         VALUES (1, ?, 1, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           total_bytes = total_bytes + excluded.total_bytes,
+           object_count = object_count + 1,
+           updated_at = excluded.updated_at`
+      ).bind(sizeBytes, now),
+    ]);
+  } catch (dbErr) {
+    // Rollback R2 object if D1 accounting fails so quota & objects stay consistent
+    await env.IMAGES_BUCKET.delete(objectKey).catch(() => undefined);
+    throw dbErr;
+  }
 
   const updatedStatus = await getR2StorageStatus(env);
 
@@ -273,30 +362,77 @@ export async function uploadImageToR2(
 }
 
 /**
- * Deletes candidate R2 objects only when zero remaining projects reference their URL,
- * safely preserving shared assets across duplicated projects.
+ * Deletes candidate R2 objects only when zero remaining projects reference their key in project_media,
+ * safely preserving shared assets across duplicated projects using indexed queries and batched deletes.
  */
 export async function cleanupOrphanedMediaKeys(
   env: Env,
   candidateKeys: Iterable<string>
 ): Promise<number> {
-  let deletedCount = 0;
-  for (const key of candidateKeys) {
-    if (!key) continue;
-    const urlPattern = `%${MEDIA_URL_PREFIX}${key}%`;
-    const refRow = await env.DB.prepare(
-      'SELECT COUNT(*) AS cnt FROM projects WHERE state_json LIKE ?'
-    )
-      .bind(urlPattern)
-      .first<{ cnt: number }>();
+  const uniqueKeys = Array.from(new Set(Array.from(candidateKeys).filter(Boolean)));
+  if (uniqueKeys.length === 0) return 0;
 
-    if ((refRow?.cnt ?? 0) === 0) {
-      await env.IMAGES_BUCKET.delete(key);
-      await env.DB.prepare('DELETE FROM media_objects WHERE object_key = ?')
-        .bind(key)
-        .run();
-      deletedCount += 1;
+  const referencedKeys = new Set<string>();
+  for (const chunk of chunkArray(uniqueKeys, SQL_IN_CHUNK_SIZE)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    const rows = await env.DB.prepare(
+      `SELECT DISTINCT object_key FROM project_media WHERE object_key IN (${placeholders})`
+    )
+      .bind(...chunk)
+      .all<{ object_key: string }>();
+    for (const r of rows.results ?? []) {
+      referencedKeys.add(r.object_key);
     }
   }
-  return deletedCount;
+
+  const orphanKeys = uniqueKeys.filter((k) => !referencedKeys.has(k));
+  if (orphanKeys.length === 0) return 0;
+
+  let freedBytes = 0;
+  let trackedRowsCount = 0;
+  for (const chunk of chunkArray(orphanKeys, SQL_IN_CHUNK_SIZE)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    const sizeRows = await env.DB.prepare(
+      `SELECT object_key, size_bytes FROM media_objects WHERE object_key IN (${placeholders})`
+    )
+      .bind(...chunk)
+      .all<{ object_key: string; size_bytes: number }>();
+    for (const r of sizeRows.results ?? []) {
+      freedBytes += Number(r.size_bytes ?? 0);
+      trackedRowsCount += 1;
+    }
+  }
+
+  for (const r2Batch of chunkArray(orphanKeys, R2_DELETE_BATCH_SIZE)) {
+    await env.IMAGES_BUCKET.delete(r2Batch);
+  }
+
+  const deleteStatements: ReturnType<Env['DB']['prepare']>[] = [];
+  for (const chunk of chunkArray(orphanKeys, SQL_IN_CHUNK_SIZE)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    deleteStatements.push(
+      env.DB.prepare(
+        `DELETE FROM media_objects WHERE object_key IN (${placeholders})`
+      ).bind(...chunk)
+    );
+  }
+
+  const now = new Date().toISOString();
+  if (trackedRowsCount > 0) {
+    deleteStatements.push(
+      env.DB.prepare(
+        `UPDATE storage_counters
+         SET total_bytes = MAX(0, total_bytes - ?),
+             object_count = MAX(0, object_count - ?),
+             updated_at = ?
+         WHERE id = 1`
+      ).bind(freedBytes, trackedRowsCount, now)
+    );
+  }
+
+  for (const batch of chunkArray(deleteStatements, D1_BATCH_CHUNK_SIZE)) {
+    await env.DB.batch(batch);
+  }
+
+  return orphanKeys.length;
 }

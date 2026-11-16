@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import {
   FOUNDATION_SPECS,
   STATUS_META,
@@ -169,6 +170,7 @@ export function GroundAnchorPlan2D({
   // Dimension ticks along Sector III (straight down at x = cx + 52)
   const dimX = cx + 52;
   const dimRadii = [0, 18, 36, 54, 72];
+  const gridPatternId = `cad-grid-${useId().replace(/:/g, '')}`;
 
   return (
     <div
@@ -285,12 +287,12 @@ export function GroundAnchorPlan2D({
           aria-label="Interactive Ground Anchor Plan for 120m Guyed Mast Tower"
         >
           <defs>
-            <pattern id="cad-grid" width="21" height="21" patternUnits="userSpaceOnUse">
+            <pattern id={gridPatternId} width="21" height="21" patternUnits="userSpaceOnUse">
               <path d="M 21 0 L 0 0 0 21" fill="none" stroke="#f1f5f9" strokeWidth="0.7" />
             </pattern>
           </defs>
 
-          <rect x="30" y="8" width="700" height="672" fill="url(#cad-grid)" rx={frameless ? 0 : 8} />
+          <rect x="30" y="8" width="700" height="672" fill={`url(#${gridPatternId})`} rx={frameless ? 0 : 8} />
 
           {/* Distance Circles (18m, 36m, 54m, 72m) */}
           {[18, 36, 54, 72].map((rM) => (

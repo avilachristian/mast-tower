@@ -188,7 +188,7 @@ const inFlightProjectSyncs = new Map<string, Promise<boolean>>();
 const pendingResyncQueue = new Map<string, { forceOverwrite?: boolean }>();
 const inFlightVisibilityPatches = new Map<
   string,
-  { settingsKey: string; promise: Promise<void> }
+  { settingsKey: string; promise: Promise<boolean> }
 >();
 
 function isBrowserOnline(): boolean {
@@ -254,11 +254,14 @@ async function executeSingleProjectSync(
     lastError: null,
   });
 
+  const uploadedUrlMap = new Map<string, string>();
+
   try {
     // Batch-upload any staged inline base64 photos to R2 before saving state_json to D1
     const { nextState, uploadedCount } = await uploadInlineImagesInProjectState(
       projectId,
-      record.state
+      record.state,
+      uploadedUrlMap
     );
 
     const expectedVersion = options.forceOverwrite ? undefined : record.version;
@@ -303,6 +306,10 @@ async function executeSingleProjectSync(
     }
     return true;
   } catch (err) {
+    // Preserve any photos already uploaded to R2 so a retry never creates duplicate R2 orphans
+    if (uploadedUrlMap.size > 0) {
+      useProjectStore.getState().applyUploadedImageUrls(projectId, uploadedUrlMap);
+    }
     if (err instanceof R2StorageBlockedError) {
       if (err.storage) {
         useStorageQuotaStore.getState().applyStatus(err.storage, false);
@@ -609,8 +616,8 @@ export async function syncClientVisibilityPatch(
   projectId: string,
   settings: ClientShowcaseSettings,
   hadUnsavedStateEdits = false
-): Promise<void> {
-  if (!isOnlineAndAuthed()) return;
+): Promise<boolean> {
+  if (!isOnlineAndAuthed()) return false;
 
   const settingsKey = JSON.stringify(settings);
   const existing = inFlightVisibilityPatches.get(projectId);
@@ -621,20 +628,19 @@ export async function syncClientVisibilityPatch(
     await existing.promise;
   }
 
-  const runPromise = (async () => {
+  const runPromise = (async (): Promise<boolean> => {
     const record = useProjectStore.getState().projects.find((p) => p.id === projectId);
-    if (!record) return;
+    if (!record) return false;
 
     // Publishing a project to the Client Showcase pushes full state + staged photos immediately
     // so clients see complete, accurate live diagrams & photos.
     if (settings.enabled) {
-      await syncSingleProjectToCloud(projectId);
-      return;
+      return syncSingleProjectToCloud(projectId);
     }
 
     // If private and never uploaded to cloud yet, keep it local until next manual/scheduled sync.
     if (!record.version) {
-      return;
+      return true;
     }
 
     try {
@@ -656,16 +662,18 @@ export async function syncClientVisibilityPatch(
         lastSyncedAt: new Date().toISOString(),
         lastError: null,
       });
+      return true;
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         useAuthStore.getState().markSessionExpired();
       }
+      return false;
     }
   })();
 
   inFlightVisibilityPatches.set(projectId, { settingsKey, promise: runPromise });
   try {
-    await runPromise;
+    return await runPromise;
   } finally {
     if (inFlightVisibilityPatches.get(projectId)?.promise === runPromise) {
       inFlightVisibilityPatches.delete(projectId);

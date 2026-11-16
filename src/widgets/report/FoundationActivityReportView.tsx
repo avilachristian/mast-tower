@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Circle,
@@ -49,10 +49,17 @@ export function FoundationActivityReportView({
 
   const setReportOpen = useUiStore((s) => s.setReportOpen);
 
-  const report = buildFoundationActivityReportData(project, null, selectedFoundation);
-  const resolvedSpec = resolveFoundationSpec(
-    selectedFoundation.type,
-    selectedFoundation.customSpecs
+  const report = useMemo(
+    () => buildFoundationActivityReportData(project, null, selectedFoundation),
+    [project, selectedFoundation]
+  );
+  const resolvedSpec = useMemo(
+    () =>
+      resolveFoundationSpec(
+        selectedFoundation.type,
+        selectedFoundation.customSpecs
+      ),
+    [selectedFoundation.type, selectedFoundation.customSpecs]
   );
 
   const handleNumericDimensionChange = (

@@ -19,11 +19,13 @@ import {
   GUY_SECTOR_KEYS,
   GUY_STRAND_COLOR_META,
   applyMaterialTransparency,
+  buildDynamicStructureKey,
   createFoundationPadVisual,
   createGuyCableVisual,
   createSurveyDatumGroup,
   resolveLayerGussetElevationM,
   resolveSectionColorHex,
+  tagSharedMaterial,
   updateFoundationPadVisual,
   updateGuyCableVisual,
   type FoundationVisualHandle,
@@ -31,6 +33,49 @@ import {
   type Tower3DColorMode,
   type Tower3DSelectionTarget,
 } from './tower3dGeometry';
+
+const TEXTURE_SLOTS = [
+  'map',
+  'normalMap',
+  'roughnessMap',
+  'metalnessMap',
+  'emissiveMap',
+  'aoMap',
+  'alphaMap',
+  'bumpMap',
+  'displacementMap',
+  'envMap',
+  'lightMap',
+] as const;
+
+const SHARED_PICK_PROXY_MAT = tagSharedMaterial(
+  new THREE.MeshBasicMaterial({ visible: false }),
+);
+
+function disposeMaterial(mat: THREE.Material | THREE.Material[] | null | undefined): void {
+  if (!mat) return;
+  const list = Array.isArray(mat) ? mat : [mat];
+  for (const m of list) {
+    if (m.userData?.sharedMaterial) continue;
+    const record = m as unknown as Record<string, unknown>;
+    for (const slot of TEXTURE_SLOTS) {
+      const tex = record[slot];
+      if (tex instanceof THREE.Texture) {
+        tex.dispose();
+      }
+    }
+    m.dispose();
+  }
+}
+
+function isHierarchyVisible(obj: THREE.Object3D): boolean {
+  let cur: THREE.Object3D | null = obj;
+  while (cur) {
+    if (!cur.visible) return false;
+    cur = cur.parent;
+  }
+  return true;
+}
 
 interface MastTower3DShowcaseProps {
   foundations: ClientFoundationSummary[];
@@ -237,10 +282,77 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
     cableLayerGroup.name = 'GuyCableLayer';
     scene.add(cableLayerGroup);
 
+  const mastColliderGroup = new THREE.Group();
+    mastColliderGroup.name = 'MastColliderLayer';
+    scene.add(mastColliderGroup);
+
     const foundationHandles: FoundationVisualHandle[] = [];
     const sectionHandles: SectionVisualHandle[] = [];
     const cableHandles: GuyCableVisualHandle[] = [];
     let sortedGlbGussetNodes: { sectionId: string; gussetYM: number }[] = [];
+
+    let disposed = false;
+    let tweenActive = false;
+    let tweenProgress = 0;
+    const tweenStartPos = new THREE.Vector3();
+    const tweenEndPos = new THREE.Vector3();
+    const tweenStartTarget = new THREE.Vector3();
+    const tweenEndTarget = new THREE.Vector3();
+
+    let rafId = 0;
+    let needsRender = false;
+    let inRenderFrame = false;
+    let interacting = false;
+    let lastTime = performance.now();
+
+    const scheduleFrame = () => {
+      if (rafId !== 0 || disposed || document.hidden) return;
+      rafId = requestAnimationFrame(renderFrame);
+    };
+
+    const requestRender = () => {
+      needsRender = true;
+      scheduleFrame();
+    };
+
+    const renderFrame = () => {
+      rafId = 0;
+      if (disposed || document.hidden) return;
+
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      let animating = false;
+      if (tweenActive) {
+        tweenProgress = Math.min(1, tweenProgress + dt * 3.2);
+        const eased = 1 - Math.pow(1 - tweenProgress, 3);
+        camera.position.lerpVectors(tweenStartPos, tweenEndPos, eased);
+        controls.target.lerpVectors(tweenStartTarget, tweenEndTarget, eased);
+        if (tweenProgress >= 1) {
+          tweenActive = false;
+        } else {
+          animating = true;
+        }
+        needsRender = true;
+      }
+
+      inRenderFrame = true;
+      const controlsMoved = controls.update();
+      inRenderFrame = false;
+      if (controlsMoved) {
+        needsRender = true;
+      }
+
+      if (needsRender) {
+        needsRender = false;
+        renderer.render(scene, camera);
+      }
+
+      if (interacting || tweenActive || animating || controlsMoved) {
+        scheduleFrame();
+      }
+    };
 
     const disposeGroupChildren = (grp: THREE.Group) => {
       grp.traverse((obj) => {
@@ -248,12 +360,7 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
         if (meshOrLine.geometry) {
           meshOrLine.geometry.dispose();
         }
-        const mat = meshOrLine.material;
-        if (Array.isArray(mat)) {
-          mat.forEach((m) => m.dispose());
-        } else if (mat) {
-          mat.dispose();
-        }
+        disposeMaterial(meshOrLine.material);
       });
       grp.clear();
     };
@@ -316,6 +423,8 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
           (!sel.sector || sel.sector === ch.sector);
         updateGuyCableVisual(ch, layer, mode, isSelected, showPending);
       }
+
+      requestRender();
     };
 
     const rebuildDynamicData = () => {
@@ -351,18 +460,44 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
       syncAppearances();
     };
 
-    // Smooth camera preset tween state
-    let tweenActive = false;
-    let tweenProgress = 0;
-    const tweenStartPos = new THREE.Vector3();
-    const tweenEndPos = new THREE.Vector3();
-    const tweenStartTarget = new THREE.Vector3();
-    const tweenEndTarget = new THREE.Vector3();
-
-    const cancelTween = () => {
+    // Smooth camera preset tween & interaction listeners for demand-driven rendering
+    const handleControlsStart = () => {
       tweenActive = false;
+      interacting = true;
+      lastTime = performance.now();
+      requestRender();
     };
-    controls.addEventListener('start', cancelTween);
+    const handleControlsEnd = () => {
+      interacting = false;
+      requestRender();
+    };
+    const handleControlsChange = () => {
+      if (inRenderFrame) {
+        needsRender = true;
+      } else {
+        requestRender();
+      }
+    };
+    const handleWindowBlur = () => {
+      interacting = false;
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (rafId !== 0) {
+          cancelAnimationFrame(rafId);
+          rafId = 0;
+        }
+      } else {
+        lastTime = performance.now();
+        requestRender();
+      }
+    };
+
+    controls.addEventListener('start', handleControlsStart);
+    controls.addEventListener('end', handleControlsEnd);
+    controls.addEventListener('change', handleControlsChange);
+    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const tweenCamera = (preset: CameraPreset) => {
       tweenStartPos.copy(camera.position);
@@ -371,6 +506,8 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
       tweenEndTarget.set(...preset.target);
       tweenProgress = 0;
       tweenActive = true;
+      lastTime = performance.now();
+      requestRender();
     };
 
     sceneHandlesRef.current = {
@@ -385,7 +522,6 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
     rebuildDynamicData();
 
     // Load pre-converted Revit IFC -> GLB tower assembly
-    let disposed = false;
     const loader = new GLTFLoader();
     const glbUrl = `${import.meta.env.BASE_URL}models/tower-model.glb`;
     loader.load(
@@ -395,9 +531,7 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
           gltf.scene.traverse((obj) => {
             const m = obj as THREE.Mesh;
             if (m.geometry) m.geometry.dispose();
-            const mat = m.material;
-            if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-            else if (mat) mat.dispose();
+            disposeMaterial(m.material);
           });
           return;
         }
@@ -417,6 +551,12 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
 
         collectedGussets.sort((a, b) => a.gussetYM - b.gussetYM);
         sortedGlbGussetNodes = collectedGussets;
+
+        mastLayerGroup.add(gltf.scene);
+        gltf.scene.updateMatrixWorld(true);
+        const colliderBox = new THREE.Box3();
+        const colliderSize = new THREE.Vector3();
+        const colliderCenter = new THREE.Vector3();
 
         sectionNodes.forEach((secObj) => {
           const sectionId = secObj.name;
@@ -440,10 +580,29 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
               };
               secMats.push(perSectionMat);
 
-              if (Array.isArray(prevMat)) prevMat.forEach((m) => m.dispose());
-              else if (prevMat) prevMat.dispose();
+              disposeMaterial(prevMat);
             }
           });
+
+          colliderBox.setFromObject(secObj);
+          if (!colliderBox.isEmpty()) {
+            colliderBox.getSize(colliderSize);
+            colliderBox.getCenter(colliderCenter);
+            const colliderGeom = new THREE.BoxGeometry(
+              Math.max(0.2, colliderSize.x),
+              Math.max(0.2, colliderSize.y),
+              Math.max(0.2, colliderSize.z),
+            );
+            const colliderMesh = new THREE.Mesh(colliderGeom, SHARED_PICK_PROXY_MAT);
+            colliderMesh.position.copy(colliderCenter);
+            colliderMesh.visible = false;
+            colliderMesh.userData = {
+              pickKind: 'section',
+              sectionId,
+              visibilityTarget: secObj,
+            };
+            mastColliderGroup.add(colliderMesh);
+          }
 
           sectionHandles.push({
             sectionId,
@@ -452,7 +611,7 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
           });
         });
 
-        mastLayerGroup.add(gltf.scene);
+        mastColliderGroup.updateMatrixWorld(true);
         setModelStatus('ready');
         rebuildDynamicData();
       },
@@ -479,10 +638,18 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
       const pickRoots: THREE.Object3D[] = [
         foundationLayerGroup,
         cableLayerGroup,
-        mastLayerGroup,
+        mastColliderGroup,
       ];
       const intersects = raycaster.intersectObjects(pickRoots, true);
-      return intersects.find((hit) => hit.object.visible && hit.object.userData?.pickKind) ?? null;
+      return (
+        intersects.find((hit) => {
+          const ud = hit.object.userData;
+          if (!ud?.pickKind) return false;
+          const visibilityObj =
+            (ud.visibilityTarget as THREE.Object3D | undefined) ?? hit.object;
+          return isHierarchyVisible(visibilityObj);
+        }) ?? null
+      );
     };
 
     const handlePointerDown = (e: PointerEvent) => {
@@ -548,42 +715,32 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      requestRender();
     });
     resizeObserver.observe(container);
 
-    let rafId = 0;
-    let lastTime = performance.now();
-    const animate = () => {
-      rafId = requestAnimationFrame(animate);
-      const now = performance.now();
-      const dt = Math.min(0.05, (now - lastTime) / 1000);
-      lastTime = now;
-
-      if (tweenActive) {
-        tweenProgress = Math.min(1, tweenProgress + dt * 3.2);
-        const eased = 1 - Math.pow(1 - tweenProgress, 3);
-        camera.position.lerpVectors(tweenStartPos, tweenEndPos, eased);
-        controls.target.lerpVectors(tweenStartTarget, tweenEndTarget, eased);
-        if (tweenProgress >= 1) tweenActive = false;
-      }
-
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
+    requestRender();
 
     return () => {
       disposed = true;
       sceneHandlesRef.current = null;
-      cancelAnimationFrame(rafId);
+      if (rafId !== 0) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
       resizeObserver.disconnect();
-      controls.removeEventListener('start', cancelTween);
+      controls.removeEventListener('start', handleControlsStart);
+      controls.removeEventListener('end', handleControlsEnd);
+      controls.removeEventListener('change', handleControlsChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
       renderer.domElement.removeEventListener('pointerup', handlePointerUp);
       renderer.domElement.removeEventListener('pointermove', handlePointerMove);
       controls.dispose();
 
       disposeGroupChildren(foundationLayerGroup);
+      disposeGroupChildren(mastColliderGroup);
       disposeGroupChildren(mastLayerGroup);
       disposeGroupChildren(cableLayerGroup);
       disposeGroupChildren(surveyDatum);
@@ -598,15 +755,20 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
     };
   }, []);
 
-  // Rebuild dynamic blocks & cables when project data shape updates
+  const dynamicStructureKey = useMemo(
+    () => buildDynamicStructureKey(foundations, verticalMast),
+    [foundations, verticalMast],
+  );
+
+  // Rebuild dynamic blocks & cables only when structural geometry/sag class updates
   useEffect(() => {
     sceneHandlesRef.current?.rebuildDynamicData();
-  }, [foundations, verticalMast]);
+  }, [dynamicStructureKey]);
 
-  // Synchronize materials, emissive highlights, and ghosts when view state changes
+  // Synchronize materials, emissive highlights, and ghosts when view or status state changes
   useEffect(() => {
     sceneHandlesRef.current?.syncAppearances();
-  }, [colorMode, selection, showPendingGhosts]);
+  }, [foundations, verticalMast, colorMode, selection, showPendingGhosts]);
 
   const handlePresetClick = (preset: CameraPreset) => {
     setActivePreset(preset.key);

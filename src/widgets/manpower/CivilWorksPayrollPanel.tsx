@@ -28,6 +28,8 @@ import type {
 } from '@/entities/project/types';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
+
+const EMPTY_STRING_SET = new Set<string>();
 import type { PayrollSheetData } from './PayrollPrintModal';
 
 const PERIOD_OPTIONS: { id: PayrollPeriodType; label: string }[] = [
@@ -108,7 +110,7 @@ export function CivilWorksPayrollPanel({
   }, [attendanceRecords]);
 
   const presentSetForSelectedDate =
-    attendanceMap.get(attendanceDate) ?? new Set<string>();
+    attendanceMap.get(attendanceDate) ?? EMPTY_STRING_SET;
 
   const weekStripDates = useMemo(() => {
     const { startDate } = getPayrollPeriodBounds('weekly', attendanceDate);

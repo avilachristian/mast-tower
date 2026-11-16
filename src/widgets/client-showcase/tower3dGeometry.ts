@@ -168,6 +168,89 @@ export function computeAnchorGuyStage(
   return 'pending';
 }
 
+/** Tags module-level shared Three.js materials so group disposal does not destroy them. */
+export function tagSharedMaterial<T extends THREE.Material>(mat: T): T {
+  mat.userData = { ...mat.userData, sharedMaterial: true };
+  return mat;
+}
+
+const SHARED_GROUND_MAT = tagSharedMaterial(
+  new THREE.MeshStandardMaterial({
+    color: 0xeae6dc,
+    roughness: 0.95,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.34,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  }),
+);
+
+const SHARED_RING_MAT = tagSharedMaterial(
+  new THREE.LineBasicMaterial({
+    color: 0xa8a29e,
+    transparent: true,
+    opacity: 0.55,
+  }),
+);
+
+const SHARED_AXIS_MAT = tagSharedMaterial(
+  new THREE.LineBasicMaterial({
+    color: 0x78716c,
+    transparent: true,
+    opacity: 0.45,
+  }),
+);
+
+const SHARED_LEAN_MAT = tagSharedMaterial(
+  new THREE.MeshStandardMaterial({
+    color: 0xd6d3d1,
+    roughness: 0.92,
+    metalness: 0.02,
+  }),
+);
+
+const SHARED_PIT_MAT = tagSharedMaterial(
+  new THREE.LineBasicMaterial({
+    color: 0xa8a29e,
+    transparent: true,
+    depthWrite: false,
+    opacity: 0.28,
+  }),
+);
+
+const SHARED_STEEL_MAT = tagSharedMaterial(
+  new THREE.MeshStandardMaterial({
+    color: 0x334155,
+    roughness: 0.38,
+    metalness: 0.65,
+  }),
+);
+
+/**
+ * Produces a stable key covering only structural properties that affect 3D geometry
+ * (pad coords/dimensions, anchor bindings, and strand sag state). Status/selection color
+ * changes keep this key stable so `syncAppearances()` can update materials in place.
+ */
+export function buildDynamicStructureKey(
+  foundations: ClientFoundationSummary[],
+  verticalMast: { guyLayers: GuyLayerRecord[] } | null | undefined,
+): string {
+  const fKey = foundations
+    .map((f) => {
+      const d = computeFoundationResolvedDims(f);
+      return `${f.id}:${f.type}:${f.xM}:${f.zM}:${f.angleDeg}:${d.lengthM}x${d.widthM}x${d.thicknessM}x${d.overburdenDepthM}x${d.leanThicknessM}`;
+    })
+    .join(';');
+  const gKey = (verticalMast?.guyLayers ?? [])
+    .map(
+      (l) =>
+        `${l.id}:${l.layerNo}:${l.sectionId}:${l.elevationM}:${l.anchorIds.I}/${l.anchorIds.II}/${l.anchorIds.III}:${getGuyStrandStatus(l.sectors.I)}/${getGuyStrandStatus(l.sectors.II)}/${getGuyStrandStatus(l.sectors.III)}`,
+    )
+    .join(';');
+  return `${fKey}||${gKey}`;
+}
+
 /** Updates material opacity and transparent/depthWrite queue flags only when needed. */
 export function applyMaterialTransparency(
   mat: THREE.MeshStandardMaterial | THREE.LineBasicMaterial,
@@ -273,26 +356,11 @@ export function createSurveyDatumGroup(): THREE.Group {
   // Translucent ground surface so excavated/backfilled anchor blocks below Y=0 remain visible
   const groundGeom = new THREE.CircleGeometry(86, 72);
   groundGeom.rotateX(-Math.PI / 2);
-  const groundMat = new THREE.MeshStandardMaterial({
-    color: 0xeae6dc,
-    roughness: 0.95,
-    metalness: 0,
-    transparent: true,
-    opacity: 0.34,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
-  const groundMesh = new THREE.Mesh(groundGeom, groundMat);
+  const groundMesh = new THREE.Mesh(groundGeom, SHARED_GROUND_MAT);
   groundMesh.position.y = 0;
   group.add(groundMesh);
 
   // Subtle concentric ring lines for 18m / 36m / 54m / 72m anchor radii
-  const ringMat = new THREE.LineBasicMaterial({
-    color: 0xa8a29e,
-    transparent: true,
-    opacity: 0.55,
-  });
-
   [18, 36, 54, 72].forEach((radiusM) => {
     const pts: THREE.Vector3[] = [];
     const steps = 96;
@@ -301,16 +369,11 @@ export function createSurveyDatumGroup(): THREE.Group {
       pts.push(new THREE.Vector3(Math.cos(a) * radiusM, 0.02, -Math.sin(a) * radiusM));
     }
     const lineGeom = new THREE.BufferGeometry().setFromPoints(pts);
-    const ringLine = new THREE.Line(lineGeom, ringMat);
+    const ringLine = new THREE.Line(lineGeom, SHARED_RING_MAT);
     group.add(ringLine);
   });
 
   // Three radial sector azimuth guide lines (30°, 150°, 270°)
-  const axisMat = new THREE.LineBasicMaterial({
-    color: 0x78716c,
-    transparent: true,
-    opacity: 0.45,
-  });
   GUY_SECTOR_KEYS.forEach((sec) => {
     const rad = (SECTOR_ANGLES_DEG[sec] * Math.PI) / 180;
     const pts = [
@@ -318,7 +381,7 @@ export function createSurveyDatumGroup(): THREE.Group {
       new THREE.Vector3(Math.cos(rad) * 78, 0.025, -Math.sin(rad) * 78),
     ];
     const geom = new THREE.BufferGeometry().setFromPoints(pts);
-    group.add(new THREE.Line(geom, axisMat));
+    group.add(new THREE.Line(geom, SHARED_AXIS_MAT));
   });
 
   return group;
@@ -388,12 +451,7 @@ export function createFoundationPadVisual(
     Math.max(0.05, dims.leanThicknessM),
     dims.widthM + 0.2,
   );
-  const leanMat = new THREE.MeshStandardMaterial({
-    color: 0xd6d3d1,
-    roughness: 0.92,
-    metalness: 0.02,
-  });
-  const leanMesh = new THREE.Mesh(leanGeom, leanMat);
+  const leanMesh = new THREE.Mesh(leanGeom, SHARED_LEAN_MAT);
   leanMesh.position.y = metrics.leanCenterY;
   leanMesh.userData = { ...pickMeta };
   orientedGroup.add(leanMesh);
@@ -406,29 +464,18 @@ export function createFoundationPadVisual(
       dims.widthM + 0.3,
     );
     const pitEdges = new THREE.EdgesGeometry(pitGeom);
-    const pitMat = new THREE.LineBasicMaterial({
-      color: 0xa8a29e,
-      transparent: true,
-      depthWrite: false,
-      opacity: 0.28,
-    });
-    const pitLines = new THREE.LineSegments(pitEdges, pitMat);
+    const pitLines = new THREE.LineSegments(pitEdges, SHARED_PIT_MAT);
     pitLines.position.y = metrics.excavationCenterY;
     orientedGroup.add(pitLines);
     pitGeom.dispose();
   }
 
   const hardwareMeshes: THREE.Mesh[] = [];
-  const steelMat = new THREE.MeshStandardMaterial({
-    color: 0x334155,
-    roughness: 0.38,
-    metalness: 0.65,
-  });
 
   if (foundation.type === 'principal') {
     // 400 x 400 mm locating plate + 3 M27 bolts centered on PF-0 top at Y=0
     const plateGeom = new THREE.BoxGeometry(0.46, 0.04, 0.46);
-    const plateMesh = new THREE.Mesh(plateGeom, steelMat);
+    const plateMesh = new THREE.Mesh(plateGeom, SHARED_STEEL_MAT);
     plateMesh.position.y = 0.02;
     plateMesh.userData = { ...pickMeta };
     orientedGroup.add(plateMesh);
@@ -441,7 +488,7 @@ export function createFoundationPadVisual(
     const len = dir.length();
 
     const rodGeom = new THREE.CylinderGeometry(0.055, 0.065, len, 8);
-    const rodMesh = new THREE.Mesh(rodGeom, steelMat);
+    const rodMesh = new THREE.Mesh(rodGeom, SHARED_STEEL_MAT);
     rodMesh.position.copy(startLocal).addScaledVector(dir, 0.5);
     rodMesh.userData = { ...pickMeta };
     orientedGroup.add(rodMesh);
@@ -449,7 +496,7 @@ export function createFoundationPadVisual(
 
     // Above-ground clevis lug head at +0.30 m N.G.L. where guy cables terminate
     const headGeom = new THREE.CylinderGeometry(0.16, 0.16, 0.14, 12);
-    const headMesh = new THREE.Mesh(headGeom, steelMat);
+    const headMesh = new THREE.Mesh(headGeom, SHARED_STEEL_MAT);
     headMesh.position.set(0, metrics.rodHeadY, 0);
     headMesh.userData = { ...pickMeta };
     orientedGroup.add(headMesh);
