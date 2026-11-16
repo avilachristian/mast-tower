@@ -45,6 +45,7 @@ import {
   buildCentralizedDailyLogMaterials,
   syncDailyLogMaterialsWithHauling,
 } from '@/entities/project/haulingInventory';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import type {
   DailyActivityLogEntry,
   DailyLogActivityItem,
@@ -217,7 +218,7 @@ export function DailyLogsView({
   const [location, setLocation] = useState(project.location);
   const [preparedBy, setPreparedBy] = useState(project.preparedBy);
   const [metaTouched, setMetaTouched] = useState(false);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayLocalIso());
   const [dayNumber, setDayNumber] = useState(nextDayNum);
   const [dayNumberTouched, setDayNumberTouched] = useState(false);
   const [workersTouched, setWorkersTouched] = useState(false);
@@ -233,7 +234,7 @@ export function DailyLogsView({
       buildCentralizedDailyLogMaterials(
         project,
         latestLog,
-        new Date().toISOString().slice(0, 10),
+        todayLocalIso(),
         computeDailyLogMaterialRemaining
       )
   );
@@ -335,7 +336,7 @@ export function DailyLogsView({
     carryOverSource?: DailyActivityLogEntry | null
   ) => {
     const sourceLog = carryOverSource !== undefined ? carryOverSource : latestLog;
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = todayLocalIso();
     setEditingLogId(null);
     setDayNumberTouched(false);
     setMaterialsTouched(false);

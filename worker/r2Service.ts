@@ -12,7 +12,7 @@ export const MAX_SINGLE_IMAGE_BYTES = 8 * 1024 * 1024; // 8 MB max per single up
 const SQL_IN_CHUNK_SIZE = 75;
 const D1_BATCH_CHUNK_SIZE = 50;
 const R2_DELETE_BATCH_SIZE = 500;
-const ORPHAN_UNLINKED_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const ORPHAN_UNLINKED_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (prevents deleting images staged offline or during interrupted syncs)
 
 export function chunkArray<T>(items: T[], size: number): T[][] {
   if (items.length === 0) return [];

@@ -33,6 +33,7 @@ import type {
 } from '@/entities/project/types';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import { HaulingRateConfigControl } from '@/widgets/hauling/HaulingRateConfigControl';
 import type { PayrollSheetData } from './PayrollPrintModal';
 
@@ -88,7 +89,7 @@ export function HaulerPayrollPanel({
   const pushToast = useFeedbackStore((s) => s.pushToast);
   const requestConfirm = useFeedbackStore((s) => s.requestConfirm);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = todayLocalIso();
   const [periodType, setPeriodType] = useState<PayrollPeriodType>('weekly');
   const [anchorDate, setAnchorDate] = useState(todayStr);
   const [customTitle, setCustomTitle] = useState('');

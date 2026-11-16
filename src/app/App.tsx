@@ -3,6 +3,7 @@ import { useAppRoute } from '@/shared/lib/router';
 import { useAuthStore } from '@/shared/state/authStore';
 import { useUiStore } from '@/shared/state/uiStore';
 import { AppDialogModal } from '@/widgets/common/AppDialogModal';
+import { AppErrorBoundary } from '@/widgets/common/AppErrorBoundary';
 import { ToastBanner } from '@/widgets/common/ToastBanner';
 
 const ClientShowcaseView = lazy(() =>
@@ -63,7 +64,7 @@ export function App() {
     route.kind === 'admin' && authStatus === 'authenticated' && !projectBrowserOpen;
 
   return (
-    <>
+    <AppErrorBoundary>
       {route.kind === 'client' ? (
         <Suspense fallback={<RouteLoadingFallback label="Loading client showcase..." />}>
           <ClientShowcaseView slug={route.slug} />
@@ -83,7 +84,7 @@ export function App() {
       {/* App-Wide Custom Alert / Confirm Modal & Status Toasts */}
       <AppDialogModal />
       <ToastBanner hasBottomNav={showAdminBottomNav} />
-    </>
+    </AppErrorBoundary>
   );
 }
 

@@ -1,4 +1,5 @@
 import { formatDateWithWeekday } from './calculations';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import {
   HAULING_CREDIT_BLOCK_KG,
   HAULING_RATE_PER_BLOCK_PHP,
@@ -198,7 +199,7 @@ export function getPayrollPeriodBounds(
 ): { startDate: string; endDate: string; label: string } {
   const safeAnchor = parseIsoDateUtc(anchorDate)
     ? anchorDate
-    : new Date().toISOString().slice(0, 10);
+    : todayLocalIso();
 
   if (periodType === 'daily') {
     return {

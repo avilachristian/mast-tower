@@ -1850,5 +1850,30 @@ describe('Hauling & Centralized Inventory System', () => {
       stateAfterAdd.haulingLogs[1].tripGroupId
     );
   });
+
+  it('normalizes legacy boilerplate notes and vertical mast state on import', () => {
+    const rawProject = createSampleVerticalMastProject();
+    // Simulate legacy notes and an unnormalized verticalMast structure
+    rawProject.foundations = rawProject.foundations.map((f, i) =>
+      i === 0 ? { ...f, notes: 'Excavation completed by previous contractor.' } : f
+    );
+
+    const jsonText = JSON.stringify(rawProject);
+
+    // Test importProjectAsNew
+    useProjectStore.getState().importProjectAsNew(jsonText);
+    const activeProject = useProjectStore.getState().project;
+    expect(activeProject.foundations[0].notes).toBe('');
+    expect(activeProject.verticalMast).toBeDefined();
+    expect(activeProject.verticalMast?.sections.length).toBe(41);
+    expect(activeProject.verticalMast?.guyLayers.length).toBe(16);
+
+    // Test importProjectJson
+    useProjectStore.getState().importProjectJson(jsonText);
+    const importedProject = useProjectStore.getState().project;
+    expect(importedProject.foundations[0].notes).toBe('');
+    expect(importedProject.verticalMast?.sections.length).toBe(41);
+    expect(importedProject.verticalMast?.guyLayers.length).toBe(16);
+  });
 });
 

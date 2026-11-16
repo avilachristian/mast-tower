@@ -1,4 +1,5 @@
 import { formatDateWithWeekday } from '@/entities/project/calculations';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import type { MastProjectState, ReportDetailsSpec } from '@/entities/project/types';
 import { resolveReportLogos } from '@/shared/assets/defaultLogos';
 import {
@@ -247,7 +248,7 @@ export function ReportLetterhead({
   const rawDate =
     effectiveDetails?.reportDate?.trim() ||
     fallbackDate?.trim() ||
-    new Date().toISOString().slice(0, 10);
+    todayLocalIso();
   const displayDate = formatDateWithWeekday(rawDate);
 
   const metaItems: { label: string; value: string }[] = [
@@ -416,7 +417,7 @@ export function ReportSignoffFooter({
   }
 
   const rawDate =
-    details?.reportDate?.trim() || fallbackDate?.trim() || new Date().toISOString().slice(0, 10);
+    details?.reportDate?.trim() || fallbackDate?.trim() || todayLocalIso();
   const displayDate = formatDateWithWeekday(rawDate);
   const gridColsClass =
     signatories.length === 1

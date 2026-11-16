@@ -40,6 +40,7 @@ import {
   type VerticalMastOrderViolation,
 } from '@/entities/project/verticalMastValidation';
 import { useUiStore } from '@/shared/state/uiStore';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import { replaceInlineImageUrlsInState } from '@/shared/lib/inlineImageRefs';
 import {
   createCoalescedIdbWriter,
@@ -1004,7 +1005,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         contractor,
         preparedBy,
         towerHeightM,
-        lastUpdated: new Date().toISOString().slice(0, 10),
+        lastUpdated: todayLocalIso(),
         reportDetails: {
           ...(base.reportDetails ?? {}),
           projectName,
@@ -1056,7 +1057,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       const sourceName =
         cloned.reportDetails?.projectName?.trim() || cloned.projectName;
       const copyName = newName?.trim() || `${sourceName} (Copy)`;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       const nextState: MastProjectState = {
         ...cloned,
         projectName: copyName,
@@ -1122,8 +1123,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         throw new Error('Invalid Mast Tower project JSON file (expected 13 foundations).');
       }
       const s = get();
+      const rawRecord = buildSavedRecord(parsed);
+      const normalizedRecord = normalizeProjectRecord(rawRecord);
       const record: SavedProjectRecord = {
-        ...buildSavedRecord(parsed),
+        ...normalizedRecord,
         syncStatus: 'pending',
       };
       const projects = [record, ...s.projects];
@@ -1142,7 +1145,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateFoundationStatus: (id, status) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) =>
           f.id === id ? applyFoundationStatusToRecord(f, status, today) : f
         );
@@ -1161,7 +1164,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return violation;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       set((s) => {
         const foundations = s.project.foundations.map((f) => {
           if (f.id !== id) return f;
@@ -1196,7 +1199,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateFoundationDetails: (id, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) =>
           f.id === id ? { ...f, ...patch } : f
         );
@@ -1206,7 +1209,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateFoundationBatch: (id, batch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) => {
           if (f.id !== id) return f;
           let updated: FoundationRecord = f;
@@ -1227,7 +1230,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateFoundationInspectionItem: (id, key, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) => {
           if (f.id !== id) return f;
           const currentMap = f.inspectionChecklist ?? {};
@@ -1264,7 +1267,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     addFoundationInspectionItem: (id, item) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const description = item.description.trim();
         if (!description) return s;
         const newKey = `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -1297,7 +1300,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     removeFoundationInspectionItem: (id, key) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) => {
           if (f.id !== id) return f;
           const isCustom = (f.customInspectionItems ?? []).some((ci) => ci.key === key);
@@ -1326,7 +1329,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     resetFoundationInspectionChecklist: (id) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) =>
           f.id === id
             ? {
@@ -1343,7 +1346,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateFoundationInspectionMeta: (id, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) => {
           if (f.id !== id) return f;
           return {
@@ -1360,7 +1363,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateFoundationMaterial: (id, key, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) => {
           if (f.id !== id) return f;
           const currentMap = f.manualMaterials ?? {};
@@ -1387,7 +1390,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     resetFoundationMaterials: (id) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) =>
           f.id === id ? { ...f, manualMaterials: undefined } : f
         );
@@ -1397,7 +1400,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateFoundationCustomSpecs: (id, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) =>
           f.id === id ? applyFoundationCustomSpecsPatch(f, patch) : f
         );
@@ -1407,7 +1410,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     resetFoundationCustomSpecs: (id) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const foundations = s.project.foundations.map((f) =>
           f.id === id ? { ...f, customSpecs: undefined } : f
         );
@@ -1417,7 +1420,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     addHaulingLog: (entry) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const newLog = buildHaulingRecord(entry);
         const next: MastProjectState = {
           ...s.project,
@@ -1430,7 +1433,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     addHaulingBatch: (entries) =>
       set((s) => {
         if (entries.length === 0) return s;
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const created = entries.map(buildHaulingRecord);
         const next: MastProjectState = {
           ...s.project,
@@ -1444,7 +1447,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => {
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulingLogs: s.project.haulingLogs.filter((l) => l.id !== id),
         };
         return commitActiveProject(s, next);
@@ -1455,7 +1458,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const idSet = new Set(ids);
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulingLogs: s.project.haulingLogs.filter((l) => !idSet.has(l.id)),
         };
         return commitActiveProject(s, next);
@@ -1471,7 +1474,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         );
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulerRoster: appendHaulerToRoster(s.project.haulerRoster, trip.haulerName),
           manpowerRoster,
           haulingLogs: [...created, ...s.project.haulingLogs],
@@ -1493,7 +1496,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         );
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulerRoster: appendHaulerToRoster(s.project.haulerRoster, trip.haulerName),
           manpowerRoster,
           haulingLogs: [...created, ...remaining],
@@ -1509,7 +1512,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         );
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           centralMaterials,
         };
         return commitActiveProject(s, next);
@@ -1522,7 +1525,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const centralMaterials: CentralMaterialItem[] = [...base, { ...item, id }];
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           centralMaterials,
         };
         return commitActiveProject(s, next);
@@ -1536,7 +1539,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const centralMaterials = base.filter((item) => item.id !== id);
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           centralMaterials:
             centralMaterials.length > 0 ? centralMaterials : createDefaultCentralMaterials(),
         };
@@ -1555,7 +1558,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         }
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulerRoster: nextRoster,
           manpowerRoster,
         });
@@ -1577,7 +1580,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         };
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulerRoster: appendHaulerToRoster(s.project.haulerRoster, haulerName),
           manpowerRoster: appendHaulerToManpowerRoster(s.project, haulerName),
           haulerPayouts: [record, ...(s.project.haulerPayouts ?? [])],
@@ -1588,7 +1591,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => ({
         ...commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulerPayouts: (s.project.haulerPayouts ?? []).filter((p) => p.id !== id),
         }),
       })),
@@ -1614,7 +1617,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const manpowerRoster = [...current, newMember];
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           manpowerRoster,
           haulerRoster: deriveLegacyHaulerNames(manpowerRoster),
         });
@@ -1674,7 +1677,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           manpowerRoster,
           haulerRoster: deriveLegacyHaulerNames(manpowerRoster),
           ...(renamedHauler
@@ -1707,7 +1710,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           manpowerRoster,
           haulerRoster: deriveLegacyHaulerNames(manpowerRoster),
           civilAttendance,
@@ -1746,7 +1749,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           civilAttendance,
         });
       }),
@@ -1778,7 +1781,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           civilAttendance,
         });
       }),
@@ -1793,7 +1796,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         };
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           civilPayrollHistory: [record, ...(s.project.civilPayrollHistory ?? [])],
         });
       });
@@ -1802,7 +1805,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateCivilPayrollStatus: (id, status, paidDate) =>
       set((s) => {
-        const today = paidDate ?? new Date().toISOString().slice(0, 10);
+        const today = paidDate ?? todayLocalIso();
         const civilPayrollHistory = (s.project.civilPayrollHistory ?? []).map((rec) =>
           rec.id === id
             ? {
@@ -1814,7 +1817,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         );
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           civilPayrollHistory,
         });
       }),
@@ -1823,7 +1826,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => ({
         ...commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           civilPayrollHistory: (s.project.civilPayrollHistory ?? []).filter(
             (r) => r.id !== id
           ),
@@ -1833,7 +1836,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     createHaulerPayrollSnapshot: (snapshot) => {
       const id = `hpay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       set((s) => {
-        const today = snapshot.paidDate ?? new Date().toISOString().slice(0, 10);
+        const today = snapshot.paidDate ?? todayLocalIso();
         const record: HaulerPayrollSnapshot = {
           ...snapshot,
           id,
@@ -1846,7 +1849,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
             : [];
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulerPayrollHistory: [record, ...(s.project.haulerPayrollHistory ?? [])],
           haulerPayouts: [...linkedPayouts, ...(s.project.haulerPayouts ?? [])],
         });
@@ -1858,7 +1861,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => {
         const target = (s.project.haulerPayrollHistory ?? []).find((r) => r.id === id);
         if (!target) return s;
-        const today = paidDate ?? new Date().toISOString().slice(0, 10);
+        const today = paidDate ?? todayLocalIso();
         const haulerPayrollHistory = (s.project.haulerPayrollHistory ?? []).map((rec) =>
           rec.id === id
             ? {
@@ -1879,7 +1882,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulerPayrollHistory,
           haulerPayouts: [...linkedPayouts, ...basePayouts],
         });
@@ -1889,7 +1892,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
       set((s) => ({
         ...commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulerPayrollHistory: (s.project.haulerPayrollHistory ?? []).filter(
             (r) => r.id !== id
           ),
@@ -1908,7 +1911,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         });
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           haulingRateConfig: next,
         });
       }),
@@ -1930,14 +1933,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const dailyLogs = recalculateDailyLogCarryOver(updatedLogs, logId);
         return commitActiveProject(s, {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           dailyLogs,
         });
       }),
 
     addDailyLog: (entry) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const totalWorkers = entry.workers.reduce((sum, w) => sum + Math.max(0, w.count), 0);
         const totalManHours = entry.workers.reduce(
           (sum, w) => sum + Math.max(0, w.count) * Math.max(0, w.hours),
@@ -1973,7 +1976,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateDailyLog: (id, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const updatedLogs = s.project.dailyLogs.map((log) => {
           if (log.id !== id) return log;
           const mergedWorkers = patch.workers ?? log.workers;
@@ -2015,7 +2018,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const dailyLogs = recalculateDailyLogCarryOver(remainingLogs);
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           dailyLogs,
         };
         return commitActiveProject(s, next);
@@ -2032,7 +2035,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         };
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           ...patch,
           reportDetails: nextDetails,
         };
@@ -2047,7 +2050,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         };
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           ...(patch.projectName?.trim() ? { projectName: patch.projectName.trim() } : {}),
           ...(patch.projectLocation?.trim() ? { location: patch.projectLocation.trim() } : {}),
           ...(patch.preparedBy?.trim() ? { preparedBy: patch.preparedBy.trim() } : {}),
@@ -2064,7 +2067,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         );
         const next: MastProjectState = {
           ...s.project,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+          lastUpdated: todayLocalIso(),
           inventory,
         };
         return commitActiveProject(s, next);
@@ -2107,9 +2110,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         throw new Error('Invalid Mast Tower project JSON file (expected 13 foundations).');
       }
       const cleaned = stripLegacyBoilerplateNotes(parsed);
+      const normalized: MastProjectState = cleaned.verticalMast
+        ? {
+            ...cleaned,
+            verticalMast: normalizeVerticalMastState(cleaned.verticalMast),
+          }
+        : cleaned;
       set((s) => ({
-        ...commitActiveProject(s, cleaned),
-        selectedFoundationId: cleaned.foundations[0].id,
+        ...commitActiveProject(s, normalized),
+        selectedFoundationId: normalized.foundations[0].id,
       }));
     },
 
@@ -2124,7 +2133,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return violation;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       const isInstalled =
         status === 'hoisted' || status === 'bolted_torqued' || status === 'plumbed_verified';
       set((s) => {
@@ -2176,7 +2185,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return violation;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       set((s) => {
         const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
         const sections = activeVm.sections.map((sec) => {
@@ -2205,7 +2214,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateTowerSectionDetails: (id, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const vm = s.project.verticalMast ?? createInitialVerticalMastState();
         const sections = vm.sections.map((sec) =>
           sec.id === id ? { ...sec, ...patch } : sec
@@ -2232,7 +2241,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return violation;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       const lo = Math.min(fromSectionNo, toSectionNo);
       const hi = Math.max(fromSectionNo, toSectionNo);
       const isInstalled =
@@ -2274,7 +2283,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return violation;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       const template = guySectorsFromStatus(status);
       set((s) => {
         const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
@@ -2332,7 +2341,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return violation;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       set((s) => {
         const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
         const guyLayers = activeVm.guyLayers.map((g) =>
@@ -2377,7 +2386,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return violation;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       set((s) => {
         const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
         const guyLayers = activeVm.guyLayers.map((g) =>
@@ -2429,7 +2438,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         return violation;
       }
 
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       set((s) => {
         const activeVm = s.project.verticalMast ?? createInitialVerticalMastState();
         const guyLayers = activeVm.guyLayers.map((g) =>
@@ -2456,7 +2465,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateGuyLayerDetails: (id, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const vm = s.project.verticalMast ?? createInitialVerticalMastState();
         const guyLayers = vm.guyLayers.map((g) =>
           g.id === id ? { ...g, ...patch } : g
@@ -2471,7 +2480,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateMastInspectionItem: (targetKind, id, key, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const vm = s.project.verticalMast ?? createInitialVerticalMastState();
         const nextVm: VerticalMastState =
           targetKind === 'section'
@@ -2492,7 +2501,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     addMastInspectionItem: (targetKind, id, item) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const vm = s.project.verticalMast ?? createInitialVerticalMastState();
         const nextVm: VerticalMastState =
           targetKind === 'section'
@@ -2513,7 +2522,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     removeMastInspectionItem: (targetKind, id, key) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const vm = s.project.verticalMast ?? createInitialVerticalMastState();
         const nextVm: VerticalMastState =
           targetKind === 'section'
@@ -2534,7 +2543,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     resetMastInspectionChecklist: (targetKind, id) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const vm = s.project.verticalMast ?? createInitialVerticalMastState();
         const nextVm: VerticalMastState =
           targetKind === 'section'
@@ -2555,7 +2564,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     updateMastInspectionMeta: (targetKind, id, patch) =>
       set((s) => {
-        const today = new Date().toISOString().slice(0, 10);
+        const today = todayLocalIso();
         const vm = s.project.verticalMast ?? createInitialVerticalMastState();
         const nextVm: VerticalMastState =
           targetKind === 'section'

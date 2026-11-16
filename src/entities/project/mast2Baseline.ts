@@ -1,4 +1,5 @@
 import { createDefaultReportLogos } from '@/shared/assets/defaultLogos';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import type {
   FoundationCustomSpecs,
   FoundationInspectionItemKey,
@@ -947,7 +948,7 @@ export function createCleanBaselineProject(): MastProjectState {
     preparedBy: 'Engr. Christian C. Avila',
     contractor: 'GSL Utility Builders',
     towerHeightM: 120,
-    lastUpdated: new Date().toISOString().slice(0, 10),
+    lastUpdated: todayLocalIso(),
     reportDetails: {
       logos: createDefaultReportLogos(),
     },

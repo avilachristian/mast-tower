@@ -1,4 +1,5 @@
 import { createDefaultReportLogos } from '@/shared/assets/defaultLogos';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import {
   checklistFromStatus,
   createInitialFoundations,
@@ -623,7 +624,7 @@ function createCompletedSiteFoundationsForTower() {
 }
 
 export function createCleanVerticalMastProject(): MastProjectState {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocalIso();
   return {
     projectType: 'vertical_mast',
     projectName: '120m Vertical Met Mast Erection',

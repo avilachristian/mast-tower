@@ -28,6 +28,7 @@ import type {
 } from '@/entities/project/types';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 
 const EMPTY_STRING_SET = new Set<string>();
 import type { PayrollSheetData } from './PayrollPrintModal';
@@ -84,7 +85,7 @@ export function CivilWorksPayrollPanel({
   const pushToast = useFeedbackStore((s) => s.pushToast);
   const requestConfirm = useFeedbackStore((s) => s.requestConfirm);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = todayLocalIso();
   const [attendanceDate, setAttendanceDate] = useState(todayStr);
   const [periodType, setPeriodType] = useState<PayrollPeriodType>('weekly');
   const [anchorDate, setAnchorDate] = useState(todayStr);

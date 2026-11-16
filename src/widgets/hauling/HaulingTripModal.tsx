@@ -10,6 +10,7 @@ import {
 } from '@/entities/project/haulingInventory';
 import type { CentralMaterialItem, HaulingMaterialCategory, MastProjectState } from '@/entities/project/types';
 import type { HaulingTripInput } from '@/shared/state/projectStore';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 
 interface DraftTripLineItem {
   key: string;
@@ -59,7 +60,7 @@ export function HaulingTripModal({
     [project]
   );
 
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayLocalIso());
   const [haulerName, setHaulerName] = useState('');
   const [tripNumber, setTripNumber] = useState<1 | 2>(1);
   const [remarks, setRemarks] = useState('');
@@ -92,7 +93,7 @@ export function HaulingTripModal({
         }))
       );
     } else {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayLocalIso();
       setDate(today);
       setHaulerName(knownHaulers[0] ?? '');
       setTripNumber(1);

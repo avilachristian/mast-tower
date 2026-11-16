@@ -1043,11 +1043,11 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       state: body.state,
     });
 
-    await c.env.DB.prepare(
+    const updateResult = await c.env.DB.prepare(
       `UPDATE projects
        SET slug = ?, name = ?, project_type = ?, client_visible = ?, client_featured = ?,
            client_settings_json = ?, state_json = ?, client_dto_json = ?, version = ?, updated_at = ?
-       WHERE id = ?`
+       WHERE id = ? AND version = ?`
     )
       .bind(
         uniqueSlug,
@@ -1060,9 +1060,27 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         clientDtoJson,
         nextVersion,
         now,
-        id
+        id,
+        existing.version
       )
       .run();
+
+    if (updateResult?.meta && typeof updateResult.meta.changes === 'number' && updateResult.meta.changes === 0) {
+      const latest = await c.env.DB.prepare(
+        'SELECT * FROM projects WHERE id = ?'
+      )
+        .bind(id)
+        .first<ProjectRow>();
+      return c.json(
+        {
+          error:
+            'This project was updated on another device. Reload the latest cloud copy before saving.',
+          code: 'VERSION_CONFLICT',
+          latestProject: latest ? rowToSavedProjectRecord(latest) : undefined,
+        },
+        409
+      );
+    }
 
     const prevKeys = extractMediaKeysFromProjectState(prevRecord.state);
     const nextKeys = extractMediaKeysFromProjectState(body.state);
@@ -1165,11 +1183,11 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       state: prevRecord.state,
     });
 
-    await c.env.DB.prepare(
+    const updateResult = await c.env.DB.prepare(
       `UPDATE projects
        SET slug = ?, client_visible = ?, client_featured = ?, client_settings_json = ?,
            client_dto_json = ?, version = ?, updated_at = ?
-       WHERE id = ?`
+       WHERE id = ? AND version = ?`
     )
       .bind(
         uniqueSlug,
@@ -1179,9 +1197,27 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         clientDtoJson,
         nextVersion,
         now,
-        id
+        id,
+        existing.version
       )
       .run();
+
+    if (updateResult?.meta && typeof updateResult.meta.changes === 'number' && updateResult.meta.changes === 0) {
+      const latest = await c.env.DB.prepare(
+        'SELECT * FROM projects WHERE id = ?'
+      )
+        .bind(id)
+        .first<ProjectRow>();
+      return c.json(
+        {
+          error:
+            'This project was updated on another device. Reload the latest cloud copy before updating visibility.',
+          code: 'VERSION_CONFLICT',
+          latestProject: latest ? rowToSavedProjectRecord(latest) : undefined,
+        },
+        409
+      );
+    }
 
     runInBackground(
       c,

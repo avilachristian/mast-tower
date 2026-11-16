@@ -34,6 +34,7 @@ import {
   resolveManpowerRoster,
 } from '@/entities/project/manpowerPayroll';
 import { computeVerticalMastMetrics } from '@/entities/project/verticalMastCalculations';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import { navigateTo } from '@/shared/lib/router';
 import { usePwaStore } from '@/shared/pwa/pwaManager';
 import { useAuthStore } from '@/shared/state/authStore';
@@ -322,7 +323,7 @@ export function AdminWorkspace() {
       if (saved) return { kind: 'civil', snapshot: saved };
 
       const dates = (project.civilAttendance ?? []).map((a) => a.date);
-      const todayIso = new Date().toISOString().slice(0, 10);
+      const todayIso = todayLocalIso();
       const bounds = getPayrollPeriodBounds('overall', todayIso, dates);
       const preview = computeCivilWorksPayrollPreview(
         manpowerRoster,
@@ -361,7 +362,7 @@ export function AdminWorkspace() {
       ...project.haulingLogs.map((l) => l.date),
       ...(project.haulerPayouts ?? []).map((p) => p.date),
     ];
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = todayLocalIso();
     const bounds = getPayrollPeriodBounds('overall', todayIso, dates);
     const rateConfig = resolveHaulingRateConfig(project);
     const preview = computeHaulerPayrollPreview(

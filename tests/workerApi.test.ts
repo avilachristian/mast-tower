@@ -321,23 +321,26 @@ function createMockD1() {
         version,
         updated_at,
         id,
+        expected_version,
       ] = params;
       const row = projects.get(String(id));
-      if (row) {
-        Object.assign(row, {
-          slug,
-          name,
-          project_type,
-          client_visible,
-          client_featured,
-          client_settings_json,
-          state_json,
-          client_dto_json,
-          version,
-          updated_at,
-        });
+      if (!row) return { rows: [], changes: 0 };
+      if (expected_version !== undefined && row.version !== expected_version) {
+        return { rows: [], changes: 0 };
       }
-      return { rows: [] };
+      Object.assign(row, {
+        slug,
+        name,
+        project_type,
+        client_visible,
+        client_featured,
+        client_settings_json,
+        state_json,
+        client_dto_json,
+        version,
+        updated_at,
+      });
+      return { rows: [], changes: 1 };
     }
     if (sql.startsWith('UPDATE projects SET slug = ?, client_visible = ?')) {
       const [
@@ -349,20 +352,23 @@ function createMockD1() {
         version,
         updated_at,
         id,
+        expected_version,
       ] = params;
       const row = projects.get(String(id));
-      if (row) {
-        Object.assign(row, {
-          slug,
-          client_visible,
-          client_featured,
-          client_settings_json,
-          client_dto_json,
-          version,
-          updated_at,
-        });
+      if (!row) return { rows: [], changes: 0 };
+      if (expected_version !== undefined && row.version !== expected_version) {
+        return { rows: [], changes: 0 };
       }
-      return { rows: [] };
+      Object.assign(row, {
+        slug,
+        client_visible,
+        client_featured,
+        client_settings_json,
+        client_dto_json,
+        version,
+        updated_at,
+      });
+      return { rows: [], changes: 1 };
     }
     if (sql.startsWith('DELETE FROM projects WHERE id = ?')) {
       const pid = String(params[0]);
@@ -543,8 +549,8 @@ function createMockD1() {
       return { results: rows as T[], success: true, meta: {} };
     },
     async run() {
-      execSql(sql, bound);
-      return { results: [], success: true, meta: {} };
+      const res = execSql(sql, bound);
+      return { results: [], success: true, meta: { changes: (res as { changes?: number }).changes ?? 1 } };
     },
     _execSync: () => {
       const { rows } = execSql(sql, bound);
@@ -1025,7 +1031,22 @@ describe('Cloudflare Worker API Integration', () => {
     expect(delAJson.deletedMediaCount).toBe(0);
     expect(mockR2.keys()).toEqual([upJson.objectKey]);
 
-    // Seed a stale (>24h) unlinked orphan object in R2 & media_objects, verify reconcile sweeps only the stale orphan
+    // Seed a recent (3-day) unlinked object and verify it SURVIVES reconcile due to 7-day TTL
+    const recentOrphanKey = 'projects/tmp/daily_log/recent-orphan.jpg';
+    await mockR2.bucket.put(recentOrphanKey, new Uint8Array(200), {
+      httpMetadata: { contentType: 'image/jpeg' },
+    });
+    mockD1.seedRawMedia({
+      object_key: recentOrphanKey,
+      project_id: null,
+      category: 'daily_log',
+      content_type: 'image/jpeg',
+      size_bytes: 200,
+      original_name: 'recent.jpg',
+      created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    // Seed a stale (>7d) unlinked orphan object in R2 & media_objects, verify reconcile sweeps only the stale orphan
     const staleKey = 'projects/tmp/daily_log/stale-orphan.jpg';
     await mockR2.bucket.put(staleKey, new Uint8Array(400), {
       httpMetadata: { contentType: 'image/jpeg' },
@@ -1037,7 +1058,7 @@ describe('Cloudflare Worker API Integration', () => {
       content_type: 'image/jpeg',
       size_bytes: 400,
       original_name: 'stale.jpg',
-      created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+      created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
     });
 
     const recRes = await cachedApp.request(
@@ -1049,9 +1070,10 @@ describe('Cloudflare Worker API Integration', () => {
     const recJson = (await recRes.json()) as {
       storage: { usedBytes: number; objectCount: number };
     };
-    expect(recJson.storage.usedBytes).toBe(500);
-    expect(recJson.storage.objectCount).toBe(1);
-    expect(mockR2.keys()).toEqual([upJson.objectKey]);
+    // 500 (linked upJson) + 200 (recent 3d orphan) = 700 bytes, 2 objects
+    expect(recJson.storage.usedBytes).toBe(700);
+    expect(recJson.storage.objectCount).toBe(2);
+    expect(mockR2.keys().sort()).toEqual([recentOrphanKey, upJson.objectKey].sort());
   });
 
   it('throttles username enumeration from a single IP using IP-wide login_attempts limit', async () => {
@@ -1085,5 +1107,74 @@ describe('Cloudflare Worker API Integration', () => {
       env
     );
     expect(blockedRes.status).toBe(429);
+  });
+
+  it('enforces atomic version conflict check on concurrent project saves', async () => {
+    const { env } = makeTestEnv();
+    const app = createWorkerApp();
+
+    const loginRes = await app.request(
+      '/api/auth/login',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'StrongPassword123!' }),
+      },
+      env
+    );
+    const cookie = loginRes.headers.get('Set-Cookie')?.split(';')[0] ?? '';
+
+    // Create a new project
+    const p1 = createSampleMast2Project();
+    const saveRes1 = await app.request(
+      '/api/admin/projects/proj-concurrency',
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: cookie,
+        },
+        body: JSON.stringify({ state: p1 }),
+      },
+      env
+    );
+    expect(saveRes1.status).toBe(200);
+    const save1Json = (await saveRes1.json()) as { project: { version: number } };
+    expect(save1Json.project.version).toBe(1);
+
+    // Save with correct expectedVersion = 1 -> succeeds to version 2
+    const saveRes2 = await app.request(
+      '/api/admin/projects/proj-concurrency',
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: cookie,
+        },
+        body: JSON.stringify({ state: { ...p1, projectName: 'Updated 1' }, expectedVersion: 1 }),
+      },
+      env
+    );
+    expect(saveRes2.status).toBe(200);
+    const save2Json = (await saveRes2.json()) as { project: { version: number } };
+    expect(save2Json.project.version).toBe(2);
+
+    // Second device attempts to save with stale expectedVersion = 1 -> 409 conflict
+    const staleSaveRes = await app.request(
+      '/api/admin/projects/proj-concurrency',
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: cookie,
+        },
+        body: JSON.stringify({ state: { ...p1, projectName: 'Stale Overwrite' }, expectedVersion: 1 }),
+      },
+      env
+    );
+    expect(staleSaveRes.status).toBe(409);
+    const staleJson = (await staleSaveRes.json()) as { code: string; latestProject: { version: number } };
+    expect(staleJson.code).toBe('VERSION_CONFLICT');
+    expect(staleJson.latestProject.version).toBe(2);
   });
 });
