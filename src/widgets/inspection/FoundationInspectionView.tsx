@@ -28,6 +28,8 @@ import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
+import { resolveMatchingPreparedSignature } from '@/widgets/report/ReportLetterhead';
+import { SignatureUploadControl } from '@/widgets/report/SignatureUploadControl';
 import { InspectionReportSheet } from './InspectionReportSheet';
 
 const INSPECTION_STATUS_OPTIONS: FoundationInspectionStatus[] = [
@@ -87,6 +89,10 @@ export function FoundationInspectionView({
   const weekdayLabel = getWeekdayName(inspectionDate);
   const passedCount = reportableInspections.filter((i) => i.status === 'Passed').length;
   const photosCount = reportableInspections.filter((i) => Boolean(i.photoDataUrl)).length;
+  const inheritedInspectorSignature = resolveMatchingPreparedSignature(
+    project,
+    meta.inspectorName
+  );
 
   const handleUploadInspectionPhoto = (
     key: FoundationInspectionItemKey,
@@ -299,6 +305,34 @@ export function FoundationInspectionView({
                         className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-slate-800 focus:border-sky-500 focus:outline-none"
                       />
                     </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <SignatureUploadControl
+                      label="Inspector Signature"
+                      value={meta.inspectorSignatureUrl}
+                      inheritedValue={inheritedInspectorSignature}
+                      emptyHint="No signature — left blank"
+                      onChange={(nextUrl) =>
+                        updateFoundationInspectionMeta(selectedFoundation.id, {
+                          inspectorSignatureUrl: nextUrl,
+                        })
+                      }
+                    />
+                    <SignatureUploadControl
+                      label="Verified by Signature"
+                      value={meta.verifiedSignatureUrl}
+                      emptyHint={
+                        meta.contractorRep?.trim()
+                          ? 'No signature — left blank'
+                          : 'Enter "Verified by" to include'
+                      }
+                      onChange={(nextUrl) =>
+                        updateFoundationInspectionMeta(selectedFoundation.id, {
+                          verifiedSignatureUrl: nextUrl,
+                        })
+                      }
+                    />
                   </div>
 
                   <label className="block">

@@ -16,10 +16,15 @@ import {
 import type { MastSelectionTarget } from '@/shared/state/uiStore';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
 import {
+  InspectionSignoffRow,
   ReportLetterhead,
   ReportSignoffFooter,
   resolveReportDetails,
 } from '@/widgets/report/ReportLetterhead';
+import {
+  resolveInspectionSignoffs,
+  useReportSignoffOverrides,
+} from '@/widgets/report/ReportSignoffOverrideContext';
 import { VerticalMastElevation2D } from './VerticalMastElevation2D';
 
 export function VerticalMastInspectionSheet({
@@ -42,10 +47,27 @@ export function VerticalMastInspectionSheet({
 
   const holder = isSection ? section : guyLayer;
   const meta = holder?.inspectionMeta ?? {};
-  const inspectionDate = meta.inspectionDate?.trim() || project.lastUpdated;
-  const reportDetails = resolveReportDetails(project, {
-    reportDate: inspectionDate,
+  const signoffOverrides = useReportSignoffOverrides();
+  const baseDate = meta.inspectionDate?.trim() || project.lastUpdated;
+  const baseDetails = resolveReportDetails(project, {
+    reportDate: baseDate,
     preparedBy: meta.inspectorName,
+    ...(meta.inspectorSignatureUrl?.trim()
+      ? { preparedSignatureUrl: meta.inspectorSignatureUrl.trim() }
+      : {}),
+  });
+  const {
+    inspectionDate,
+    reportDetails,
+    inspectorName,
+    inspectorSignatureUrl,
+    verifiedBy,
+    verifiedSignatureUrl,
+  } = resolveInspectionSignoffs({
+    project,
+    meta,
+    baseDetails,
+    overrides: signoffOverrides,
   });
 
   const allRows = buildVerticalMastInspectionRows(
@@ -58,10 +80,6 @@ export function VerticalMastInspectionSheet({
 
   const overallStatus = deriveOverallInspectionStatus(meta.overallStatus, rows);
   const passedCount = rows.filter((i) => i.status === 'Passed').length;
-
-  const inspectorName =
-    meta.inspectorName?.trim() || reportDetails.preparedBy || project.preparedBy;
-  const verifiedBy = meta.contractorRep?.trim() || '';
 
   const stageLabel = isSection
     ? TOWER_SECTION_STATUS_META[section!.status].label
@@ -237,7 +255,7 @@ export function VerticalMastInspectionSheet({
         </div>
 
         {/* Flush Verification Checklist Table */}
-        <div className={photoRows.length > 0 ? 'border-b-2 border-slate-900' : ''}>
+        <div className="border-b-2 border-slate-900">
           <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-900 font-bold uppercase text-[11px] flex items-center justify-between">
             <span>Field QA / QC Verification Checklist ({rows.length} Items)</span>
             <span className="text-[10px] font-semibold text-slate-600 normal-case">
@@ -302,7 +320,7 @@ export function VerticalMastInspectionSheet({
 
         {/* Flush Photo Evidence Matrix (when photos attached) */}
         {photoRows.length > 0 && (
-          <div>
+          <div className="border-b-2 border-slate-900">
             <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-900 font-bold uppercase text-[11px]">
               Photographic Documentation ({photoRows.length})
             </div>
@@ -328,6 +346,16 @@ export function VerticalMastInspectionSheet({
             </div>
           </div>
         )}
+
+        {/* Flush Sign-off Row */}
+        <InspectionSignoffRow
+          inspectorLabel="QA/QC Inspector"
+          inspectorName={inspectorName}
+          inspectorSignatureUrl={inspectorSignatureUrl}
+          verifiedBy={verifiedBy}
+          verifiedSignatureUrl={verifiedSignatureUrl}
+          inspectionDate={inspectionDate}
+        />
       </div>
 
       <ReportSignoffFooter details={reportDetails} fallbackDate={inspectionDate} />

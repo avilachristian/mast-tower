@@ -6,6 +6,10 @@ export interface InlineImageCapableState {
       string,
       { photoDataUrl?: string; photoName?: string } | undefined
     >;
+    inspectionMeta?: {
+      inspectorSignatureUrl?: string;
+      verifiedSignatureUrl?: string;
+    };
   }>;
   verticalMast?: {
     sections: Array<{
@@ -13,18 +17,29 @@ export interface InlineImageCapableState {
         string,
         { photoDataUrl?: string; photoName?: string } | undefined
       >;
+      inspectionMeta?: {
+        inspectorSignatureUrl?: string;
+        verifiedSignatureUrl?: string;
+      };
     }>;
     guyLayers: Array<{
       inspectionChecklist?: Record<
         string,
         { photoDataUrl?: string; photoName?: string } | undefined
       >;
+      inspectionMeta?: {
+        inspectorSignatureUrl?: string;
+        verifiedSignatureUrl?: string;
+      };
     }>;
   };
   dailyLogs: Array<{
     documentationItems?: Array<{ photoDataUrl?: string; photoName?: string }>;
   }>;
   reportDetails?: {
+    preparedSignatureUrl?: string;
+    checkedSignatureUrl?: string;
+    approvedSignatureUrl?: string;
     logos?: {
       left?: { dataUrl: string; caption?: string };
       center?: { dataUrl: string; caption?: string };
@@ -34,7 +49,7 @@ export interface InlineImageCapableState {
 }
 
 export interface InlineImageRef {
-  category: 'inspection' | 'daily_log' | 'logo';
+  category: 'inspection' | 'daily_log' | 'logo' | 'signature';
   nameHint: string;
   getValue: () => string | undefined;
   setValue: (next: string) => void;
@@ -129,6 +144,72 @@ export function collectInlineImageRefs(
       }
     }
   }
+
+  const reportDetails = state.reportDetails;
+  if (reportDetails) {
+    const pushReportSig = (
+      field: 'preparedSignatureUrl' | 'checkedSignatureUrl' | 'approvedSignatureUrl',
+      nameHint: string
+    ) => {
+      const val = reportDetails[field];
+      if (val && val.startsWith('data:image/')) {
+        refs.push({
+          category: 'signature',
+          nameHint,
+          getValue: () => reportDetails[field],
+          setValue: (next) => {
+            reportDetails[field] = next;
+          },
+        });
+      }
+    };
+    pushReportSig('preparedSignatureUrl', 'signature-prepared.png');
+    pushReportSig('checkedSignatureUrl', 'signature-checked.png');
+    pushReportSig('approvedSignatureUrl', 'signature-approved.png');
+  }
+
+  const collectMetaSignatures = (
+    prefix: string,
+    meta?: { inspectorSignatureUrl?: string; verifiedSignatureUrl?: string }
+  ) => {
+    if (!meta) return;
+    if (
+      meta.inspectorSignatureUrl &&
+      meta.inspectorSignatureUrl.startsWith('data:image/')
+    ) {
+      refs.push({
+        category: 'signature',
+        nameHint: `${prefix}-inspector-sig.png`,
+        getValue: () => meta.inspectorSignatureUrl,
+        setValue: (next) => {
+          meta.inspectorSignatureUrl = next;
+        },
+      });
+    }
+    if (
+      meta.verifiedSignatureUrl &&
+      meta.verifiedSignatureUrl.startsWith('data:image/')
+    ) {
+      refs.push({
+        category: 'signature',
+        nameHint: `${prefix}-verified-sig.png`,
+        getValue: () => meta.verifiedSignatureUrl,
+        setValue: (next) => {
+          meta.verifiedSignatureUrl = next;
+        },
+      });
+    }
+  };
+
+  (state.foundations ?? []).forEach((f, idx) =>
+    collectMetaSignatures(`foundation-${idx}`, f.inspectionMeta)
+  );
+  (state.verticalMast?.sections ?? []).forEach((sec, idx) =>
+    collectMetaSignatures(`mast-sec-${idx}`, sec.inspectionMeta)
+  );
+  (state.verticalMast?.guyLayers ?? []).forEach((layer, idx) =>
+    collectMetaSignatures(`mast-layer-${idx}`, layer.inspectionMeta)
+  );
 
   return refs;
 }

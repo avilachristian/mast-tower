@@ -23,7 +23,7 @@ export function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-export type MediaCategory = 'inspection' | 'daily_log' | 'logo';
+export type MediaCategory = 'inspection' | 'daily_log' | 'logo' | 'signature';
 
 const MIME_TO_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -72,6 +72,8 @@ export function extractMediaKeysFromProjectState(
   };
 
   for (const f of state.foundations ?? []) {
+    collectUrl(f.inspectionMeta?.inspectorSignatureUrl);
+    collectUrl(f.inspectionMeta?.verifiedSignatureUrl);
     if (f.inspectionChecklist) {
       for (const entry of Object.values(f.inspectionChecklist)) {
         collectUrl(entry?.photoDataUrl);
@@ -80,6 +82,8 @@ export function extractMediaKeysFromProjectState(
   }
 
   for (const sec of state.verticalMast?.sections ?? []) {
+    collectUrl(sec.inspectionMeta?.inspectorSignatureUrl);
+    collectUrl(sec.inspectionMeta?.verifiedSignatureUrl);
     if (sec.inspectionChecklist) {
       for (const entry of Object.values(sec.inspectionChecklist)) {
         collectUrl(entry?.photoDataUrl);
@@ -88,6 +92,8 @@ export function extractMediaKeysFromProjectState(
   }
 
   for (const layer of state.verticalMast?.guyLayers ?? []) {
+    collectUrl(layer.inspectionMeta?.inspectorSignatureUrl);
+    collectUrl(layer.inspectionMeta?.verifiedSignatureUrl);
     if (layer.inspectionChecklist) {
       for (const entry of Object.values(layer.inspectionChecklist)) {
         collectUrl(entry?.photoDataUrl);
@@ -107,6 +113,10 @@ export function extractMediaKeysFromProjectState(
     collectUrl(logos.center?.dataUrl);
     collectUrl(logos.right?.dataUrl);
   }
+
+  collectUrl(state.reportDetails?.preparedSignatureUrl);
+  collectUrl(state.reportDetails?.checkedSignatureUrl);
+  collectUrl(state.reportDetails?.approvedSignatureUrl);
 
   return keys;
 }

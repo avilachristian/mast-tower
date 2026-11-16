@@ -86,7 +86,9 @@ export interface CustomFoundationInspectionItem {
 export interface FoundationInspectionMeta {
   inspectionDate?: string; // YYYY-MM-DD
   inspectorName?: string;
+  inspectorSignatureUrl?: string;
   contractorRep?: string;
+  verifiedSignatureUrl?: string;
   overallStatus?: FoundationInspectionStatus;
   generalNotes?: string;
 }
@@ -457,10 +459,13 @@ export interface ReportDetailsSpec {
   reportDate?: string;
   preparedBy?: string;
   preparedTitle?: string;
+  preparedSignatureUrl?: string;
   checkedBy?: string;
   checkedTitle?: string;
+  checkedSignatureUrl?: string;
   approvedBy?: string;
   approvedTitle?: string;
+  approvedSignatureUrl?: string;
   logoHeightPx?: number;
   logos?: {
     left?: ReportLogoItem;

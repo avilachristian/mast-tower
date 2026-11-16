@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { MastProjectState } from '@/entities/project/types';
 import { PrintModalHeader, usePrintPageSetup } from '@/widgets/report/PrintPageControls';
+import { ReportSignoffOverrideProvider } from '@/widgets/report/ReportSignoffOverrideContext';
 import { OverallVerticalMastStatusSheet } from './OverallVerticalMastStatusSheet';
 
 export function OverallVerticalMastStatusPrintModal({
@@ -44,23 +45,25 @@ export function OverallVerticalMastStatusPrintModal({
         className={`report-modal-dialog ${dialogMaxWidthClass} mx-auto bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden print:max-w-none print:rounded-none print:shadow-none print:border-none`}
         onClick={(e) => e.stopPropagation()}
       >
-        <PrintModalHeader
-          title="Overall Vertical Mast Erection Status Report"
-          subtitle={`${project.reportDetails?.projectName?.trim() || project.projectName} · Vertical Elevation, Anchor Layout, Sections (S01–S41) & Guy Layers (L01–L16)`}
-          targetRef={sheetRef}
-          documentTitle={docTitle}
-          onClose={onClose}
-        />
+        <ReportSignoffOverrideProvider project={project} enabled={!clientSafe}>
+          <PrintModalHeader
+            title="Overall Vertical Mast Erection Status Report"
+            subtitle={`${project.reportDetails?.projectName?.trim() || project.projectName} · Vertical Elevation, Anchor Layout, Sections (S01–S41) & Guy Layers (L01–L16)`}
+            targetRef={sheetRef}
+            documentTitle={docTitle}
+            onClose={onClose}
+          />
 
-        <div className="report-modal-preview-frame overflow-x-auto bg-slate-100/75 p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">
-          <div
-            ref={sheetRef}
-            style={{ width: `${sheetWidthPx}px`, minWidth: `${sheetWidthPx}px` }}
-            className="report-modal-scroll-area report-printable-card pdf-desktop-layout mx-auto bg-white shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none"
-          >
-            <OverallVerticalMastStatusSheet project={project} clientSafe={clientSafe} />
+          <div className="report-modal-preview-frame overflow-x-auto bg-slate-100/75 p-2 sm:p-4 print:p-0 print:bg-white print:overflow-visible">
+            <div
+              ref={sheetRef}
+              style={{ width: `${sheetWidthPx}px`, minWidth: `${sheetWidthPx}px` }}
+              className="report-modal-scroll-area report-printable-card pdf-desktop-layout mx-auto bg-white shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none"
+            >
+              <OverallVerticalMastStatusSheet project={project} clientSafe={clientSafe} />
+            </div>
           </div>
-        </div>
+        </ReportSignoffOverrideProvider>
       </div>
     </div>,
     document.body

@@ -191,7 +191,7 @@ export const apiClient = {
     blob: Blob;
     filename: string;
     projectId: string;
-    category: 'inspection' | 'daily_log' | 'logo';
+    category: 'inspection' | 'daily_log' | 'logo' | 'signature';
   }) => {
     const formData = new FormData();
     formData.append('file', params.blob, params.filename);

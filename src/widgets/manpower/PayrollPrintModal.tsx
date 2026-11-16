@@ -24,6 +24,10 @@ import {
   ReportSignoffFooter,
   resolveReportDetails,
 } from '@/widgets/report/ReportLetterhead';
+import {
+  ReportSignoffOverrideProvider,
+  useReportSignoffOverrideControls,
+} from '@/widgets/report/ReportSignoffOverrideContext';
 
 export type PayrollSheetData =
   | { kind: 'civil'; snapshot: CivilWorksPayrollSnapshot }
@@ -818,6 +822,23 @@ export function PayrollPrintModal({
   data: PayrollSheetData;
   onClose: () => void;
 }) {
+  return (
+    <ReportSignoffOverrideProvider project={project}>
+      <PayrollPrintModalContent project={project} data={data} onClose={onClose} />
+    </ReportSignoffOverrideProvider>
+  );
+}
+
+function PayrollPrintModalContent({
+  project,
+  data,
+  onClose,
+}: {
+  project: MastProjectState;
+  data: PayrollSheetData;
+  onClose: () => void;
+}) {
+  const signoffCtrl = useReportSignoffOverrideControls();
   const [copied, setCopied] = useState(false);
   const payrollShowSignature = useUiStore((s) => s.payrollShowSignature);
   const setPayrollShowSignature = useUiStore((s) => s.setPayrollShowSignature);
@@ -843,9 +864,14 @@ export function PayrollPrintModal({
 
   const handleCopyText = async () => {
     try {
+      const overriddenPrepared = signoffCtrl?.overrides.prepared?.name;
+      const effectiveProject =
+        overriddenPrepared !== undefined
+          ? { ...project, preparedBy: overriddenPrepared.trim() }
+          : project;
       const text = isCivil
-        ? formatCivilPayrollPlainText(data.snapshot, project)
-        : formatHaulerPayrollPlainText(data.snapshot, project);
+        ? formatCivilPayrollPlainText(data.snapshot, effectiveProject)
+        : formatHaulerPayrollPlainText(data.snapshot, effectiveProject);
       await navigator.clipboard.writeText(text);
       setCopied(true);
       pushToast({

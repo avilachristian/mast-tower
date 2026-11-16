@@ -1272,7 +1272,8 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       const category: MediaCategory =
         categoryRaw === 'inspection' ||
         categoryRaw === 'daily_log' ||
-        categoryRaw === 'logo'
+        categoryRaw === 'logo' ||
+        categoryRaw === 'signature'
           ? categoryRaw
           : 'daily_log';
 

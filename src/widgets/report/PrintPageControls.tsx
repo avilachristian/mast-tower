@@ -1,11 +1,15 @@
 import { useEffect, useState, type ReactNode, type RefObject } from 'react';
-import { AlertCircle, CheckCircle2, Printer, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, PenLine, Printer, X } from 'lucide-react';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import {
   applyPrintPageStyle,
   triggerReportPrint,
   type ReportPrintResult,
 } from './ReportLetterhead';
+import {
+  SignatoriesOverridePanel,
+  useReportSignoffOverrideControls,
+} from './ReportSignoffOverrideContext';
 
 const DEFAULT_PREVIEW_WIDTH_PX = 900;
 
@@ -128,6 +132,8 @@ export function PrintModalHeader({
 }: PrintModalHeaderProps) {
   const { handlePrint, statusResult, isPrinting } =
     useReportPrintFeedback(documentTitle);
+  const signoffCtrl = useReportSignoffOverrideControls();
+  const [signatoriesOpen, setSignatoriesOpen] = useState(false);
 
   const statusPill = statusResult ? (
     <span
@@ -151,9 +157,31 @@ export function PrintModalHeader({
     </span>
   ) : null;
 
+  const signatoriesButton = signoffCtrl ? (
+    <button
+      type="button"
+      onClick={() => setSignatoriesOpen((v) => !v)}
+      className={`inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-9 px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer shadow-2xs transition ${
+        signatoriesOpen || signoffCtrl.hasActiveOverrides
+          ? 'border-sky-500 bg-sky-50 text-sky-800 hover:bg-sky-100'
+          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+      }`}
+      title="Override Prepared By, Verified By, Checked By, or Approved By for this printout"
+    >
+      <PenLine className="w-3.5 h-3.5 shrink-0" />
+      <span>Signatories</span>
+      {signoffCtrl.hasActiveOverrides && (
+        <span className="px-1.5 py-0.5 rounded-full bg-sky-600 text-white text-[9px] font-bold leading-none uppercase">
+          Edited
+        </span>
+      )}
+    </button>
+  ) : null;
+
   const actionButtons = (
     <>
       {statusPill}
+      {signatoriesButton}
       {extraActions}
       <button
         type="button"
@@ -204,6 +232,10 @@ export function PrintModalHeader({
       <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 flex flex-wrap items-center justify-end gap-2 sm:hidden">
         {actionButtons}
       </div>
+
+      {signoffCtrl && signatoriesOpen && (
+        <SignatoriesOverridePanel onClose={() => setSignatoriesOpen(false)} />
+      )}
     </div>
   );
 }

@@ -24,6 +24,8 @@ import {
 import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
+import { resolveMatchingPreparedSignature } from '@/widgets/report/ReportLetterhead';
+import { SignatureUploadControl } from '@/widgets/report/SignatureUploadControl';
 import { VerticalMastElevation2D } from './VerticalMastElevation2D';
 import { VerticalMastInspectionSheet } from './VerticalMastInspectionSheet';
 
@@ -106,6 +108,10 @@ export function VerticalMastInspectionView() {
   const weekdayLabel = getWeekdayName(inspectionDate);
   const passedCount = reportableInspections.filter((i) => i.status === 'Passed').length;
   const photosCount = reportableInspections.filter((i) => Boolean(i.photoDataUrl)).length;
+  const inheritedInspectorSignature = resolveMatchingPreparedSignature(
+    project,
+    meta.inspectorName
+  );
 
   const handleMarkAllPassed = () => {
     for (const item of reportableInspections) {
@@ -344,6 +350,33 @@ export function VerticalMastInspectionView() {
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
                   />
                 </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <SignatureUploadControl
+                  label="Inspector Signature"
+                  value={meta.inspectorSignatureUrl}
+                  inheritedValue={inheritedInspectorSignature}
+                  emptyHint="No signature — left blank"
+                  onChange={(nextUrl) =>
+                    updateMastInspectionMeta(selectedMastTarget.kind, activeId, {
+                      inspectorSignatureUrl: nextUrl,
+                    })
+                  }
+                />
+                <SignatureUploadControl
+                  label="Verified by Signature"
+                  value={meta.verifiedSignatureUrl}
+                  emptyHint={
+                    meta.contractorRep?.trim()
+                      ? 'No signature — left blank'
+                      : 'Enter "Verified by" to include'
+                  }
+                  onChange={(nextUrl) =>
+                    updateMastInspectionMeta(selectedMastTarget.kind, activeId, {
+                      verifiedSignatureUrl: nextUrl,
+                    })
+                  }
+                />
               </div>
               <div>
                 <label className="block font-semibold text-slate-600 mb-1">

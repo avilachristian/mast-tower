@@ -14,10 +14,15 @@ import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
 import {
+  InspectionSignoffRow,
   ReportLetterhead,
   ReportSignoffFooter,
   resolveReportDetails,
 } from '@/widgets/report/ReportLetterhead';
+import {
+  resolveInspectionSignoffs,
+  useReportSignoffOverrides,
+} from '@/widgets/report/ReportSignoffOverrideContext';
 
 export function InspectionReportSheet({
   project,
@@ -38,14 +43,28 @@ export function InspectionReportSheet({
   const reportableInspections = getReportableInspections(report.inspections);
   const spec = FOUNDATION_SPECS[foundation.type];
   const meta = foundation.inspectionMeta ?? {};
-  const reportDetails = resolveReportDetails(project, {
-    reportDate: meta.inspectionDate,
+  const signoffOverrides = useReportSignoffOverrides();
+  const baseDate = meta.inspectionDate?.trim() || project.lastUpdated;
+  const baseDetails = resolveReportDetails(project, {
+    reportDate: baseDate,
     preparedBy: meta.inspectorName,
+    ...(meta.inspectorSignatureUrl?.trim()
+      ? { preparedSignatureUrl: meta.inspectorSignatureUrl.trim() }
+      : {}),
   });
-  const inspectionDate = meta.inspectionDate?.trim() || project.lastUpdated;
-  const inspectorName =
-    meta.inspectorName?.trim() || reportDetails.preparedBy || project.preparedBy;
-  const verifiedBy = meta.contractorRep?.trim() || '';
+  const {
+    inspectionDate,
+    reportDetails,
+    inspectorName,
+    inspectorSignatureUrl,
+    verifiedBy,
+    verifiedSignatureUrl,
+  } = resolveInspectionSignoffs({
+    project,
+    meta,
+    baseDetails,
+    overrides: signoffOverrides,
+  });
   const overallStatus = deriveOverallInspectionStatus(
     meta.overallStatus,
     reportableInspections
@@ -351,38 +370,14 @@ export function InspectionReportSheet({
         </div>
 
         {/* Sign-off Row */}
-        <div
-          className={`grid grid-cols-1 ${
-            verifiedBy
-              ? 'sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3'
-              : 'sm:grid-cols-2 pdf-desktop:grid-cols-2 print:grid-cols-2'
-          } divide-y sm:divide-y-0 sm:divide-x pdf-desktop:divide-y-0 pdf-desktop:divide-x print:divide-y-0 print:divide-x divide-slate-900 text-[11px]`}
-        >
-          <div className="p-2.5">
-            <div className="text-[10px] font-bold uppercase text-slate-500">
-              Inspected By (Site Engineer)
-            </div>
-            <div className="mt-4 pt-1 border-t border-slate-400 font-semibold text-slate-900">
-              {inspectorName}
-            </div>
-          </div>
-          {verifiedBy && (
-            <div className="p-2.5">
-              <div className="text-[10px] font-bold uppercase text-slate-500">
-                Verified By
-              </div>
-              <div className="mt-4 pt-1 border-t border-slate-400 font-semibold text-slate-900">
-                {verifiedBy}
-              </div>
-            </div>
-          )}
-          <div className="p-2.5">
-            <div className="text-[10px] font-bold uppercase text-slate-500">Date Inspected</div>
-            <div className="mt-4 pt-1 border-t border-slate-400 font-semibold text-slate-900">
-              {formatDateWithWeekday(inspectionDate)}
-            </div>
-          </div>
-        </div>
+        <InspectionSignoffRow
+          inspectorLabel="Inspected By (Site Engineer)"
+          inspectorName={inspectorName}
+          inspectorSignatureUrl={inspectorSignatureUrl}
+          verifiedBy={verifiedBy}
+          verifiedSignatureUrl={verifiedSignatureUrl}
+          inspectionDate={inspectionDate}
+        />
       </div>
 
       {/* Report Signoff & Notes Footer */}

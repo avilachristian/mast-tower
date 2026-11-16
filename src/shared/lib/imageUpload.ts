@@ -146,7 +146,7 @@ export function estimateInlineImagesUsage(
 export async function uploadOrStageProjectImage(params: {
   file: File;
   projectId: string;
-  category: 'inspection' | 'daily_log' | 'logo';
+  category: 'inspection' | 'daily_log' | 'logo' | 'signature';
   maxDimension?: number;
   quality?: number;
 }): Promise<UploadedImageResult | null> {
@@ -167,7 +167,7 @@ export async function uploadOrStageProjectImage(params: {
   }
 
   const dataUrl =
-    category === 'logo'
+    category === 'logo' || category === 'signature'
       ? await resizeLogoFileToDataUrl(file)
       : await readAndResizeImageFile(file, maxDimension, quality);
   const blob = await dataUrlToBlob(dataUrl);
@@ -195,7 +195,7 @@ export async function uploadOrStageProjectImage(params: {
 
   feedback.pushToast({
     tone: 'info',
-    title: 'Photo Saved Locally',
+    title: category === 'signature' ? 'Signature Saved Locally' : 'Photo Saved Locally',
     message: `${file.name} (${formatStorageBytes(blob.size)}) queued for R2 upload on next Sync.`,
     durationMs: 2600,
   });

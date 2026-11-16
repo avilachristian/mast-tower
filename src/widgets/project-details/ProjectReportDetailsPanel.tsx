@@ -4,6 +4,7 @@ import { createDefaultReportLogos, resolveReportLogos } from '@/shared/assets/de
 import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
 import { useProjectStore } from '@/shared/state/projectStore';
 import { ReportLetterhead } from '@/widgets/report/ReportLetterhead';
+import { SignatureUploadControl } from '@/widgets/report/SignatureUploadControl';
 
 type LogoPosition = 'left' | 'center' | 'right';
 
@@ -410,6 +411,16 @@ export function ProjectReportDetailsPanel({
                   className="w-full h-8 px-2.5 border border-slate-300 rounded bg-white"
                 />
               </label>
+              <div className="sm:col-span-2 pb-1">
+                <SignatureUploadControl
+                  label="Prepared By Signature"
+                  value={details.preparedSignatureUrl}
+                  emptyHint="No signature — line remains blank"
+                  onChange={(nextUrl) =>
+                    update({ preparedSignatureUrl: nextUrl })
+                  }
+                />
+              </div>
 
               <label className="block">
                 <span className="block text-[11px] font-semibold text-slate-600 mb-1">
@@ -435,6 +446,16 @@ export function ProjectReportDetailsPanel({
                   className="w-full h-8 px-2.5 border border-slate-300 rounded bg-white"
                 />
               </label>
+              <div className="sm:col-span-2 pb-1">
+                <SignatureUploadControl
+                  label="Checked / Reviewed By Signature"
+                  value={details.checkedSignatureUrl}
+                  emptyHint="No signature — line remains blank"
+                  onChange={(nextUrl) =>
+                    update({ checkedSignatureUrl: nextUrl })
+                  }
+                />
+              </div>
 
               <label className="block">
                 <span className="block text-[11px] font-semibold text-slate-600 mb-1">
@@ -460,6 +481,21 @@ export function ProjectReportDetailsPanel({
                   className="w-full h-8 px-2.5 border border-slate-300 rounded bg-white"
                 />
               </label>
+              <div className="sm:col-span-2 pb-1">
+                <SignatureUploadControl
+                  label="Approved By Signature"
+                  value={details.approvedSignatureUrl}
+                  emptyHint="No signature — line remains blank"
+                  onChange={(nextUrl) =>
+                    update({ approvedSignatureUrl: nextUrl })
+                  }
+                />
+              </div>
+
+              <div className="sm:col-span-2 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-[10.5px] text-slate-500">
+                Inspection-specific <span className="font-semibold text-slate-700">Inspected By</span> &amp;{' '}
+                <span className="font-semibold text-slate-700">Verified By</span> signatures can be uploaded directly inside the Foundation &amp; Vertical Mast Inspection tabs.
+              </div>
 
               <label className="sm:col-span-2 block">
                 <span className="block text-[11px] font-semibold text-slate-600 mb-1">

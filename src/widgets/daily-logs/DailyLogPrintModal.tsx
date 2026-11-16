@@ -21,8 +21,13 @@ import { PrintModalHeader, usePrintPageSetup } from '@/widgets/report/PrintPageC
 import {
   ReportLetterhead,
   ReportSignoffFooter,
+  resolveMatchingPreparedSignature,
   resolveReportDetails,
 } from '@/widgets/report/ReportLetterhead';
+import {
+  ReportSignoffOverrideProvider,
+  useReportSignoffOverrideControls,
+} from '@/widgets/report/ReportSignoffOverrideContext';
 
 export function DailyLogPrintModal({
   project,
@@ -35,6 +40,41 @@ export function DailyLogPrintModal({
   onSelectLog: (id: string) => void;
   onClose: () => void;
 }) {
+  const preparedBy =
+    log.preparedBy?.trim() ||
+    project.reportDetails?.preparedBy?.trim() ||
+    project.preparedBy;
+
+  return (
+    <ReportSignoffOverrideProvider
+      project={project}
+      defaults={{
+        preparedBy,
+        preparedSignatureUrl: resolveMatchingPreparedSignature(project, preparedBy),
+      }}
+    >
+      <DailyLogPrintModalContent
+        project={project}
+        log={log}
+        onSelectLog={onSelectLog}
+        onClose={onClose}
+      />
+    </ReportSignoffOverrideProvider>
+  );
+}
+
+function DailyLogPrintModalContent({
+  project,
+  log,
+  onSelectLog,
+  onClose,
+}: {
+  project: MastProjectState;
+  log: DailyActivityLogEntry;
+  onSelectLog: (id: string) => void;
+  onClose: () => void;
+}) {
+  const signoffCtrl = useReportSignoffOverrideControls();
   const [copied, setCopied] = useState(false);
   const sheetRef = useRef<HTMLDivElement>(null);
 
@@ -120,7 +160,13 @@ export function DailyLogPrintModal({
 
   const handleCopyText = async () => {
     try {
-      const text = formatDailyLogPlainText(log, project);
+      const overriddenName = signoffCtrl?.overrides.prepared?.name;
+      const effectivePrepared =
+        overriddenName !== undefined ? overriddenName.trim() : preparedBy;
+      const text = formatDailyLogPlainText(
+        { ...log, preparedBy: effectivePrepared },
+        { ...project, preparedBy: effectivePrepared }
+      );
       await navigator.clipboard.writeText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);

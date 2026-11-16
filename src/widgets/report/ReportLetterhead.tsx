@@ -1,6 +1,10 @@
 import { formatDateWithWeekday } from '@/entities/project/calculations';
 import type { MastProjectState, ReportDetailsSpec } from '@/entities/project/types';
 import { resolveReportLogos } from '@/shared/assets/defaultLogos';
+import {
+  applySignoffOverridesToDetails,
+  useReportSignoffOverrides,
+} from './ReportSignoffOverrideContext';
 
 const PRINT_PAGE_STYLE_ID = 'mast-dynamic-print-page-style';
 
@@ -160,21 +164,46 @@ export function triggerReportPrint(
   }
 }
 
+export function resolveMatchingPreparedSignature(
+  project: Pick<MastProjectState, 'preparedBy' | 'reportDetails'>,
+  candidateName?: string
+): string | undefined {
+  const sigUrl = project.reportDetails?.preparedSignatureUrl?.trim();
+  if (!sigUrl) return undefined;
+  const candidate = candidateName?.trim();
+  if (!candidate) return sigUrl;
+  const basePreparedBy =
+    project.reportDetails?.preparedBy?.trim() || project.preparedBy?.trim() || '';
+  return basePreparedBy && candidate.toLowerCase() === basePreparedBy.toLowerCase()
+    ? sigUrl
+    : undefined;
+}
+
 export function resolveReportDetails(
   project: Pick<
     MastProjectState,
     'projectName' | 'location' | 'preparedBy' | 'contractor' | 'lastUpdated' | 'reportDetails'
   >,
-  overrides?: { reportDate?: string; preparedBy?: string }
+  overrides?: {
+    reportDate?: string;
+    preparedBy?: string;
+    preparedSignatureUrl?: string;
+  }
 ): ReportDetailsSpec {
   const base = project.reportDetails ?? {};
+  const basePreparedBy = base.preparedBy?.trim() || project.preparedBy?.trim() || '';
+  const overridePreparedBy = overrides?.preparedBy?.trim() || '';
+
   return {
     ...base,
     projectName: base.projectName?.trim() || project.projectName,
     projectLocation: base.projectLocation?.trim() || project.location,
     contractor: base.contractor?.trim() || project.contractor,
-    preparedBy:
-      overrides?.preparedBy?.trim() || base.preparedBy?.trim() || project.preparedBy,
+    preparedBy: overridePreparedBy || basePreparedBy,
+    preparedSignatureUrl:
+      overrides?.preparedSignatureUrl !== undefined
+        ? overrides.preparedSignatureUrl.trim() || undefined
+        : resolveMatchingPreparedSignature(project, overridePreparedBy),
     reportDate:
       overrides?.reportDate?.trim() || base.reportDate?.trim() || project.lastUpdated,
     logos: resolveReportLogos(base.logos),
@@ -200,35 +229,42 @@ export function ReportLetterhead({
   fallbackContractor?: string;
   fallbackDate?: string;
 }) {
-  const logos = resolveReportLogos(details?.logos);
+  const signoffOverrides = useReportSignoffOverrides();
+  const effectiveDetails =
+    applySignoffOverridesToDetails(details, signoffOverrides) ?? details;
+  const logos = resolveReportLogos(effectiveDetails?.logos);
   const hasAnyLogo = Boolean(
     logos?.left?.dataUrl || logos?.center?.dataUrl || logos?.right?.dataUrl
   );
-  const logoHeight = Math.min(110, Math.max(28, details?.logoHeightPx ?? 52));
-  const projectName = details?.projectName?.trim() || fallbackProjectName?.trim() || '';
+  const logoHeight = Math.min(110, Math.max(28, effectiveDetails?.logoHeightPx ?? 52));
+  const projectName =
+    effectiveDetails?.projectName?.trim() || fallbackProjectName?.trim() || '';
   const projectLocation =
-    details?.projectLocation?.trim() || fallbackLocation?.trim() || '';
-  const contractor = details?.contractor?.trim() || fallbackContractor?.trim() || '';
-  const mainTitle = details?.documentTitle?.trim() || defaultTitle;
+    effectiveDetails?.projectLocation?.trim() || fallbackLocation?.trim() || '';
+  const contractor =
+    effectiveDetails?.contractor?.trim() || fallbackContractor?.trim() || '';
+  const mainTitle = effectiveDetails?.documentTitle?.trim() || defaultTitle;
   const rawDate =
-    details?.reportDate?.trim() || fallbackDate?.trim() || new Date().toISOString().slice(0, 10);
+    effectiveDetails?.reportDate?.trim() ||
+    fallbackDate?.trim() ||
+    new Date().toISOString().slice(0, 10);
   const displayDate = formatDateWithWeekday(rawDate);
 
   const metaItems: { label: string; value: string }[] = [
     ...(projectName ? [{ label: 'Project Name', value: projectName }] : []),
-    ...(details?.clientName?.trim()
-      ? [{ label: 'Client / Owner', value: details.clientName.trim() }]
+    ...(effectiveDetails?.clientName?.trim()
+      ? [{ label: 'Client / Owner', value: effectiveDetails.clientName.trim() }]
       : []),
     ...(contractor ? [{ label: 'Contractor', value: contractor }] : []),
     ...(projectLocation ? [{ label: 'Location', value: projectLocation }] : []),
-    ...(details?.referenceNo?.trim()
-      ? [{ label: 'Reference / Dwg No.', value: details.referenceNo.trim() }]
+    ...(effectiveDetails?.referenceNo?.trim()
+      ? [{ label: 'Reference / Dwg No.', value: effectiveDetails.referenceNo.trim() }]
       : []),
-    ...(details?.revision?.trim()
-      ? [{ label: 'Revision', value: details.revision.trim() }]
+    ...(effectiveDetails?.revision?.trim()
+      ? [{ label: 'Revision', value: effectiveDetails.revision.trim() }]
       : []),
-    ...(details?.checkedBy?.trim()
-      ? [{ label: 'Checked By', value: details.checkedBy.trim() }]
+    ...(effectiveDetails?.checkedBy?.trim()
+      ? [{ label: 'Checked By', value: effectiveDetails.checkedBy.trim() }]
       : []),
   ];
 
@@ -343,24 +379,37 @@ export function ReportSignoffFooter({
   fallbackPreparedBy?: string;
   fallbackDate?: string;
 }) {
-  const hasNotes = Boolean(details?.notes?.trim());
+  const signoffOverrides = useReportSignoffOverrides();
+  const effectiveDetails = applySignoffOverridesToDetails(
+    details,
+    signoffOverrides,
+    fallbackPreparedBy
+  );
+  const hasNotes = Boolean(effectiveDetails?.notes?.trim());
+  const resolvedPreparedName =
+    signoffOverrides?.prepared?.name !== undefined
+      ? effectiveDetails?.preparedBy?.trim()
+      : effectiveDetails?.preparedBy?.trim() || fallbackPreparedBy?.trim();
   const signatories = [
     {
       role: 'Prepared By',
-      name: details?.preparedBy?.trim() || fallbackPreparedBy?.trim(),
-      title: details?.preparedTitle?.trim(),
+      name: resolvedPreparedName,
+      title: effectiveDetails?.preparedTitle?.trim(),
+      signatureUrl: effectiveDetails?.preparedSignatureUrl?.trim() || undefined,
     },
     {
       role: 'Checked / Reviewed By',
-      name: details?.checkedBy?.trim(),
-      title: details?.checkedTitle?.trim(),
+      name: effectiveDetails?.checkedBy?.trim(),
+      title: effectiveDetails?.checkedTitle?.trim(),
+      signatureUrl: effectiveDetails?.checkedSignatureUrl?.trim() || undefined,
     },
     {
       role: 'Approved By',
-      name: details?.approvedBy?.trim(),
-      title: details?.approvedTitle?.trim(),
+      name: effectiveDetails?.approvedBy?.trim(),
+      title: effectiveDetails?.approvedTitle?.trim(),
+      signatureUrl: effectiveDetails?.approvedSignatureUrl?.trim() || undefined,
     },
-  ].filter((sig) => Boolean(sig.name));
+  ].filter((sig) => Boolean(sig.name || sig.signatureUrl));
 
   if (!hasNotes && signatories.length === 0) {
     return null;
@@ -390,9 +439,18 @@ export function ReportSignoffFooter({
       {signatories.length > 0 && (
         <div className={`grid ${gridColsClass} gap-6 pt-2 text-[10.5px]`}>
           {signatories.map((sig) => (
-            <div key={sig.role} className="pt-1">
-              <div className="text-[9px] uppercase tracking-wider font-semibold text-slate-400 mb-5">
+            <div key={sig.role} className="pt-1 flex flex-col">
+              <div className="text-[9px] uppercase tracking-wider font-semibold text-slate-400 mb-1">
                 {sig.role}
+              </div>
+              <div className="h-11 flex items-end pb-1">
+                {sig.signatureUrl ? (
+                  <img
+                    src={sig.signatureUrl}
+                    alt={`${sig.role} signature`}
+                    className="max-h-10 max-w-[160px] w-auto object-contain"
+                  />
+                ) : null}
               </div>
               <div className="border-t border-slate-400 pt-1">
                 <div className="font-bold text-slate-900 min-h-[15px]">{sig.name}</div>
@@ -407,6 +465,83 @@ export function ReportSignoffFooter({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Flush boxed sign-off strip shared by Foundation and Vertical Mast Inspection sheets.
+ * Omits Verified By when blank and renders blank space above the line when no signature image is uploaded.
+ */
+export function InspectionSignoffRow({
+  inspectorLabel,
+  inspectorName,
+  inspectorSignatureUrl,
+  verifiedBy,
+  verifiedSignatureUrl,
+  inspectionDate,
+}: {
+  inspectorLabel: string;
+  inspectorName: string;
+  inspectorSignatureUrl?: string;
+  verifiedBy?: string;
+  verifiedSignatureUrl?: string;
+  inspectionDate: string;
+}) {
+  const trimmedVerified = verifiedBy?.trim() || '';
+  return (
+    <div
+      className={`grid grid-cols-1 ${
+        trimmedVerified
+          ? 'sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3'
+          : 'sm:grid-cols-2 pdf-desktop:grid-cols-2 print:grid-cols-2'
+      } divide-y sm:divide-y-0 sm:divide-x pdf-desktop:divide-y-0 pdf-desktop:divide-x print:divide-y-0 print:divide-x divide-slate-900 text-[11px]`}
+    >
+      <div className="p-2.5 flex flex-col">
+        <div className="text-[10px] font-bold uppercase text-slate-500">
+          {inspectorLabel}
+        </div>
+        <div className="h-10 flex items-end pb-0.5 mt-1">
+          {inspectorSignatureUrl ? (
+            <img
+              src={inspectorSignatureUrl}
+              alt="Inspector signature"
+              className="max-h-9 max-w-[160px] w-auto object-contain"
+            />
+          ) : null}
+        </div>
+        <div className="pt-1 border-t border-slate-400 font-semibold text-slate-900">
+          {inspectorName || '—'}
+        </div>
+      </div>
+      {trimmedVerified && (
+        <div className="p-2.5 flex flex-col">
+          <div className="text-[10px] font-bold uppercase text-slate-500">
+            Verified By
+          </div>
+          <div className="h-10 flex items-end pb-0.5 mt-1">
+            {verifiedSignatureUrl ? (
+              <img
+                src={verifiedSignatureUrl}
+                alt="Verifier signature"
+                className="max-h-9 max-w-[160px] w-auto object-contain"
+              />
+            ) : null}
+          </div>
+          <div className="pt-1 border-t border-slate-400 font-semibold text-slate-900">
+            {trimmedVerified}
+          </div>
+        </div>
+      )}
+      <div className="p-2.5 flex flex-col">
+        <div className="text-[10px] font-bold uppercase text-slate-500">
+          Date Inspected
+        </div>
+        <div className="h-10 mt-1" />
+        <div className="pt-1 border-t border-slate-400 font-semibold text-slate-900">
+          {formatDateWithWeekday(inspectionDate)}
+        </div>
+      </div>
     </div>
   );
 }
