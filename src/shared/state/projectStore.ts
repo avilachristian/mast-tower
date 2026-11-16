@@ -793,6 +793,8 @@ interface ProjectStore {
   resetCleanBaseline: () => void;
   importProjectJson: (jsonText: string) => void;
   exportProjectJson: () => string;
+  importWorkspaceJson: (jsonText: string) => { importedCount: number; totalCount: number };
+  exportWorkspaceJson: () => string;
 
   // Vertical Mast Tower phase actions
   updateTowerSectionStatus: (
@@ -2123,6 +2125,61 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
     },
 
     exportProjectJson: () => JSON.stringify(get().project, null, 2),
+
+    exportWorkspaceJson: () => {
+      const s = get();
+      const payload = {
+        app: 'mast-tower-report-generator',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        activeProjectId: s.activeProjectId,
+        projects: s.projects,
+      };
+      return JSON.stringify(payload, null, 2);
+    },
+
+    importWorkspaceJson: (jsonText: string) => {
+      const parsed = JSON.parse(jsonText);
+      const rawProjects = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.projects)
+          ? parsed.projects
+          : null;
+      if (!rawProjects || rawProjects.length === 0) {
+        throw new Error('Invalid workspace archive: No projects found in JSON file.');
+      }
+      const s = get();
+      const validated: SavedProjectRecord[] = [];
+
+      for (const p of rawProjects) {
+        if (!p || typeof p !== 'object' || !p.state) continue;
+        if (!Array.isArray(p.state.foundations) || p.state.foundations.length !== 13) continue;
+        const normalized = normalizeProjectRecord(p as SavedProjectRecord);
+        validated.push(normalized);
+      }
+
+      if (validated.length === 0) {
+        throw new Error('No valid Mast Tower projects (13 foundations) found in archive.');
+      }
+
+      const mergedMap = new Map<string, SavedProjectRecord>();
+      for (const p of s.projects) mergedMap.set(p.id, p);
+      for (const p of validated) mergedMap.set(p.id, { ...p, syncStatus: 'pending' });
+
+      const newProjects = Array.from(mergedMap.values());
+      const nextActiveId = validated[0].id;
+      const nextActiveProject = validated[0].state;
+
+      persistWorkspace(nextActiveId, newProjects);
+      set({
+        projects: newProjects,
+        activeProjectId: nextActiveId,
+        project: nextActiveProject,
+        selectedFoundationId: nextActiveProject.foundations[0].id,
+      });
+
+      return { importedCount: validated.length, totalCount: newProjects.length };
+    },
 
     updateTowerSectionStatus: (id, status) => {
       const curr = get();

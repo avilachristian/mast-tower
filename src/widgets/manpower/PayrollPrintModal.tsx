@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Download } from 'lucide-react';
 import { formatDateWithWeekday } from '@/entities/project/calculations';
+import {
+  downloadCivilWorksPayrollCsv,
+  downloadHaulerPayrollCsv,
+} from '@/entities/project/payrollCsvExport';
 import { resolveHaulingRateConfig } from '@/entities/project/haulingInventory';
 import {
   buildAttendanceDayColumns,
@@ -295,7 +299,7 @@ export function PayrollReportSheet({
                       <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9.5px] print:text-[8.5px] leading-tight">
                         <th
                           rowSpan={3}
-                          className="px-1 py-1 border-r border-slate-900 w-6 text-center align-middle"
+                          className="px-1 py-1 border-r border-slate-900 w-5 text-center align-middle"
                         >
                           #
                         </th>
@@ -313,37 +317,37 @@ export function PayrollReportSheet({
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-right align-middle whitespace-nowrap"
                         >
-                          Daily Rate (₱)
+                          Rate (₱)
                         </th>
                         <th
                           colSpan={civilMatrix.dayCols.length}
-                          className="px-1 py-1 border-r border-slate-900 text-center"
+                          className="px-0.5 py-1 border-r border-slate-900 text-center"
                         >
                           Attendance
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-1 py-1 border-r border-slate-900 text-center align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-center align-middle whitespace-nowrap"
                         >
-                          Days Present
+                          Days
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-right align-middle whitespace-nowrap"
                         >
                           Gross Pay (₱)
                         </th>
                         <th
                           rowSpan={3}
-                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-right align-middle whitespace-nowrap"
                         >
                           Deduction (₱)
                         </th>
                         <th
                           rowSpan={3}
-                          className={`px-1.5 py-1 text-right align-middle ${
+                          className={`px-1.5 py-1 text-right align-middle whitespace-nowrap ${
                             showSignature ? 'border-r border-slate-900' : ''
                           }`}
                         >
@@ -384,10 +388,10 @@ export function PayrollReportSheet({
                   ) : civilMatrix.mode === 'weeks' ||
                     civilMatrix.mode === 'months' ? (
                     <>
-                      <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9.5px] print:text-[8.5px] leading-tight">
+                      <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9px] print:text-[8px] leading-tight">
                         <th
                           rowSpan={2}
-                          className="px-1 py-1 border-r border-slate-900 w-6 text-center align-middle"
+                          className="px-1 py-1 border-r border-slate-900 w-5 text-center align-middle"
                         >
                           #
                         </th>
@@ -405,13 +409,13 @@ export function PayrollReportSheet({
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-right align-middle whitespace-nowrap"
                         >
-                          Daily Rate (₱)
+                          Rate (₱)
                         </th>
                         <th
                           colSpan={civilMatrix.buckets.length}
-                          className="px-1.5 py-1 border-r border-slate-900 text-center"
+                          className="px-1 py-1 border-r border-slate-900 text-center"
                         >
                           {civilMatrix.mode === 'weeks'
                             ? 'Attendance (Days Present per Week)'
@@ -419,25 +423,25 @@ export function PayrollReportSheet({
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-1 py-1 border-r border-slate-900 text-center align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-center align-middle whitespace-nowrap"
                         >
-                          Days Present
+                          Days
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-right align-middle whitespace-nowrap"
                         >
                           Gross Pay (₱)
                         </th>
                         <th
                           rowSpan={2}
-                          className="px-1.5 py-1 border-r border-slate-900 text-right align-middle"
+                          className="px-1 py-1 border-r border-slate-900 text-right align-middle whitespace-nowrap"
                         >
                           Deduction (₱)
                         </th>
                         <th
                           rowSpan={2}
-                          className={`px-1.5 py-1 text-right align-middle ${
+                          className={`px-1.5 py-1 text-right align-middle whitespace-nowrap ${
                             showSignature ? 'border-r border-slate-900' : ''
                           }`}
                         >
@@ -467,29 +471,29 @@ export function PayrollReportSheet({
                       </tr>
                     </>
                   ) : (
-                    <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9.5px] print:text-[8.5px] leading-tight">
-                      <th className="px-1 py-1.5 border-r border-slate-900 w-6 text-center">
+                    <tr className="bg-slate-100 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9px] print:text-[8px] leading-tight">
+                      <th className="px-1 py-1.5 border-r border-slate-900 w-5 text-center">
                         #
                       </th>
                       <th className="px-1.5 py-1.5 border-r border-slate-900">Name</th>
                       <th className="px-1.5 py-1.5 border-r border-slate-900">Position</th>
-                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right">
-                        Daily Rate (₱)
+                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
+                        Rate (₱)
                       </th>
                       <th className="px-1.5 py-1.5 border-r border-slate-900 text-center">
                         Attendance Span
                       </th>
-                      <th className="px-1 py-1.5 border-r border-slate-900 text-center">
-                        Days Present
+                      <th className="px-1 py-1.5 border-r border-slate-900 text-center whitespace-nowrap">
+                        Days
                       </th>
-                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right">
+                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
                         Gross Pay (₱)
                       </th>
-                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right">
+                      <th className="px-1.5 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
                         Deduction (₱)
                       </th>
                       <th
-                        className={`px-1.5 py-1.5 text-right ${
+                        className={`px-1.5 py-1.5 text-right whitespace-nowrap ${
                           showSignature ? 'border-r border-slate-900' : ''
                         }`}
                       >
@@ -613,7 +617,11 @@ export function PayrollReportSheet({
                           >
                             ₱{net.toLocaleString()}
                           </td>
-                          {showSignature && <td className="px-1 py-1.5" />}
+                          {showSignature && (
+                            <td className="px-1 py-1 text-center align-middle">
+                              <div className="w-14 mx-auto border-b border-slate-400 mt-2 print:mt-1.5" />
+                            </td>
+                          )}
                         </tr>
                       );
                     })
@@ -702,31 +710,31 @@ export function PayrollReportSheet({
           <div className="overflow-x-auto print:overflow-visible">
             <table className="w-full text-left text-[10.5px] print:text-[9.5px] border-collapse">
               <thead>
-                <tr className="bg-slate-50 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9.5px] print:text-[8.5px] leading-tight">
+                <tr className="bg-slate-50 text-slate-800 border-b border-slate-900 font-bold uppercase text-[9px] print:text-[8px] leading-tight">
                   <th className="px-1 py-1.5 border-r border-slate-900 w-5 text-center">#</th>
-                  <th className="px-1 py-1.5 border-r border-slate-900">Hauler Name</th>
-                  <th className="px-1 py-1.5 border-r border-slate-900 text-center">Days</th>
-                  <th className="px-1 py-1.5 border-r border-slate-900 text-center">Trips</th>
-                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
+                  <th className="px-1.5 py-1.5 border-r border-slate-900">Hauler Name</th>
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-center whitespace-nowrap">Days</th>
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-center whitespace-nowrap">Trips</th>
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
                     Hauled (kg)
                   </th>
-                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
-                    Prior Excess
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
+                    Prior Ex.
                   </th>
-                  <th className="px-1 py-1.5 border-r border-slate-900 text-center">
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-center whitespace-nowrap">
                     Credits ({formatNum(creditBlockKg)}kg)
                   </th>
-                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
-                    End Excess
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
+                    End Ex.
                   </th>
-                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
-                    Period Earned
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
+                    Gross (₱)
                   </th>
-                  <th className="px-1 py-1.5 border-r border-slate-900 text-right">
+                  <th className="px-1 py-1.5 border-r border-slate-900 text-right whitespace-nowrap">
                     Deduction (₱)
                   </th>
                   <th
-                    className={`px-1 py-1.5 text-right ${
+                    className={`px-1.5 py-1.5 text-right whitespace-nowrap ${
                       showSignature ? 'border-r border-slate-900' : ''
                     }`}
                   >
@@ -796,7 +804,11 @@ export function PayrollReportSheet({
                         >
                           ₱{item.payoutReleasedPhp.toLocaleString()}
                         </td>
-                        {showSignature && <td className="px-1 py-1.5" />}
+                        {showSignature && (
+                          <td className="px-1 py-1 text-center align-middle">
+                            <div className="w-14 mx-auto border-b border-slate-400 mt-2 print:mt-1.5" />
+                          </td>
+                        )}
                       </tr>
                     );
                   })
@@ -990,6 +1002,20 @@ function PayrollPrintModalContent({
                   <Copy className="w-3.5 h-3.5" />
                 )}
                 <span>{copied ? 'Copied' : 'Copy Text'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (data.kind === 'civil') {
+                    downloadCivilWorksPayrollCsv(project, data.snapshot);
+                  } else {
+                    downloadHaulerPayrollCsv(project, data.snapshot);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-9 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer shadow-2xs"
+              >
+                <Download className="w-3.5 h-3.5 text-slate-600" />
+                <span>Export CSV</span>
               </button>
             </>
           }

@@ -23,6 +23,7 @@ import {
 import { computeProjectMetrics, formatDateWithWeekday } from '@/entities/project/calculations';
 import type { ProjectSyncStatus, ProjectType, SavedProjectRecord } from '@/entities/project/types';
 import { resolveReportLogos } from '@/shared/assets/defaultLogos';
+import { todayLocalIso } from '@/shared/lib/dateUtils';
 import {
   computeVerticalMastMetrics,
   type VerticalMastMetrics,
@@ -55,6 +56,8 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
   const duplicateProject = useProjectStore((s) => s.duplicateProject);
   const deleteProject = useProjectStore((s) => s.deleteProject);
   const importProjectAsNew = useProjectStore((s) => s.importProjectAsNew);
+  const importWorkspaceJson = useProjectStore((s) => s.importWorkspaceJson);
+  const exportWorkspaceJson = useProjectStore((s) => s.exportWorkspaceJson);
   const showAlert = useFeedbackStore((s) => s.showAlert);
   const requestConfirm = useFeedbackStore((s) => s.requestConfirm);
 
@@ -190,11 +193,51 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportWorkspace = () => {
+    const json = exportWorkspaceJson();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mast-tower-workspace-backup-${todayLocalIso()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const text = await file.text();
+      let isMulti = false;
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed?.projects) || (Array.isArray(parsed) && parsed.length > 1)) {
+          isMulti = true;
+        }
+      } catch {
+        // syntax error will throw in store import
+      }
+
+      if (isMulti) {
+        const confirmed = await requestConfirm({
+          title: 'Restore Workspace Archive',
+          message:
+            'This backup file contains multiple projects. Do you want to restore and merge these projects into your local workspace?',
+          confirmLabel: 'Restore All Projects',
+          tone: 'info',
+        });
+        if (!confirmed) return;
+        const res = importWorkspaceJson(text);
+        await showAlert({
+          tone: 'success',
+          title: 'Workspace Restored',
+          message: `Successfully imported ${res.importedCount} projects into your workspace.`,
+        });
+        onClose();
+        return;
+      }
+
       importProjectAsNew(text);
       onClose();
     } catch (err) {
@@ -255,6 +298,17 @@ export function ProjectLauncherView({ onClose }: { onClose: () => void }) {
               onChange={handleImportFile}
               className="hidden"
             />
+
+            <button
+              type="button"
+              onClick={handleExportWorkspace}
+              title="Export all projects as a backup archive"
+              className="inline-flex items-center gap-1.5 min-h-10 sm:min-h-0 px-3 py-2 sm:py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
+            >
+              <Download className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-slate-500" />
+              <span className="sm:hidden">Backup All</span>
+              <span className="hidden sm:inline">Backup All Projects</span>
+            </button>
 
             <button
               type="button"

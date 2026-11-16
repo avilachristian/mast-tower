@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  Download,
   FileText,
   History,
   Plus,
@@ -14,6 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import { formatDateWithWeekday } from '@/entities/project/calculations';
+import { downloadCivilWorksPayrollCsv } from '@/entities/project/payrollCsvExport';
 import {
   addDaysIso,
   computeCivilWorksPayrollPreview,
@@ -690,6 +692,15 @@ export function CivilWorksPayrollPanel({
           </button>
           <button
             type="button"
+            onClick={() => downloadCivilWorksPayrollCsv(project, buildDraftSnapshot('generated'))}
+            disabled={preview.totalWorkersWithAttendance === 0}
+            className="inline-flex items-center gap-1.5 min-h-9 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50 text-xs font-semibold text-slate-700 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export CSV</span>
+          </button>
+          <button
+            type="button"
             onClick={() => handleSaveSnapshot('generated')}
             disabled={preview.totalWorkersWithAttendance === 0}
             className="inline-flex items-center gap-1.5 min-h-9 px-3.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 disabled:bg-slate-300 text-white text-xs font-bold cursor-pointer shadow-2xs"
@@ -802,6 +813,15 @@ export function CivilWorksPayrollPanel({
                   >
                     <Printer className="w-3 h-3" />
                     <span>Print</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadCivilWorksPayrollCsv(project, rec)}
+                    aria-label={`Export CSV ${rec.title}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-semibold text-slate-700 cursor-pointer"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>CSV</span>
                   </button>
                   <button
                     type="button"
