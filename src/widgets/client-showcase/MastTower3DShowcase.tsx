@@ -3,7 +3,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { RotateCcw, Eye, EyeOff, Box, AlertTriangle } from 'lucide-react';
+import { RotateCcw, Eye, EyeOff, Box, AlertTriangle, Download } from 'lucide-react';
+import {
+  compositeWebglSnapshotWithLegend,
+  sanitizeDiagramFilename,
+  triggerDataUrlDownload,
+  type CanvasLegendGroup,
+} from '@/shared/lib/diagramExport';
+import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { STATUS_META } from '@/entities/project/mast2Baseline';
 import {
   ANCHOR_GUY_STAGE_META,
@@ -166,6 +173,7 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [webglError, setWebglError] = useState<string | null>(null);
   const [hoverLabel, setHoverLabel] = useState<string | null>(null);
+  const pushToast = useFeedbackStore((s) => s.pushToast);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const foundationsRef = useRef(foundations);
@@ -190,6 +198,10 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
     rebuildDynamicData: () => void;
     syncAppearances: () => void;
     tweenCamera: (preset: CameraPreset) => void;
+    captureSnapshotDataUrl: (
+      legendGroups: CanvasLegendGroup[],
+      headerLabel?: string
+    ) => string | null;
   } | null>(null);
 
   useEffect(() => {
@@ -510,6 +522,35 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
       requestRender();
     };
 
+    const captureSnapshotDataUrl = (
+      legendGroups: CanvasLegendGroup[],
+      headerLabel?: string
+    ): string | null => {
+      if (disposed || !container) return null;
+      const w = Math.max(320, container.clientWidth);
+      const h = Math.max(460, container.clientHeight);
+      const prevPixelRatio = renderer.getPixelRatio();
+      const exportPixelRatio = Math.max(2, prevPixelRatio);
+      try {
+        if (exportPixelRatio !== prevPixelRatio) {
+          renderer.setPixelRatio(exportPixelRatio);
+          renderer.setSize(w, h, false);
+        }
+        renderer.render(scene, camera);
+        return compositeWebglSnapshotWithLegend(
+          renderer.domElement,
+          legendGroups,
+          headerLabel
+        );
+      } finally {
+        if (exportPixelRatio !== prevPixelRatio) {
+          renderer.setPixelRatio(prevPixelRatio);
+          renderer.setSize(w, h, false);
+        }
+        renderer.render(scene, camera);
+      }
+    };
+
     sceneHandlesRef.current = {
       foundationHandles,
       sectionHandles,
@@ -517,6 +558,7 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
       rebuildDynamicData,
       syncAppearances,
       tweenCamera,
+      captureSnapshotDataUrl,
     };
 
     rebuildDynamicData();
@@ -775,6 +817,39 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
     sceneHandlesRef.current?.tweenCamera(preset);
   };
 
+  const handleDownload3DPng = () => {
+    const modeLabel =
+      colorMode === 'combined'
+        ? 'Combined'
+        : colorMode === 'foundation'
+          ? 'Foundations Only'
+          : 'Mast & Guying';
+    const presetLabel =
+      CAMERA_PRESETS.find((p) => p.key === activePreset)?.label ?? activePreset;
+    const headerLabel = `120m Guyed Mast Tower 3D Model — ${modeLabel} (${presetLabel} View)`;
+    const dataUrl = sceneHandlesRef.current?.captureSnapshotDataUrl(
+      legendSections,
+      headerLabel
+    );
+    if (!dataUrl) {
+      pushToast({
+        tone: 'error',
+        message: 'Could not capture 3D viewport image.',
+      });
+      return;
+    }
+    const filename = sanitizeDiagramFilename(
+      `mast-tower-3d-${activePreset}-${colorMode}`,
+      'png'
+    );
+    triggerDataUrlDownload(dataUrl, filename);
+    pushToast({
+      tone: 'success',
+      message: `Downloaded ${filename}`,
+      durationMs: 2800,
+    });
+  };
+
   const legendSections = useMemo(() => {
     const groups: {
       title: string;
@@ -902,11 +977,20 @@ export const MastTower3DShowcase: React.FC<MastTower3DShowcaseProps> = ({
           <button
             type="button"
             onClick={() => handlePresetClick(CAMERA_PRESETS[0])}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-white text-slate-700 border border-slate-300 hover:bg-slate-100"
+            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 cursor-pointer"
             title="Reset 3D camera"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             Reset
+          </button>
+          <button
+            type="button"
+            onClick={handleDownload3DPng}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-slate-900 text-white border border-slate-900 hover:bg-slate-800 cursor-pointer print:hidden"
+            title="Download high-resolution PNG snapshot of current 3D view with legend"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>PNG</span>
           </button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useRef } from 'react';
 import {
   FOUNDATION_SPECS,
   STATUS_META,
@@ -12,6 +12,7 @@ import type {
   FoundationStatus,
 } from '@/entities/project/types';
 import { ANCHOR_GUY_STAGE_META } from '@/entities/project/verticalMastBaseline';
+import { DiagramDownloadButtons } from '@/widgets/common/DiagramDownloadButtons';
 
 export function computeCalloutBoxWidth(labelText: string, isSingle: boolean): number {
   if (!isSingle) return 74;
@@ -171,6 +172,7 @@ export function GroundAnchorPlan2D({
   const dimX = cx + 52;
   const dimRadii = [0, 18, 36, 54, 72];
   const gridPatternId = `cad-grid-${useId().replace(/:/g, '')}`;
+  const svgRef = useRef<SVGSVGElement | null>(null);
 
   return (
     <div
@@ -186,19 +188,26 @@ export function GroundAnchorPlan2D({
         <div
           className={
             frameless
-              ? 'flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-stone-200 bg-white shrink-0'
-              : 'flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/70 shrink-0'
+              ? 'flex flex-col gap-2 px-4 py-2.5 border-b border-stone-200 bg-white shrink-0'
+              : 'flex flex-col gap-2 px-4 py-2.5 border-b border-slate-100 bg-slate-50/70 shrink-0'
           }
         >
-        <div>
-          <h2 className="text-sm font-bold text-slate-900">
-            {title}
-          </h2>
-          <p className="text-xs text-slate-500">
-            {subtitle}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold text-slate-900">
+                {title}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {subtitle}
+              </p>
+            </div>
+            <DiagramDownloadButtons
+              svgRef={svgRef}
+              filenameBase={title}
+              frameless={frameless}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
           {isGuyingMode
             ? (
                 [
@@ -276,6 +285,7 @@ export function GroundAnchorPlan2D({
         }
       >
         <svg
+          ref={svgRef}
           viewBox="30 8 700 672"
           preserveAspectRatio="xMidYMid meet"
           className={

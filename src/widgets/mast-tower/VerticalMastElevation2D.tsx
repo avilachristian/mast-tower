@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type {
   AnchorGuyStage,
   GuyLayerRecord,
@@ -17,6 +17,7 @@ import {
   type MastSelectionTarget,
   type MastVerticalScale,
 } from '@/shared/state/uiStore';
+import { DiagramDownloadButtons } from '@/widgets/common/DiagramDownloadButtons';
 
 type ElevationFocus = 'all' | 'lower' | 'upper';
 
@@ -105,6 +106,7 @@ export function VerticalMastElevation2D({
   const [localScale, setLocalScale] = useState<MastVerticalScale>(defaultVerticalScale ?? 1);
   const mastVerticalScale = useUiStore((s) => s.mastVerticalScale);
   const setMastVerticalScale = useUiStore((s) => s.setMastVerticalScale);
+  const svgRef = useRef<SVGSVGElement | null>(null);
 
   const canScale = enableVerticalScale ?? (Boolean(onSelectTarget) && !hideHeader);
   const isLocallyScaled = defaultVerticalScale !== undefined;
@@ -319,6 +321,12 @@ export function VerticalMastElevation2D({
                 </button>
               ))}
             </div>
+
+            <DiagramDownloadButtons
+              svgRef={svgRef}
+              filenameBase={`${title}${focus !== 'all' ? `-${focus}` : ''}`}
+              frameless={frameless}
+            />
           </div>
         </div>
       )}
@@ -378,6 +386,7 @@ export function VerticalMastElevation2D({
         }
       >
         <svg
+          ref={svgRef}
           viewBox={viewBox}
           className={
             activeVScale > 1
