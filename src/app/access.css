@@ -139,6 +139,33 @@
   display: flex;
   gap: 8px;
 }
+.staff-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.staff-workspace-style {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #b9cbd1;
+  border-radius: 7px;
+  background: #f4f8fa;
+}
+.access-page .staff-workspace-style button {
+  border: 0;
+  border-radius: 5px;
+  padding: 6px 9px;
+  background: transparent;
+  color: #586d7b;
+}
+.access-page .staff-workspace-style button[aria-pressed='true'] {
+  background: #17666b;
+  color: #fff;
+}
 .access-checks {
   display: flex;
   flex-wrap: wrap;
@@ -245,6 +272,90 @@ html[data-admin-style='swiss'] .access-owner-tools--sidebar button {
 html[data-admin-style='swiss'] .access-owner-tools--sidebar button:hover {
   border-color: #0a0a0a;
   background: #f2f0ea;
+}
+html[data-admin-style='swiss'] .staff-workspace {
+  background: #f7f6f2;
+  color: #0a0a0a;
+}
+html[data-admin-style='swiss'] .staff-workspace .access-eyebrow {
+  color: #57534e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+html[data-admin-style='swiss'] .staff-workspace .access-card {
+  border-color: #d6d3cd;
+  border-radius: 0;
+  background: #f7f6f2;
+  box-shadow: none;
+}
+html[data-admin-style='swiss'] .staff-workspace .access-card h2,
+html[data-admin-style='swiss'] .staff-workspace h1,
+html[data-admin-style='swiss'] .staff-workspace h3 {
+  color: #0a0a0a;
+}
+html[data-admin-style='swiss'] .staff-workspace h3,
+html[data-admin-style='swiss'] .staff-workspace label,
+html[data-admin-style='swiss'] .staff-workspace th {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+html[data-admin-style='swiss'] .staff-workspace label {
+  color: #262626;
+}
+html[data-admin-style='swiss'] .staff-workspace th {
+  background: #f2f0ea;
+  color: #57534e;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+html[data-admin-style='swiss'] .staff-workspace th,
+html[data-admin-style='swiss'] .staff-workspace td {
+  border-color: #d6d3cd;
+}
+html[data-admin-style='swiss'] .staff-workspace input:not([type='checkbox']),
+html[data-admin-style='swiss'] .staff-workspace select {
+  border-color: #a8a29e;
+  border-radius: 0;
+  background: #fff;
+  color: #0a0a0a;
+}
+html[data-admin-style='swiss'] .staff-workspace input:focus,
+html[data-admin-style='swiss'] .staff-workspace select:focus {
+  outline-color: #0a0a0a;
+}
+html[data-admin-style='swiss'] .staff-workspace button {
+  border-color: #a8a29e;
+  border-radius: 0;
+  background: #f7f6f2;
+  color: #171717;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+html[data-admin-style='swiss'] .staff-workspace button:hover {
+  border-color: #0a0a0a;
+  background: #f2f0ea;
+}
+html[data-admin-style='swiss'] .staff-workspace button[type='submit'],
+html[data-admin-style='swiss'] .staff-workspace .access-tabs button[aria-pressed='true'] {
+  border-color: #0a0a0a;
+  background: #0a0a0a;
+  color: #fff;
+}
+html[data-admin-style='swiss'] .staff-workspace .staff-workspace-style {
+  gap: 0;
+  padding: 2px;
+  border-color: #a8a29e;
+  border-radius: 0;
+  background: #f2f0ea;
+}
+html[data-admin-style='swiss'] .staff-workspace .staff-workspace-style button {
+  border: 0;
+  border-radius: 0;
+  padding: 6px 9px;
+  background: transparent;
+  color: #57534e;
+}
+html[data-admin-style='swiss'] .staff-workspace .staff-workspace-style button[aria-pressed='true'] {
+  background: #0a0a0a;
+  color: #fff;
 }
 html[data-admin-style='swiss'] .access-owner-tools--toolbar button {
   border-color: #d6d3cd;

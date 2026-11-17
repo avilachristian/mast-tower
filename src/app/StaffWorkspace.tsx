@@ -6,6 +6,7 @@ import type {
   StaffCommandType,
 } from '@/shared/api/access';
 import { useAuthStore } from '@/shared/state/authStore';
+import { useUiStore } from '@/shared/state/uiStore';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
 import {
   MANPOWER_POSITIONS,
@@ -79,6 +80,8 @@ export function StaffWorkspace() {
   const user = useAuthStore((s) => s.user)!,
     logout = useAuthStore((s) => s.logout),
     check = useAuthStore((s) => s.checkSession);
+  const adminUiStyle = useUiStore((s) => s.adminUiStyle);
+  const setAdminUiStyle = useUiStore((s) => s.setAdminUiStyle);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]),
     [projectId, setProjectId] = useState(''),
     [workspace, setWorkspace] = useState<StaffWorkspaceDto | null>(null),
@@ -189,14 +192,32 @@ export function StaffWorkspace() {
     });
   };
   return (
-    <div className="access-page">
+    <div className="access-page staff-workspace">
       <header>
         <div>
           <p className="access-eyebrow">PROJECT ADMINISTRATION</p>
           <h1>Manpower & hauling</h1>
           <p>{user.displayName}</p>
         </div>
-        <button onClick={() => void logout()}>Sign out</button>
+        <div className="staff-header-actions">
+          <div className="staff-workspace-style" role="group" aria-label="Workspace style">
+            <button
+              type="button"
+              aria-pressed={adminUiStyle === 'classic'}
+              onClick={() => setAdminUiStyle('classic')}
+            >
+              Classic
+            </button>
+            <button
+              type="button"
+              aria-pressed={adminUiStyle === 'swiss'}
+              onClick={() => setAdminUiStyle('swiss')}
+            >
+              Layout A
+            </button>
+          </div>
+          <button onClick={() => void logout()}>Sign out</button>
+        </div>
       </header>
       <div className="access-toolbar">
         <label>
