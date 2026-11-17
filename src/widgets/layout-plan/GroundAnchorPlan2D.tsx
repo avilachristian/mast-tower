@@ -141,6 +141,7 @@ export function GroundAnchorPlan2D({
     {
       not_started: 0,
       excavated: 0,
+      excavation_inspected: 0,
       lean_concrete: 0,
       rebar_and_anchor: 0,
       formwork: 0,
@@ -248,6 +249,7 @@ export function GroundAnchorPlan2D({
                   'formwork',
                   'rebar_and_anchor',
                   'lean_concrete',
+                  'excavation_inspected',
                   'excavated',
                   'not_started',
                 ] as FoundationStatus[]
@@ -661,11 +663,12 @@ export function GroundAnchorPlan2D({
                 );
               })
             ) : (
-              /* Activity Status Swatches matching the 8 civil construction stages */
+              /* Activity Status Swatches matching the foundation construction stages */
               (
                 [
                   'not_started',
                   'excavated',
+                  'excavation_inspected',
                   'lean_concrete',
                   'rebar_and_anchor',
                   'formwork',
@@ -674,7 +677,7 @@ export function GroundAnchorPlan2D({
                   'completed',
                 ] as FoundationStatus[]
               ).map((status, idx) => {
-                const sy = 33 + idx * 17;
+                const sy = 31 + idx * 15.5;
                 const stMeta = STATUS_META[status];
                 const label = stMeta.label;
                 return (

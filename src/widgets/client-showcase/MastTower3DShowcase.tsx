@@ -131,6 +131,7 @@ const CAMERA_PRESETS: CameraPreset[] = [
 const FOUNDATION_LEGEND_ORDER: FoundationStatus[] = [
   'not_started',
   'excavated',
+  'excavation_inspected',
   'lean_concrete',
   'rebar_and_anchor',
   'formwork',

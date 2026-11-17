@@ -7,6 +7,7 @@ export type SectorId = 'CENTER' | 'I' | 'II' | 'III';
 export type FoundationStatus =
   | 'not_started'
   | 'excavated'
+  | 'excavation_inspected'
   | 'lean_concrete'
   | 'rebar_and_anchor'
   | 'formwork'

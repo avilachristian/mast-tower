@@ -29,6 +29,7 @@ import {
   createCleanBaselineProject,
   createInitialFoundations,
   createSampleMast2Project,
+  checklistFromStatus,
   deriveStatusFromChecklist,
   emptyChecklist,
   resolveFoundationSpec,
@@ -96,6 +97,8 @@ describe('Mast 2 Baseline & Conversions', () => {
     expect(deriveStatusFromChecklist(c)).toBe('not_started');
     c.excavationVerified = true;
     expect(deriveStatusFromChecklist(c)).toBe('excavated');
+    c.excavationInspectionDone = true;
+    expect(deriveStatusFromChecklist(c)).toBe('excavation_inspected');
     c.leanConcretePoured = true;
     expect(deriveStatusFromChecklist(c)).toBe('lean_concrete');
     c.rebarCageInstalled = true;
@@ -108,6 +111,17 @@ describe('Mast 2 Baseline & Conversions', () => {
     expect(deriveStatusFromChecklist(c)).toBe('curing');
     c.curingAndBackfillDone = true;
     expect(deriveStatusFromChecklist(c)).toBe('completed');
+  });
+
+  it('maps checklist accurately from status in checklistFromStatus', () => {
+    const excavatedChecklist = checklistFromStatus('excavated');
+    expect(excavatedChecklist.excavationVerified).toBe(true);
+    expect(excavatedChecklist.excavationInspectionDone).toBe(false);
+
+    const inspectedChecklist = checklistFromStatus('excavation_inspected');
+    expect(inspectedChecklist.excavationVerified).toBe(true);
+    expect(inspectedChecklist.excavationInspectionDone).toBe(true);
+    expect(inspectedChecklist.leanConcretePoured).toBe(false);
   });
 
   it('computes project hauling and progress metrics accurately', () => {

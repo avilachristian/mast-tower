@@ -132,12 +132,20 @@ export const STATUS_META: Record<
     pct: 0,
   },
   excavated: {
-    label: '1–2. Excavated & Retrofitted',
-    shortLabel: 'Excavated & Retrofitted',
+    label: '1. Excavated',
+    shortLabel: 'Excavated',
     color: '#b97a57',
     bgClass: 'bg-stone-100 border-stone-400',
     textClass: 'text-stone-800',
-    pct: 15,
+    pct: 10,
+  },
+  excavation_inspected: {
+    label: '2. Excavation Inspected & Retrofitted',
+    shortLabel: 'Excavation Inspected & Retrofitted',
+    color: '#d97706',
+    bgClass: 'bg-amber-50 border-amber-400',
+    textClass: 'text-amber-800',
+    pct: 20,
   },
   lean_concrete: {
     label: '3. Lean Concrete Poured',
@@ -573,7 +581,8 @@ export function deriveStatusFromChecklist(c: FoundationStageChecklist): Foundati
   if (c.formworkBraced) return 'formwork';
   if (c.rebarCageInstalled || c.anchorHardwareAligned) return 'rebar_and_anchor';
   if (c.leanConcretePoured) return 'lean_concrete';
-  if (c.excavationVerified || c.excavationInspectionDone) return 'excavated';
+  if (c.excavationInspectionDone) return 'excavation_inspected';
+  if (c.excavationVerified) return 'excavated';
   return 'not_started';
 }
 
@@ -581,6 +590,7 @@ export function checklistFromStatus(status: FoundationStatus): FoundationStageCh
   const order: FoundationStatus[] = [
     'not_started',
     'excavated',
+    'excavation_inspected',
     'lean_concrete',
     'rebar_and_anchor',
     'formwork',
@@ -592,13 +602,13 @@ export function checklistFromStatus(status: FoundationStatus): FoundationStageCh
   return {
     excavationVerified: idx >= 1,
     excavationInspectionDone: idx >= 2,
-    leanConcretePoured: idx >= 2,
-    rebarCageInstalled: idx >= 3,
-    anchorHardwareAligned: idx >= 4,
-    formworkBraced: idx >= 4,
-    concretePoured: idx >= 5,
-    curingStarted: idx >= 6,
-    curingAndBackfillDone: idx >= 7,
+    leanConcretePoured: idx >= 3,
+    rebarCageInstalled: idx >= 4,
+    anchorHardwareAligned: idx >= 5,
+    formworkBraced: idx >= 5,
+    concretePoured: idx >= 6,
+    curingStarted: idx >= 7,
+    curingAndBackfillDone: idx >= 8,
   };
 }
 
@@ -720,7 +730,7 @@ export function createSampleMast2Project(): MastProjectState {
   setSampleStatus('II-C1', 'curing', '2026-11-11', 'Curing wet burlap active; ready for backfill after 7 days.');
   setSampleStatus('III-C1', 'rebar_and_anchor', undefined, '50mm lean concrete cured; M_02/M_26 cage & dual anchor rod tied.');
   setSampleStatus('I-B1', 'lean_concrete', undefined, 'Pit bottom compacted; 50mm lean concrete poured.');
-  setSampleStatus('II-B1', 'excavated', undefined, 'Pit dimensions 2.0m×2.0m×2.0m verified.');
+  setSampleStatus('II-B1', 'excavation_inspected', undefined, 'Pit dimensions 2.0m×2.0m×2.0m verified and retrofitted.');
   setSampleStatus('III-B1', 'excavated', undefined, 'Dewatered and leveled.');
 
   return {

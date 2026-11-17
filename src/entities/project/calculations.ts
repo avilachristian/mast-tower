@@ -292,6 +292,7 @@ const ORDERED_STATUSES: FoundationStatus[] = [
   'formwork',
   'rebar_and_anchor',
   'lean_concrete',
+  'excavation_inspected',
   'excavated',
   'not_started',
 ];
