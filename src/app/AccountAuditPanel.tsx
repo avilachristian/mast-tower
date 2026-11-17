@@ -124,7 +124,7 @@ export function AccountAuditPanel() {
           aria-modal="true"
           aria-label={open === 'accounts' ? 'Team accounts' : 'Audit history'}
         >
-          <div className="access-dialog access-page">
+          <div className={`access-dialog access-page ${open === 'accounts' ? 'access-accounts-dialog' : ''}`}>
             <header>
               <h1>{open === 'accounts' ? 'Team accounts' : 'Audit history'}</h1>
               <button onClick={() => setOpen(null)}>Close</button>
@@ -137,7 +137,7 @@ export function AccountAuditPanel() {
             {notice && <p role="status">{notice}</p>}
             {open === 'accounts' ? (
               <>
-                <div className="access-scroll">
+                <div className="access-scroll access-account-table">
                   <table>
                     <thead>
                       <tr>
@@ -189,10 +189,10 @@ export function AccountAuditPanel() {
                     ? 'Edit ' + editing.username
                     : 'Create staff account'}
                 </h2>
-                <form onSubmit={(e) => void save(e)} key={editing?.id ?? 'new'}>
+                <form className="access-account-form" onSubmit={(e) => void save(e)} key={editing?.id ?? 'new'}>
                   <fieldset disabled={busy}>
                     {!editing && (
-                      <>
+                      <div className="access-account-credentials">
                         <label>
                           Username
                           <input
@@ -214,7 +214,7 @@ export function AccountAuditPanel() {
                             autoComplete="new-password"
                           />
                         </label>
-                      </>
+                      </div>
                     )}
                     <label>
                       Display name
@@ -224,9 +224,12 @@ export function AccountAuditPanel() {
                         defaultValue={editing?.displayName}
                       />
                     </label>
-                    <h3>Modules</h3>
-                    {(['manpower_payroll', 'hauling_inventory'] as const).map(
-                      (p) => (
+                    <div className="access-account-options">
+                      <div>
+                        <h3>Modules</h3>
+                        <div className="access-account-checks">
+                          {(['manpower_payroll', 'hauling_inventory'] as const).map(
+                            (p) => (
                         <label key={p}>
                           <input
                             type="checkbox"
@@ -240,10 +243,14 @@ export function AccountAuditPanel() {
                             ? 'Manpower & payroll'
                             : 'Hauling & inventory'}
                         </label>
-                      )
-                    )}
-                    <h3>Assigned projects</h3>
-                    {projects.map((p) => (
+                            )
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <h3>Assigned projects</h3>
+                        <div className="access-account-checks">
+                          {projects.map((p) => (
                       <label key={p.id}>
                         <input
                           type="checkbox"
@@ -253,7 +260,10 @@ export function AccountAuditPanel() {
                         />
                         {p.name}
                       </label>
-                    ))}
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                     {editing && (
                       <label>
                         <input

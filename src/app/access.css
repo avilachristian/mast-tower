@@ -179,9 +179,41 @@
   overflow: auto;
 }
 .access-dialog {
-  width: min(1120px, 100%);
+  width: min(1400px, 100%);
   border-radius: 16px;
-  min-height: 80vh;
+  min-height: 0;
+  max-height: 94vh;
+  overflow: auto;
+  background: #f3f6f7;
+  box-shadow: 0 24px 70px #0a24335c;
+}
+.access-accounts-dialog {padding:28px 36px 30px;}
+.access-accounts-dialog > header {margin-bottom:12px;}
+.access-accounts-dialog h1 {font-size:28px;}
+.access-accounts-dialog h2 {font-size:17px;margin:8px 0 10px;}
+.access-accounts-dialog h3 {font-size:13px;margin:8px 0 6px;}
+.access-accounts-dialog .access-account-table {margin-bottom:4px;}
+.access-accounts-dialog table {font-size:12px;}
+.access-accounts-dialog th,.access-accounts-dialog td {padding:7px 10px;}
+.access-accounts-dialog .access-account-form {display:block;margin:0;}
+.access-accounts-dialog .access-account-form fieldset {display:block;padding:0;margin:0;}
+.access-account-credentials {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:10px 0 12px;}
+.access-account-credentials input,.access-accounts-dialog .access-account-form > fieldset > label input:not([type=checkbox]) {width:100%;}
+.access-account-options {display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:2px 0 12px;}
+.access-account-checks {display:flex;align-items:center;flex-wrap:wrap;gap:6px 18px;}
+.access-account-checks label {flex-direction:row;align-items:center;}
+.access-accounts-dialog .access-account-form fieldset > label:has(input[type=checkbox]) {display:inline-flex;margin:0 18px 0 0;}
+.access-accounts-dialog .access-account-form .access-toolbar {margin:10px 0 0;}
+.access-accounts-dialog .access-account-form input:not([type=checkbox]) {height:36px;}
+.access-accounts-dialog > form:not(.access-account-form) {display:flex;align-items:end;gap:12px;margin-top:12px;}
+.access-accounts-dialog > form:not(.access-account-form) label {flex:1;}
+.access-accounts-dialog > form:not(.access-account-form) input {width:100%;}
+@media (min-width: 900px) and (min-height: 650px) {
+  .access-accounts-dialog {overflow:visible;}
+}
+@media (max-width: 700px) {
+  .access-accounts-dialog {padding:18px 16px 20px;}
+  .access-account-credentials,.access-account-options {grid-template-columns:1fr;gap:8px;}
 }
 .access-dialog form fieldset {
   display: flex;
