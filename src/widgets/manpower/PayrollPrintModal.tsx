@@ -18,7 +18,7 @@ import {
 import type {
   CivilWorksPayrollSnapshot,
   HaulerPayrollSnapshot,
-  MastProjectState,
+  PayrollReportProject,
 } from '@/entities/project/types';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useUiStore } from '@/shared/state/uiStore';
@@ -49,7 +49,7 @@ export function PayrollReportSheet({
   showSignature = true,
   showStatus = true,
 }: {
-  project: MastProjectState;
+  project: PayrollReportProject;
   data: PayrollSheetData;
   showSignature?: boolean;
   showStatus?: boolean;
@@ -882,7 +882,7 @@ export function PayrollPrintModal({
   data,
   onClose,
 }: {
-  project: MastProjectState;
+  project: PayrollReportProject;
   data: PayrollSheetData;
   onClose: () => void;
 }) {
@@ -898,7 +898,7 @@ function PayrollPrintModalContent({
   data,
   onClose,
 }: {
-  project: MastProjectState;
+  project: PayrollReportProject;
   data: PayrollSheetData;
   onClose: () => void;
 }) {

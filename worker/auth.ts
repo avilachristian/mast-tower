@@ -29,7 +29,10 @@ function toBase64Url(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -78,7 +81,11 @@ export async function verifyPassword(
   const parts = storedHash.split('$');
   if (parts.length !== 4 || parts[0] !== 'pbkdf2_sha256') return false;
   const iterations = Number.parseInt(parts[1], 10);
-  if (!Number.isFinite(iterations) || iterations < 10_000 || iterations > 500_000) {
+  if (
+    !Number.isFinite(iterations) ||
+    iterations < 10_000 ||
+    iterations > 500_000
+  ) {
     return false;
   }
   const salt = fromHex(parts[2]);
@@ -122,6 +129,13 @@ export async function ensureSeededAdminUser(env: Env): Promise<void> {
   ).first<{ cnt: number }>();
 
   if ((countRow?.cnt ?? 0) > 0) {
+    // A multi-account migration can designate the configured bootstrap username
+    // only while no owner exists. Never upgrade arbitrary staff on later logins.
+    await env.DB.prepare(
+      "UPDATE admin_users SET role = 'super_admin' WHERE LOWER(username) = ? AND NOT EXISTS (SELECT 1 FROM admin_users WHERE role = 'super_admin')"
+    )
+      .bind(username)
+      .run();
     seededDbs.add(dbKey);
     return;
   }
@@ -132,8 +146,8 @@ export async function ensureSeededAdminUser(env: Env): Promise<void> {
   const displayName = env.ADMIN_DISPLAY_NAME?.trim() || 'Project Admin';
 
   await env.DB.prepare(
-    `INSERT OR IGNORE INTO admin_users (id, username, display_name, password_hash, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT OR IGNORE INTO admin_users (id, username, display_name, password_hash, created_at, updated_at, role)
+     VALUES (?, ?, ?, ?, ?, ?, 'super_admin')`
   )
     .bind(id, username, displayName, passwordHash, now, now)
     .run();
@@ -183,7 +197,10 @@ export async function recordFailedLoginAttempt(
     .run();
 }
 
-export async function clearLoginAttempts(env: Env, ipKey: string): Promise<void> {
+export async function clearLoginAttempts(
+  env: Env,
+  ipKey: string
+): Promise<void> {
   await env.DB.prepare('DELETE FROM login_attempts WHERE ip_key = ?')
     .bind(ipKey)
     .run();
@@ -227,7 +244,7 @@ export async function getSessionUserFromRequest(
   const tokenHash = await sha256Hex(token);
   const now = new Date().toISOString();
   const row = await c.env.DB.prepare(
-    `SELECT u.id, u.username, u.display_name, s.expires_at
+    `SELECT u.id, u.username, u.display_name, u.role, u.permissions_json, u.is_active, s.expires_at
      FROM admin_sessions s
      JOIN admin_users u ON u.id = s.user_id
      WHERE s.token_hash = ?`
@@ -238,9 +255,12 @@ export async function getSessionUserFromRequest(
       username: string;
       display_name: string;
       expires_at: string;
+      role: AdminSessionUser['role'];
+      permissions_json: string;
+      is_active: number;
     }>();
 
-  if (!row) return null;
+  if (!row || row.is_active !== 1) return null;
   if (row.expires_at <= now) {
     await c.env.DB.prepare('DELETE FROM admin_sessions WHERE token_hash = ?')
       .bind(tokenHash)
@@ -248,11 +268,7 @@ export async function getSessionUserFromRequest(
     return null;
   }
 
-  return {
-    id: row.id,
-    username: row.username,
-    displayName: row.display_name,
-  };
+  return sessionDto(c.env, row);
 }
 
 export function setSessionCookie(c: WorkerContext, token: string): void {
@@ -295,20 +311,16 @@ export async function authenticateAdminCredentials(
   if (!username || !password) return null;
 
   const user = await env.DB.prepare(
-    'SELECT id, username, display_name, password_hash, created_at, updated_at FROM admin_users WHERE LOWER(username) = ?'
+    'SELECT id, username, display_name, password_hash, created_at, updated_at, role, permissions_json, is_active FROM admin_users WHERE LOWER(username) = ?'
   )
     .bind(username)
     .first<AdminUserRow>();
 
-  if (!user) return null;
+  if (!user || user.is_active !== 1) return null;
   const ok = await verifyPassword(password, user.password_hash);
   if (!ok) return null;
 
-  return {
-    id: user.id,
-    username: user.username,
-    displayName: user.display_name,
-  };
+  return sessionDto(env, user);
 }
 
 export async function requireAdmin(
@@ -327,4 +339,39 @@ export async function requireAdmin(
   }
   c.set('adminUser', user);
   await next();
+}
+
+export async function sessionDto(
+  env: Env,
+  row: {
+    id: string;
+    username: string;
+    display_name: string;
+    role: AdminSessionUser['role'];
+    permissions_json: string;
+    is_active: number;
+  }
+): Promise<AdminSessionUser> {
+  let permissions: AdminSessionUser['permissions'] = [];
+  try {
+    permissions = JSON.parse(row.permissions_json).filter(
+      (v: unknown) => v === 'manpower_payroll' || v === 'hauling_inventory'
+    );
+  } catch {
+    /* fail closed */
+  }
+  const assigned = await env.DB.prepare(
+    'SELECT project_id FROM admin_user_projects WHERE user_id = ?'
+  )
+    .bind(row.id)
+    .all<{ project_id: string }>();
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    role: row.role === 'super_admin' ? 'super_admin' : 'staff',
+    permissions,
+    projectIds: assigned.results.map((r) => r.project_id),
+    isActive: row.is_active === 1,
+  };
 }

@@ -1,0 +1,223 @@
+.access-page {
+  color: #172b3a;
+  background: #f4f7f8;
+  min-height: 100dvh;
+  padding: clamp(16px, 3vw, 40px);
+  font-size: 14px;
+}
+.access-page > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.access-page h1 {
+  font-size: 26px;
+  font-weight: 750;
+  letter-spacing: -0.7px;
+}
+.access-page h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+.access-page h3 {
+  font-weight: 650;
+  margin: 16px 0 8px;
+}
+.access-eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: #337778;
+}
+.access-card {
+  background: white;
+  border: 1px solid #d7e1e6;
+  border-radius: 14px;
+  padding: 20px;
+  margin: 18px 0;
+  box-shadow: 0 3px 12px #17313d04;
+}
+.access-page button,
+.access-owner-tools button {
+  border: 1px solid #b6cbd1;
+  border-radius: 7px;
+  background: #fff;
+  padding: 8px 13px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.access-page button:hover {
+  background: #eef6f6;
+}
+.access-page button[type='submit'],
+.access-tabs button[aria-pressed='true'] {
+  color: white;
+  background: #17666b;
+  border-color: #17666b;
+}
+.access-page button:disabled,
+.access-page fieldset:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.access-page form,
+.access-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.access-page label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.access-page label:has(input[type='checkbox']) {
+  flex-direction: row;
+  align-items: center;
+}
+.access-page input:not([type='checkbox']),
+.access-page select {
+  border: 1px solid #b9cbd1;
+  border-radius: 6px;
+  background: white;
+  padding: 8px 10px;
+  min-width: 120px;
+  max-width: 100%;
+  font-weight: 400;
+}
+.access-page input[type='number'] {
+  width: 130px;
+}
+.access-page input:focus,
+.access-page select:focus {
+  outline: 2px solid #349b9c;
+  outline-offset: 2px;
+}
+.access-page fieldset {
+  border: 0;
+  min-width: 0;
+}
+.access-page table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  text-align: left;
+}
+.access-page th {
+  font-weight: 650;
+  color: #586d7b;
+  background: #f4f8fa;
+}
+.access-page th,
+.access-page td {
+  border-bottom: 1px solid #e4ebef;
+  padding: 10px 12px;
+  vertical-align: top;
+}
+.access-page td button {
+  margin: 2px;
+  white-space: nowrap;
+}
+.access-page pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 440px;
+  font-size: 11px;
+}
+.access-scroll {
+  overflow: auto;
+}
+.access-tabs {
+  display: flex;
+  gap: 8px;
+}
+.access-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 16px 0;
+}
+.access-error {
+  border: 1px solid #ecb5b5;
+  background: #fff1f1;
+  padding: 14px;
+  border-radius: 8px;
+  color: #9c2929;
+  margin: 14px 0;
+}
+.access-notice {
+  border: 1px solid #e3cf99;
+  background: #fff9e9;
+  padding: 14px;
+  border-radius: 8px;
+  margin: 14px 0;
+}
+.access-owner-tools {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 6px 12px;
+  background: #edf4f5;
+}
+.access-overlay {
+  position: fixed;
+  inset: 0;
+  background: #10253599;
+  z-index: 100;
+  display: flex;
+  align-items: start;
+  justify-content: center;
+  padding: 3vh 12px;
+  overflow: auto;
+}
+.access-dialog {
+  width: min(1120px, 100%);
+  border-radius: 16px;
+  min-height: 80vh;
+}
+.access-dialog form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+@media print {
+  .access-page {
+    background: white;
+    padding: 0;
+  }
+  .access-page > header button,
+  .access-toolbar,
+  .access-tabs,
+  .access-page form,
+  .access-page button,
+  .access-page h3,
+  .access-owner-tools {
+    display: none !important;
+  }
+  .access-card {
+    box-shadow: none;
+    border: 0;
+    padding: 6px;
+    margin: 10px 0;
+  }
+  .access-scroll {
+    overflow: visible;
+  }
+  .access-page th,
+  .access-page td {
+    padding: 6px;
+    font-size: 9px;
+  }
+  .access-page fieldset:disabled {
+    opacity: 1;
+  }
+}

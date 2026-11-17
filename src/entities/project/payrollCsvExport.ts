@@ -1,7 +1,7 @@
 import type {
   CivilWorksPayrollSnapshot,
   HaulerPayrollSnapshot,
-  MastProjectState,
+  PayrollReportProject,
 } from './types';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
 
@@ -35,7 +35,7 @@ function triggerCsvDownload(csvContent: string, filename: string): void {
 }
 
 export function generateCivilWorksPayrollCsv(
-  project: MastProjectState,
+  project: PayrollReportProject,
   snapshot: CivilWorksPayrollExportInput
 ): string {
   const rows: string[][] = [];
@@ -112,7 +112,7 @@ export function generateCivilWorksPayrollCsv(
 }
 
 export function downloadCivilWorksPayrollCsv(
-  project: MastProjectState,
+  project: PayrollReportProject,
   snapshot: CivilWorksPayrollExportInput
 ): void {
   const csv = generateCivilWorksPayrollCsv(project, snapshot);
@@ -121,7 +121,7 @@ export function downloadCivilWorksPayrollCsv(
 }
 
 export function generateHaulerPayrollCsv(
-  project: MastProjectState,
+  project: PayrollReportProject,
   snapshot: HaulerPayrollExportInput
 ): string {
   const rows: string[][] = [];
@@ -209,7 +209,7 @@ export function generateHaulerPayrollCsv(
 }
 
 export function downloadHaulerPayrollCsv(
-  project: MastProjectState,
+  project: PayrollReportProject,
   snapshot: HaulerPayrollExportInput
 ): void {
   const csv = generateHaulerPayrollCsv(project, snapshot);

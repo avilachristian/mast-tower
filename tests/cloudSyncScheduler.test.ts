@@ -42,7 +42,7 @@ describe('Auto-Sync Schedule & Deferred Staging', () => {
   beforeEach(() => {
     useAuthStore.setState({
       status: 'authenticated',
-      user: { id: 'adm-1', username: 'admin', displayName: 'Admin' },
+      user: { id: 'adm-1', username: 'admin', displayName: 'Admin', role: 'super_admin', permissions: [], projectIds: [], isActive: true },
       offlineCached: false,
       checking: false,
       errorMessage: null,
@@ -233,7 +233,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
     vi.stubGlobal('window', globalThis);
     useAuthStore.setState({
       status: 'authenticated',
-      user: { id: 'adm-1', username: 'admin', displayName: 'Admin' },
+      user: { id: 'adm-1', username: 'admin', displayName: 'Admin', role: 'super_admin', permissions: [], projectIds: [], isActive: true },
       offlineCached: false,
       checking: false,
       errorMessage: null,
@@ -575,7 +575,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
     mockStorage.setItem(
       'mast2-admin-session-cache-v1',
       JSON.stringify({
-        user: { id: 'adm-1', username: 'admin', displayName: 'Admin' },
+        user: { id: 'adm-1', username: 'admin', displayName: 'Admin', role: 'super_admin', permissions: [], projectIds: [], isActive: true },
         cachedAt: expiredAt,
       })
     );
@@ -594,7 +594,7 @@ describe('Cloud Sync Concurrency, Visibility & Store Integrity', () => {
     mockStorage.setItem(
       'mast2-admin-session-cache-v1',
       JSON.stringify({
-        user: { id: 'adm-1', username: 'admin', displayName: 'Admin' },
+        user: { id: 'adm-1', username: 'admin', displayName: 'Admin', role: 'super_admin', permissions: [], projectIds: [], isActive: true },
         cachedAt: freshAt,
       })
     );

@@ -473,6 +473,7 @@ export interface ReportDetailsSpec {
   approvedBy?: string;
   approvedTitle?: string;
   approvedSignatureUrl?: string;
+  safetyOfficerBy?: string;
   logoHeightPx?: number;
   logos?: {
     left?: ReportLogoItem;
@@ -727,3 +728,5 @@ export interface ClientProjectShowcaseDto {
   highlights: ClientDailyHighlightDto[];
 }
 
+
+export type PayrollReportProject = Pick<MastProjectState, 'projectName' | 'location' | 'contractor' | 'preparedBy' | 'lastUpdated' | 'reportDetails' | 'haulingRateConfig' | 'civilAttendance'>;

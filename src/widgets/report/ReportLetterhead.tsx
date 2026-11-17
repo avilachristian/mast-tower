@@ -410,6 +410,12 @@ export function ReportSignoffFooter({
       title: effectiveDetails?.approvedTitle?.trim(),
       signatureUrl: effectiveDetails?.approvedSignatureUrl?.trim() || undefined,
     },
+    {
+      role: 'Safety Officer',
+      name: effectiveDetails?.safetyOfficerBy?.trim(),
+      title: 'Safety Officer',
+      signatureUrl: undefined,
+    },
   ].filter((sig) => Boolean(sig.name || sig.signatureUrl));
 
   if (!hasNotes && signatories.length === 0) {

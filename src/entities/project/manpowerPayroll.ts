@@ -1,4 +1,4 @@
-import { formatDateWithWeekday } from './calculations';
+import { formatDateWithWeekday } from '@/shared/lib/dateUtils';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
 import {
   HAULING_CREDIT_BLOCK_KG,

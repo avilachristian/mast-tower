@@ -554,6 +554,7 @@ export function DailyLogPrintSheet({
         details={{
           ...effectiveDetails,
           preparedBy,
+          safetyOfficerBy: log.safetyOfficer?.trim() || undefined,
         }}
         fallbackPreparedBy={preparedBy}
         fallbackDate={log.date}

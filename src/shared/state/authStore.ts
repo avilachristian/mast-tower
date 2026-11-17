@@ -1,3 +1,4 @@
+import { invalidateSessionRequests } from '@/shared/api/sessionEpoch';
 import { create } from 'zustand';
 import { ApiError, apiClient, type AdminUserDto } from '@/shared/api/client';
 
@@ -17,8 +18,15 @@ function readCachedAdminSession(): CachedAdminSession | null {
     const raw = window.localStorage.getItem(ADMIN_SESSION_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<CachedAdminSession>;
-    if (parsed?.user?.id && parsed?.user?.username) {
-      const parsedTime = parsed.cachedAt ? Date.parse(parsed.cachedAt) : Number.NaN;
+    if (
+      parsed?.user?.id &&
+      parsed?.user?.username &&
+      parsed.user.role === 'super_admin' &&
+      parsed.user.isActive
+    ) {
+      const parsedTime = parsed.cachedAt
+        ? Date.parse(parsed.cachedAt)
+        : Number.NaN;
       if (
         !Number.isFinite(parsedTime) ||
         Date.now() - parsedTime > OFFLINE_SESSION_MAX_AGE_MS
@@ -40,7 +48,7 @@ function readCachedAdminSession(): CachedAdminSession | null {
 function writeCachedAdminSession(user: AdminUserDto | null): void {
   if (typeof window === 'undefined') return;
   try {
-    if (!user) {
+    if (!user || user.role !== 'super_admin') {
       window.localStorage.removeItem(ADMIN_SESSION_CACHE_KEY);
     } else {
       window.localStorage.setItem(
@@ -67,7 +75,7 @@ interface AuthState {
   clearError: () => void;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'unknown',
   user: null,
   offlineCached: false,
@@ -79,6 +87,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const res = await apiClient.getSession();
       if (res.authenticated && res.user) {
+        if (get().user && get().user?.id !== res.user.id)
+          invalidateSessionRequests();
         writeCachedAdminSession(res.user);
         set({
           status: 'authenticated',
@@ -88,6 +98,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         });
         return true;
       }
+      invalidateSessionRequests();
       writeCachedAdminSession(null);
       set({
         status: 'unauthenticated',
@@ -97,11 +108,21 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
       return false;
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'SESSION_CHANGED')
+        return get().status === 'authenticated';
       // Offline grace: allow an already authenticated field engineer to work offline and sync later
       const cached = readCachedAdminSession();
       const isNetworkIssue =
         !(err instanceof ApiError) ||
         (typeof navigator !== 'undefined' && !navigator.onLine);
+      if (
+        isNetworkIssue &&
+        get().status === 'authenticated' &&
+        get().user?.role === 'staff'
+      ) {
+        set({ checking: false, offlineCached: false });
+        return true;
+      }
       if (isNetworkIssue && cached) {
         set({
           status: 'authenticated',
@@ -122,6 +143,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   login: async (username, password) => {
+    invalidateSessionRequests();
     set({ checking: true, errorMessage: null });
     try {
       const res = await apiClient.login(username, password);
@@ -135,6 +157,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
       return true;
     } catch (err) {
+      if (err instanceof ApiError && err.code === 'SESSION_CHANGED')
+        return get().status === 'authenticated';
       const message =
         err instanceof Error
           ? err.message
@@ -151,6 +175,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    invalidateSessionRequests();
+    writeCachedAdminSession(null);
+    set({
+      status: 'unauthenticated',
+      user: null,
+      offlineCached: false,
+      checking: true,
+    });
     try {
       await apiClient.logout();
     } catch {
@@ -162,10 +194,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       user: null,
       offlineCached: false,
       errorMessage: null,
+      checking: false,
     });
   },
 
   markSessionExpired: () => {
+    invalidateSessionRequests();
     writeCachedAdminSession(null);
     set({
       status: 'unauthenticated',

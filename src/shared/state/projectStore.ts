@@ -279,6 +279,7 @@ if (typeof window !== 'undefined' && !workspaceFlushListenersRegistered) {
     }
   });
 }
+let accessGeneration = 0;
 let hydrationPromise: Promise<void> | null = null;
 
 export interface ProjectSyncHooks {
@@ -963,6 +964,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
 
     hydrateFromStorage: () => {
       if (hydrationPromise) return hydrationPromise;
+      const generation = accessGeneration;
       hydrationPromise = (async () => {
         if (typeof window === 'undefined') {
           set({ storageHydrated: true });
@@ -1042,6 +1044,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
             }
           }
 
+          if (generation !== accessGeneration) return;
           if (loaded && loaded.projects.length > 0) {
             const active =
               loaded.projects.find((p) => p.id === loaded.activeProjectId) ??
@@ -1056,7 +1059,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         } catch {
           // Ignore storage read/migration errors and continue with fallback workspace
         } finally {
-          set({ storageHydrated: true });
+          if (generation === accessGeneration) set({ storageHydrated: true });
         }
       })();
       return hydrationPromise;
@@ -2902,3 +2905,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
   };
 });
 
+
+/** Drop owner records from memory without deleting the owner's offline drafts. */
+export function clearOwnerWorkspaceMemory() {
+  accessGeneration += 1;
+  hydrationPromise = null;
+  useProjectStore.setState({projects:[],activeProjectId:'',project:createCleanBaselineProject(),storageHydrated:false});
+}

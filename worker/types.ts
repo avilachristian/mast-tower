@@ -1,3 +1,4 @@
+import type { AccessUser } from '../src/shared/api/access';
 import type { D1Database, Fetcher, R2Bucket } from '@cloudflare/workers-types';
 
 export interface Env {
@@ -36,6 +37,9 @@ export interface PublicProjectSummary {
 }
 
 export interface AdminUserRow {
+  role: AccessUser['role'];
+  permissions_json: string;
+  is_active: number;
   id: string;
   username: string;
   display_name: string;
@@ -44,8 +48,4 @@ export interface AdminUserRow {
   updated_at: string;
 }
 
-export interface AdminSessionUser {
-  id: string;
-  username: string;
-  displayName: string;
-}
+export interface AdminSessionUser extends AccessUser {}

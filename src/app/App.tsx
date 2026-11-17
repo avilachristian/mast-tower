@@ -1,6 +1,11 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { clearOwnerSyncMemory } from '@/shared/storage/cloudSync';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useAppRoute } from '@/shared/lib/router';
 import { useAuthStore } from '@/shared/state/authStore';
+import {
+  useProjectStore,
+  clearOwnerWorkspaceMemory,
+} from '@/shared/state/projectStore';
 import { useUiStore } from '@/shared/state/uiStore';
 import { AppDialogModal } from '@/widgets/common/AppDialogModal';
 import { AppErrorBoundary } from '@/widgets/common/AppErrorBoundary';
@@ -22,6 +27,33 @@ const AdminWorkspace = lazy(() =>
   }))
 );
 
+const StaffWorkspace = lazy(() =>
+  import('./StaffWorkspace').then((m) => ({ default: m.StaffWorkspace }))
+);
+
+function OwnerWorkspace() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void useProjectStore
+      .getState()
+      .hydrateFromStorage()
+      .then(() => {
+        if (live) setReady(true);
+      });
+    return () => {
+      live = false;
+      clearOwnerWorkspaceMemory();
+      clearOwnerSyncMemory();
+    };
+  }, []);
+  return ready ? (
+    <AdminWorkspace />
+  ) : (
+    <RouteLoadingFallback label="Loading project records..." />
+  );
+}
+
 function RouteLoadingFallback({ label }: { label: string }) {
   return (
     <div className="min-h-dvh bg-slate-50 flex items-center justify-center p-6">
@@ -35,6 +67,7 @@ function RouteLoadingFallback({ label }: { label: string }) {
 
 export function App() {
   const route = useAppRoute();
+  const user = useAuthStore((s) => s.user);
   const authStatus = useAuthStore((s) => s.status);
   const checkSession = useAuthStore((s) => s.checkSession);
   const projectBrowserOpen = useUiStore((s) => s.projectBrowserOpen);
@@ -61,23 +94,37 @@ export function App() {
   }, [route.kind, adminUiStyle]);
 
   const showAdminBottomNav =
-    route.kind === 'admin' && authStatus === 'authenticated' && !projectBrowserOpen;
+    route.kind === 'admin' &&
+    authStatus === 'authenticated' &&
+    !projectBrowserOpen;
 
   return (
     <AppErrorBoundary>
       {route.kind === 'client' ? (
-        <Suspense fallback={<RouteLoadingFallback label="Loading client showcase..." />}>
+        <Suspense
+          fallback={<RouteLoadingFallback label="Loading client showcase..." />}
+        >
           <ClientShowcaseView slug={route.slug} />
         </Suspense>
       ) : authStatus === 'unknown' ? (
         <RouteLoadingFallback label="Verifying administrator session..." />
       ) : authStatus === 'unauthenticated' ? (
-        <Suspense fallback={<RouteLoadingFallback label="Loading administrator sign in..." />}>
+        <Suspense
+          fallback={
+            <RouteLoadingFallback label="Loading administrator sign in..." />
+          }
+        >
           <AdminLoginView />
         </Suspense>
       ) : (
-        <Suspense fallback={<RouteLoadingFallback label="Loading workspace..." />}>
-          <AdminWorkspace />
+        <Suspense
+          fallback={<RouteLoadingFallback label="Loading workspace..." />}
+        >
+          {user?.role === 'super_admin' ? (
+            <OwnerWorkspace key={user.id} />
+          ) : (
+            <StaffWorkspace key={JSON.stringify(user)} />
+          )}
         </Suspense>
       )}
 

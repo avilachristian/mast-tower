@@ -1,3 +1,4 @@
+import { AccountAuditPanel } from './AccountAuditPanel';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
@@ -789,6 +790,7 @@ export function AdminWorkspace() {
         isSwiss ? 'bg-[#F7F6F2] text-neutral-900' : 'bg-slate-50 text-slate-900'
       }`}
     >
+      <AccountAuditPanel />
       <input
         ref={fileInputRef}
         type="file"

@@ -1,3 +1,4 @@
+import { currentSessionEpoch } from '@/shared/api/sessionEpoch';
 import { create } from 'zustand';
 import { ApiError, apiClient, R2StorageBlockedError } from '@/shared/api/client';
 import {
@@ -198,7 +199,8 @@ function isBrowserOnline(): boolean {
 
 function isOnlineAndAuthed(): boolean {
   if (typeof window === 'undefined') return false;
-  return isBrowserOnline() && useAuthStore.getState().status === 'authenticated';
+  const auth = useAuthStore.getState();
+  return isBrowserOnline() && auth.status === 'authenticated' && auth.user?.role === 'super_admin';
 }
 
 export async function flushPendingDeletesOnly(): Promise<void> {
@@ -247,6 +249,7 @@ async function executeSingleProjectSync(
   const record = projectStore.projects.find((p) => p.id === projectId);
   if (!record) return false;
 
+  const syncEpoch = currentSessionEpoch();
   const snapshotUpdatedAt = record.updatedAt;
   useCloudSyncStore.getState().setStatePatch({
     isSyncing: true,
@@ -264,6 +267,7 @@ async function executeSingleProjectSync(
       uploadedUrlMap
     );
 
+    if (syncEpoch !== currentSessionEpoch() || !isOnlineAndAuthed()) return false;
     const expectedVersion = options.forceOverwrite ? undefined : record.version;
     const res = await apiClient.saveAdminProject(projectId, {
       state: nextState,
@@ -306,6 +310,7 @@ async function executeSingleProjectSync(
     }
     return true;
   } catch (err) {
+    if (syncEpoch !== currentSessionEpoch()) return false;
     // Preserve any photos already uploaded to R2 so a retry never creates duplicate R2 orphans
     if (uploadedUrlMap.size > 0) {
       useProjectStore.getState().applyUploadedImageUrls(projectId, uploadedUrlMap);
@@ -733,7 +738,7 @@ export function initializeCloudSync(): void {
       // Leave newly created/duplicated/imported projects staged locally until synced
     },
     onProjectDeleted: (projectId) => {
-      if (useAuthStore.getState().status !== 'authenticated') return;
+      if (useAuthStore.getState().status !== 'authenticated' || useAuthStore.getState().user?.role !== 'super_admin') return;
       if (!isOnlineAndAuthed()) {
         const next = Array.from(
           new Set([...useCloudSyncStore.getState().pendingDeleteIds, projectId])
@@ -764,7 +769,7 @@ export function initializeCloudSync(): void {
         });
     },
     onClientSettingsChanged: (projectId, settings, hadUnsavedStateEdits) => {
-      if (useAuthStore.getState().status !== 'authenticated') return;
+      if (useAuthStore.getState().status !== 'authenticated' || useAuthStore.getState().user?.role !== 'super_admin') return;
       void syncClientVisibilityPatch(projectId, settings, hadUnsavedStateEdits);
     },
   });
@@ -796,4 +801,9 @@ export function stopCloudSyncSchedulerForTest(): void {
   inFlightProjectSyncs.clear();
   pendingResyncQueue.clear();
   inFlightVisibilityPatches.clear();
+}
+
+export function clearOwnerSyncMemory() {
+  pendingResyncQueue.clear();
+  useCloudSyncStore.setState({conflictServerRecord:null,conflictProjectId:null,syncingProjectId:null,hydratedFromCloud:false,isSyncing:false,lastError:null});
 }

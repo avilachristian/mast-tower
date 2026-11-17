@@ -1,3 +1,4 @@
+import { currentSessionEpoch } from './sessionEpoch';
 import type {
   ClientProjectShowcaseDto,
   ClientShowcaseSettings,
@@ -7,11 +8,7 @@ import type {
 } from '@/entities/project/types';
 import type { R2StorageStatus } from '@/shared/storage/r2Quota';
 
-export interface AdminUserDto {
-  id: string;
-  username: string;
-  displayName: string;
-}
+export type AdminUserDto = import('./access').AccessUser;
 
 export interface SavedProjectSummary {
   id: string;
@@ -30,7 +27,12 @@ export class ApiError extends Error {
   code: string;
   payload: unknown;
 
-  constructor(status: number, code: string, message: string, payload?: unknown) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    payload?: unknown
+  ) {
     super(message);
     this.status = status;
     this.code = code;
@@ -47,10 +49,11 @@ export class R2StorageBlockedError extends ApiError {
   }
 }
 
-async function requestJson<T>(
+export async function requestJson<T>(
   input: string,
   init: RequestInit = {}
 ): Promise<T> {
+  const requestEpoch = currentSessionEpoch();
   const headers = new Headers(init.headers);
   if (
     init.body &&
@@ -68,6 +71,12 @@ async function requestJson<T>(
   });
 
   const text = await res.text();
+  if (requestEpoch !== currentSessionEpoch())
+    throw new ApiError(
+      409,
+      'SESSION_CHANGED',
+      'The signed-in account changed. Please retry in the current session.'
+    );
   let data: Record<string, unknown> = {};
   if (text) {
     try {
@@ -78,7 +87,8 @@ async function requestJson<T>(
   }
 
   if (!res.ok) {
-    const code = typeof data.code === 'string' ? data.code : `HTTP_${res.status}`;
+    const code =
+      typeof data.code === 'string' ? data.code : `HTTP_${res.status}`;
     const message =
       typeof data.error === 'string'
         ? data.error
@@ -101,9 +111,12 @@ async function requestJson<T>(
 export const apiClient = {
   // Public Client Showcase (uses 'no-cache' so browser honors ETag / 304 conditional revalidation)
   fetchClientProjects: () =>
-    requestJson<{ projects: ClientProjectShowcaseDto[] }>('/api/client/projects', {
-      cache: 'no-cache',
-    }),
+    requestJson<{ projects: ClientProjectShowcaseDto[] }>(
+      '/api/client/projects',
+      {
+        cache: 'no-cache',
+      }
+    ),
 
   fetchClientProject: (idOrSlug: string) =>
     requestJson<{
@@ -193,12 +206,13 @@ export const apiClient = {
     ),
 
   deleteAdminProject: (id: string) =>
-    requestJson<{ ok: boolean; deletedMediaCount: number; storage: R2StorageStatus }>(
-      `/api/admin/projects/${encodeURIComponent(id)}`,
-      {
-        method: 'DELETE',
-      }
-    ),
+    requestJson<{
+      ok: boolean;
+      deletedMediaCount: number;
+      storage: R2StorageStatus;
+    }>(`/api/admin/projects/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 
   // R2 Storage & Images
   getStorageStatus: () =>

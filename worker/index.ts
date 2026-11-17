@@ -1,3 +1,5 @@
+import { accessRoutes } from './accessRoutes';
+import { auditedWrite, auditStatement } from './audit';
 import { Hono } from 'hono';
 import {
   buildClientShowcaseDto,
@@ -66,7 +68,10 @@ function runInBackground(
   }
 }
 
-function buildCanonicalCacheRequest(requestUrl: string, pathnameOverride?: string): Request {
+function buildCanonicalCacheRequest(
+  requestUrl: string,
+  pathnameOverride?: string
+): Request {
   const url = new URL(requestUrl);
   if (pathnameOverride) {
     url.pathname = pathnameOverride;
@@ -79,7 +84,10 @@ function normalizeEtagToken(tag: string): string {
   return tag.trim().replace(/^W\//i, '');
 }
 
-function matchesIfNoneMatch(headerValue: string | undefined, etag: string): boolean {
+function matchesIfNoneMatch(
+  headerValue: string | undefined,
+  etag: string
+): boolean {
   if (!headerValue) return false;
   if (headerValue.trim() === '*') return true;
   const target = normalizeEtagToken(etag);
@@ -93,7 +101,9 @@ async function computeWeakOrStrongEtag(seed: string): Promise<string> {
     'SHA-256',
     new TextEncoder().encode(seed)
   );
-  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0'))
+  const hex = Array.from(new Uint8Array(digest), (b) =>
+    b.toString(16).padStart(2, '0')
+  )
     .join('')
     .slice(0, 24);
   return `"${hex}"`;
@@ -105,15 +115,21 @@ async function purgeCacheKeys(
   pathnames: Iterable<string>
 ): Promise<void> {
   if (!edgeCache) return;
-  const uniquePaths = Array.from(new Set(Array.from(pathnames).filter(Boolean)));
+  const uniquePaths = Array.from(
+    new Set(Array.from(pathnames).filter(Boolean))
+  );
   await Promise.all(
     uniquePaths.map((p) =>
-      edgeCache.delete(buildCanonicalCacheRequest(requestUrl, p)).catch(() => false)
+      edgeCache
+        .delete(buildCanonicalCacheRequest(requestUrl, p))
+        .catch(() => false)
     )
   );
 }
 
-function projectPathsForInvalidation(identifiers: Iterable<string | null | undefined>): string[] {
+function projectPathsForInvalidation(
+  identifiers: Iterable<string | null | undefined>
+): string[] {
   const paths = ['/api/client/projects'];
   for (const raw of identifiers) {
     const clean = raw?.trim();
@@ -196,10 +212,11 @@ async function ensureUniqueSlug(
 
 async function clearOtherFeaturedProjects(
   env: Env,
-  activeFeaturedId: string
+  activeFeaturedId: string,
+  actor: AdminSessionUser
 ): Promise<Array<{ id: string; slug: string | null }>> {
   const rows = await env.DB.prepare(
-    'SELECT id, slug, client_settings_json, client_dto_json FROM projects WHERE client_featured = 1 AND id != ?'
+    'SELECT id, slug, client_settings_json, client_dto_json, version FROM projects WHERE client_featured = 1 AND id != ?'
   )
     .bind(activeFeaturedId)
     .all<{
@@ -207,17 +224,21 @@ async function clearOtherFeaturedProjects(
       slug: string | null;
       client_settings_json: string;
       client_dto_json?: string | null;
+      version: number;
     }>();
 
   const list = rows.results ?? [];
   if (list.length === 0) return [];
 
-  const statements = list.map((row) => {
+  const statements = list.flatMap((row) => {
     const parsedSettings = parseJsonSafe<Partial<ClientShowcaseSettings>>(
       row.client_settings_json,
       {}
     );
-    const updatedSettings = JSON.stringify({ ...parsedSettings, featured: false });
+    const updatedSettings = JSON.stringify({
+      ...parsedSettings,
+      featured: false,
+    });
 
     let updatedDtoJson: string | null = null;
     if (row.client_dto_json) {
@@ -237,9 +258,34 @@ async function clearOtherFeaturedProjects(
       }
     }
 
-    return env.DB.prepare(
-      'UPDATE projects SET client_featured = 0, client_settings_json = ?, client_dto_json = ? WHERE id = ?'
-    ).bind(updatedSettings, updatedDtoJson ?? row.client_dto_json ?? null, row.id);
+    return [
+      env.DB.prepare(
+        'UPDATE projects SET client_featured = 0, client_settings_json = ?, client_dto_json = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?'
+      ).bind(
+        updatedSettings,
+        updatedDtoJson ?? row.client_dto_json ?? null,
+        new Date().toISOString(),
+        row.id,
+        row.version
+      ),
+      auditStatement(
+        env,
+        actor,
+        row.id,
+        [
+          {
+            domain: 'project',
+            entity: 'clientSettings',
+            entityId: row.id,
+            action: 'UPDATE',
+            diff: { featured: { old: true, new: false } },
+          },
+        ],
+        crypto.randomUUID(),
+        row.version,
+        row.version + 1
+      ),
+    ];
   });
 
   for (const batch of chunkArray(statements, 50)) {
@@ -351,9 +397,9 @@ function isValidProjectStatePayload(value: unknown): value is MastProjectState {
   const candidate = value as Partial<MastProjectState> | null | undefined;
   return Boolean(
     candidate &&
-      typeof candidate === 'object' &&
-      Array.isArray(candidate.foundations) &&
-      candidate.foundations.length > 0
+    typeof candidate === 'object' &&
+    Array.isArray(candidate.foundations) &&
+    candidate.foundations.length > 0
   );
 }
 
@@ -369,7 +415,10 @@ export function createWorkerApp(options?: WorkerAppOptions) {
   // Public Client Showcase Endpoints (Precomputed Sanitized DTOs + Edge Cache)
   // ---------------------------------------------------------------------------
   app.get('/api/client/projects', async (c) => {
-    const cacheReq = buildCanonicalCacheRequest(c.req.url, '/api/client/projects');
+    const cacheReq = buildCanonicalCacheRequest(
+      c.req.url,
+      '/api/client/projects'
+    );
     const ifNoneMatch = c.req.header('If-None-Match');
 
     if (edgeCache) {
@@ -408,10 +457,9 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       const { dto, needsBackfill } = extractClientDtoFromRow(row);
       if (needsBackfill) {
         backfillStmts.push(
-          c.env.DB.prepare('UPDATE projects SET client_dto_json = ? WHERE id = ?').bind(
-            JSON.stringify(dto),
-            row.id
-          )
+          c.env.DB.prepare(
+            'UPDATE projects SET client_dto_json = ? WHERE id = ?'
+          ).bind(JSON.stringify(dto), row.id)
         );
       }
       return dto;
@@ -423,7 +471,9 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       }
     }
 
-    const etagSeed = rows.map((r) => `${r.id}:${r.version}:${r.updated_at}`).join('|');
+    const etagSeed = rows
+      .map((r) => `${r.id}:${r.version}:${r.updated_at}`)
+      .join('|');
     const etag = await computeWeakOrStrongEtag(`list:${etagSeed}`);
 
     if (matchesIfNoneMatch(ifNoneMatch, etag)) {
@@ -534,8 +584,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       id: s.id,
       slug: s.slug || s.id,
       projectName: s.dto_project_name?.trim() || s.name || dto.projectName,
-      location:
-        (s.id === dto.id ? dto.location : s.dto_location?.trim()) || '',
+      location: (s.id === dto.id ? dto.location : s.dto_location?.trim()) || '',
       featured: Boolean(s.client_featured),
     }));
 
@@ -629,7 +678,9 @@ export function createWorkerApp(options?: WorkerAppOptions) {
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
 
     if (matchesIfNoneMatch(ifNoneMatch, object.httpEtag)) {
-      const bodyStream = object.body as unknown as { cancel?: () => Promise<void> } | null;
+      const bodyStream = object.body as unknown as {
+        cancel?: () => Promise<void>;
+      } | null;
       if (bodyStream && typeof bodyStream.cancel === 'function') {
         void bodyStream.cancel().catch(() => undefined);
       }
@@ -659,11 +710,9 @@ export function createWorkerApp(options?: WorkerAppOptions) {
   // ---------------------------------------------------------------------------
   app.get('/api/auth/me', async (c) => {
     const user = await getSessionUserFromRequest(c);
-    return c.json(
-      { authenticated: Boolean(user), user: user ?? null },
-      200,
-      { 'Cache-Control': 'no-store' }
-    );
+    return c.json({ authenticated: Boolean(user), user: user ?? null }, 200, {
+      'Cache-Control': 'no-store',
+    });
   });
 
   app.post('/api/auth/login', async (c) => {
@@ -710,7 +759,10 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         recordFailedLoginAttempt(c.env, ipOnlyKey, MAX_FAILED_IP_ATTEMPTS),
       ]);
       return c.json(
-        { error: 'Invalid admin username or password.', code: 'INVALID_CREDENTIALS' },
+        {
+          error: 'Invalid admin username or password.',
+          code: 'INVALID_CREDENTIALS',
+        },
         401
       );
     }
@@ -731,6 +783,48 @@ export function createWorkerApp(options?: WorkerAppOptions) {
   // Protected Admin Endpoints
   // ---------------------------------------------------------------------------
   app.use('/api/admin/*', requireAdmin);
+  app.route(
+    '/api/admin',
+    accessRoutes(
+      (env, row, next, now) => {
+        const settings = JSON.parse(
+          row.client_settings_json
+        ) as ClientShowcaseSettings;
+        const dto = buildPrecomputedClientDtoJson({
+          id: row.id,
+          createdAt: row.created_at,
+          updatedAt: now,
+          version: row.version + 1,
+          clientSettings: settings,
+          state: next,
+        });
+        return env.DB.prepare(
+          'UPDATE projects SET state_json = ?, client_dto_json = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?'
+        ).bind(
+          JSON.stringify(next),
+          dto,
+          row.version + 1,
+          now,
+          row.id,
+          row.version
+        );
+      },
+      (url, row) =>
+        purgeCacheKeys(
+          edgeCache,
+          url,
+          projectPathsForInvalidation([row.id, row.slug])
+        )
+    )
+  );
+  app.use('/api/admin/*', async (c, next) => {
+    if (c.get('adminUser')?.role !== 'super_admin')
+      return c.json(
+        { error: 'Site Engineer access required.', code: 'FORBIDDEN' },
+        403
+      );
+    await next();
+  });
 
   app.get('/api/admin/projects', async (c) => {
     const summaryMode =
@@ -760,11 +854,9 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         };
       });
 
-      return c.json(
-        { projects: projectSummaries, storage },
-        200,
-        { 'Cache-Control': 'no-store' }
-      );
+      return c.json({ projects: projectSummaries, storage }, 200, {
+        'Cache-Control': 'no-store',
+      });
     }
 
     const rows = await c.env.DB.prepare(
@@ -773,23 +865,20 @@ export function createWorkerApp(options?: WorkerAppOptions) {
 
     const projects = (rows.results ?? []).map(rowToSavedProjectRecord);
 
-    return c.json(
-      { projects, storage },
-      200,
-      { 'Cache-Control': 'no-store' }
-    );
+    return c.json({ projects, storage }, 200, { 'Cache-Control': 'no-store' });
   });
 
   app.get('/api/admin/projects/:id', async (c) => {
     const id = c.req.param('id');
-    const row = await c.env.DB.prepare(
-      'SELECT * FROM projects WHERE id = ?'
-    )
+    const row = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ?')
       .bind(id)
       .first<ProjectRow>();
 
     if (!row) {
-      return c.json({ error: 'Project not found.', code: 'PROJECT_NOT_FOUND' }, 404);
+      return c.json(
+        { error: 'Project not found.', code: 'PROJECT_NOT_FOUND' },
+        404
+      );
     }
 
     const project = rowToSavedProjectRecord(row);
@@ -829,7 +918,10 @@ export function createWorkerApp(options?: WorkerAppOptions) {
 
     if (existing) {
       return c.json(
-        { error: 'A project with this ID already exists.', code: 'DUPLICATE_ID' },
+        {
+          error: 'A project with this ID already exists.',
+          code: 'DUPLICATE_ID',
+        },
         409
       );
     }
@@ -850,7 +942,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
     };
 
     const clearedFeatured = finalSettings.featured
-      ? await clearOtherFeaturedProjects(c.env, id)
+      ? await clearOtherFeaturedProjects(c.env, id, c.get('adminUser')!)
       : [];
     const clientDtoJson = buildPrecomputedClientDtoJson({
       id,
@@ -861,13 +953,14 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       state: body.state,
     });
 
-    await c.env.DB.prepare(
-      `INSERT INTO projects (
+    await auditedWrite(
+      c.env,
+      c.env.DB.prepare(
+        `INSERT INTO projects (
          id, slug, name, project_type, client_visible, client_featured,
          client_settings_json, state_json, client_dto_json, version, created_at, updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-    )
-      .bind(
+      ).bind(
         id,
         uniqueSlug,
         meta.name,
@@ -879,8 +972,14 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         clientDtoJson,
         createdAt,
         updatedAt
-      )
-      .run();
+      ),
+      c.get('adminUser')!,
+      id,
+      null,
+      { ...body.state, clientSettings: finalSettings },
+      null,
+      1
+    );
 
     await linkProjectMediaKeys(
       c.env,
@@ -963,7 +1062,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         slug: uniqueSlug,
       };
       const clearedFeatured = finalSettings.featured
-        ? await clearOtherFeaturedProjects(c.env, id)
+        ? await clearOtherFeaturedProjects(c.env, id, c.get('adminUser')!)
         : [];
       const clientDtoJson = buildPrecomputedClientDtoJson({
         id,
@@ -974,13 +1073,14 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         state: body.state,
       });
 
-      await c.env.DB.prepare(
-        `INSERT INTO projects (
+      await auditedWrite(
+        c.env,
+        c.env.DB.prepare(
+          `INSERT INTO projects (
            id, slug, name, project_type, client_visible, client_featured,
            client_settings_json, state_json, client_dto_json, version, created_at, updated_at
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-      )
-        .bind(
+        ).bind(
           id,
           uniqueSlug,
           meta.name,
@@ -992,8 +1092,14 @@ export function createWorkerApp(options?: WorkerAppOptions) {
           clientDtoJson,
           now,
           now
-        )
-        .run();
+        ),
+        c.get('adminUser')!,
+        id,
+        null,
+        { ...body.state, clientSettings: finalSettings },
+        null,
+        1
+      );
 
       await linkProjectMediaKeys(
         c.env,
@@ -1072,7 +1178,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
     };
 
     const clearedFeatured = finalSettings.featured
-      ? await clearOtherFeaturedProjects(c.env, id)
+      ? await clearOtherFeaturedProjects(c.env, id, c.get('adminUser')!)
       : [];
 
     const name =
@@ -1090,13 +1196,14 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       state: body.state,
     });
 
-    const updateResult = await c.env.DB.prepare(
-      `UPDATE projects
+    const updateResult = await auditedWrite(
+      c.env,
+      c.env.DB.prepare(
+        `UPDATE projects
        SET slug = ?, name = ?, project_type = ?, client_visible = ?, client_featured = ?,
            client_settings_json = ?, state_json = ?, client_dto_json = ?, version = ?, updated_at = ?
        WHERE id = ? AND version = ?`
-    )
-      .bind(
+      ).bind(
         uniqueSlug,
         name,
         projectType,
@@ -1109,10 +1216,20 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         now,
         id,
         existing.version
-      )
-      .run();
+      ),
+      c.get('adminUser')!,
+      id,
+      { ...prevRecord.state, clientSettings: prevRecord.clientSettings },
+      { ...body.state, clientSettings: finalSettings },
+      existing.version,
+      nextVersion
+    );
 
-    if (updateResult?.meta && typeof updateResult.meta.changes === 'number' && updateResult.meta.changes === 0) {
+    if (
+      updateResult?.meta &&
+      typeof updateResult.meta.changes === 'number' &&
+      updateResult.meta.changes === 0
+    ) {
       const latest = await c.env.DB.prepare(
         'SELECT * FROM projects WHERE id = ?'
       )
@@ -1213,10 +1330,13 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       merged.slug || prevRecord.state.projectName,
       id
     );
-    const finalSettings: ClientShowcaseSettings = { ...merged, slug: uniqueSlug };
+    const finalSettings: ClientShowcaseSettings = {
+      ...merged,
+      slug: uniqueSlug,
+    };
 
     const clearedFeatured = finalSettings.featured
-      ? await clearOtherFeaturedProjects(c.env, id)
+      ? await clearOtherFeaturedProjects(c.env, id, c.get('adminUser')!)
       : [];
 
     const now = new Date().toISOString();
@@ -1230,13 +1350,14 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       state: prevRecord.state,
     });
 
-    const updateResult = await c.env.DB.prepare(
-      `UPDATE projects
+    const updateResult = await auditedWrite(
+      c.env,
+      c.env.DB.prepare(
+        `UPDATE projects
        SET slug = ?, client_visible = ?, client_featured = ?, client_settings_json = ?,
            client_dto_json = ?, version = ?, updated_at = ?
        WHERE id = ? AND version = ?`
-    )
-      .bind(
+      ).bind(
         uniqueSlug,
         finalSettings.enabled ? 1 : 0,
         finalSettings.featured ? 1 : 0,
@@ -1246,10 +1367,20 @@ export function createWorkerApp(options?: WorkerAppOptions) {
         now,
         id,
         existing.version
-      )
-      .run();
+      ),
+      c.get('adminUser')!,
+      id,
+      { ...prevRecord.state, clientSettings: prevRecord.clientSettings },
+      { ...prevRecord.state, clientSettings: finalSettings },
+      existing.version,
+      nextVersion
+    );
 
-    if (updateResult?.meta && typeof updateResult.meta.changes === 'number' && updateResult.meta.changes === 0) {
+    if (
+      updateResult?.meta &&
+      typeof updateResult.meta.changes === 'number' &&
+      updateResult.meta.changes === 0
+    ) {
       const latest = await c.env.DB.prepare(
         'SELECT * FROM projects WHERE id = ?'
       )
@@ -1309,25 +1440,57 @@ export function createWorkerApp(options?: WorkerAppOptions) {
     const candidateKeys = extractMediaKeysFromProjectState(record.state);
 
     // Clear project_media and project_id references before deleting project row so shared media in duplicates isn't cascaded away
-    await c.env.DB.batch([
-      c.env.DB.prepare('DELETE FROM project_media WHERE project_id = ?').bind(id),
-      c.env.DB.prepare('UPDATE media_objects SET project_id = NULL WHERE project_id = ?').bind(id),
-      c.env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(id),
+    const deletion = await c.env.DB.batch([
+      c.env.DB.prepare(
+        'DELETE FROM project_media WHERE project_id = ? AND EXISTS (SELECT 1 FROM projects WHERE id = ? AND version = ?)'
+      ).bind(id, id, existing.version),
+      c.env.DB.prepare(
+        'UPDATE media_objects SET project_id = NULL WHERE project_id = ? AND EXISTS (SELECT 1 FROM projects WHERE id = ? AND version = ?)'
+      ).bind(id, id, existing.version),
+      c.env.DB.prepare(
+        'DELETE FROM projects WHERE id = ? AND version = ?'
+      ).bind(id, existing.version),
+      auditStatement(
+        c.env,
+        c.get('adminUser')!,
+        id,
+        [
+          {
+            domain: 'project',
+            entity: 'project',
+            entityId: id,
+            action: 'DELETE',
+            diff: { name: { old: existing.name, new: null } },
+          },
+        ],
+        crypto.randomUUID(),
+        existing.version,
+        null
+      ),
     ]);
 
-    const deletedMediaCount = await cleanupOrphanedMediaKeys(c.env, candidateKeys);
+    if (deletion[2].meta.changes !== 1)
+      return c.json(
+        {
+          error: 'Project changed. Reload before deleting.',
+          code: 'VERSION_CONFLICT',
+        },
+        409
+      );
+    const deletedMediaCount = await cleanupOrphanedMediaKeys(
+      c.env,
+      candidateKeys
+    );
     const storage = await getR2StorageStatus(c.env);
 
     runInBackground(
       c,
-      purgeCacheKeys(
-        edgeCache,
-        c.req.url,
-        [
-          ...projectPathsForInvalidation([id, existing.slug]),
-          ...Array.from(candidateKeys).map((k) => `${MEDIA_URL_PREFIX}${encodeURI(k)}`),
-        ]
-      )
+      purgeCacheKeys(edgeCache, c.req.url, [
+        ...projectPathsForInvalidation([id, existing.slug]),
+        ...Array.from(candidateKeys).map(
+          (k) => `${MEDIA_URL_PREFIX}${encodeURI(k)}`
+        ),
+      ])
     );
 
     return c.json({ ok: true, deletedMediaCount, storage });
@@ -1391,7 +1554,10 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       }
       return c.json(
         {
-          error: err instanceof Error ? err.message : 'Failed to upload image to R2.',
+          error:
+            err instanceof Error
+              ? err.message
+              : 'Failed to upload image to R2.',
           code: 'UPLOAD_FAILED',
         },
         500
@@ -1413,7 +1579,9 @@ export function createWorkerApp(options?: WorkerAppOptions) {
     if (deletedCount > 0) {
       runInBackground(
         c,
-        purgeCacheKeys(edgeCache, c.req.url, [`${MEDIA_URL_PREFIX}${encodeURI(objectKey)}`])
+        purgeCacheKeys(edgeCache, c.req.url, [
+          `${MEDIA_URL_PREFIX}${encodeURI(objectKey)}`,
+        ])
       );
     }
     const storage = await getR2StorageStatus(c.env);
@@ -1426,7 +1594,9 @@ export function createWorkerApp(options?: WorkerAppOptions) {
   app.all('*', async (c) => {
     if (c.env.ASSETS) {
       return (await c.env.ASSETS.fetch(
-        c.req.raw as unknown as Parameters<NonNullable<Env['ASSETS']>['fetch']>[0]
+        c.req.raw as unknown as Parameters<
+          NonNullable<Env['ASSETS']>['fetch']
+        >[0]
       )) as unknown as Response;
     }
     return c.json({ error: 'Not found' }, 404);

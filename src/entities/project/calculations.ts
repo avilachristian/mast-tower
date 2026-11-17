@@ -58,42 +58,8 @@ export interface ProjectSummaryMetrics {
   peakWorkersLogged: number;
 }
 
-const WEEKDAY_NAMES = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-] as const;
-
-/** Parses YYYY-MM-DD in local calendar coordinates and returns its day name (e.g. "Tuesday"). */
-export function getWeekdayName(isoDate: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
-  if (!match) return '';
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const d = new Date(year, month - 1, day);
-  if (
-    Number.isNaN(d.getTime()) ||
-    d.getFullYear() !== year ||
-    d.getMonth() !== month - 1 ||
-    d.getDate() !== day
-  ) {
-    return '';
-  }
-  return WEEKDAY_NAMES[d.getDay()] ?? '';
-}
-
-/** Formats an ISO YYYY-MM-DD date with its weekday name (e.g. "Tuesday, 2026-11-10"). */
-export function formatDateWithWeekday(isoDate: string): string {
-  const trimmed = isoDate.trim();
-  if (!trimmed) return '—';
-  const weekday = getWeekdayName(trimmed);
-  return weekday ? `${weekday}, ${trimmed}` : trimmed;
-}
+import { formatDateWithWeekday } from '@/shared/lib/dateUtils';
+export { formatDateWithWeekday, getWeekdayName } from '@/shared/lib/dateUtils';
 
 export function bagsToCuM(bags: number): number {
   return bags / BAGS_PER_CUBIC_METER;
@@ -1191,11 +1157,20 @@ export function getDailyLogVisitorRows(log: DailyActivityLogEntry): DailyLogVisi
   if (log.visitorItems && log.visitorItems.length > 0) {
     return log.visitorItems;
   }
-  if (log.safetyAndVisitors?.trim()) {
+  // Legacy records packed both values into one string, e.g.
+  // "Safety Officer: Jane Doe | Client QA, Supplier". Never display the
+  // officer portion as a visitor when reading those records.
+  const legacyVisitorText = (log.safetyAndVisitors ?? '')
+    .split('|')
+    .map((part) => part.trim())
+    .filter((part) => !/^safety\s*officer\s*:/i.test(part))
+    .join(' | ')
+    .trim();
+  if (legacyVisitorText) {
     return [
       {
         id: 'legacy-visitor',
-        name: log.safetyAndVisitors.trim(),
+        name: legacyVisitorText,
         roleOrCompany: '—',
         purpose: 'Site Visit / Note',
         remarks: '',

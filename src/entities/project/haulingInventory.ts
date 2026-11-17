@@ -1,4 +1,4 @@
-import { BAGS_PER_CUBIC_METER, DEFAULT_KG_PER_BAG, PROJECT_MATERIAL_TARGETS } from './mast2Baseline';
+import { BAGS_PER_CUBIC_METER, DEFAULT_KG_PER_BAG, PROJECT_MATERIAL_TARGETS } from './materialConstants';
 import type {
   CentralMaterialItem,
   DailyActivityLogEntry,
