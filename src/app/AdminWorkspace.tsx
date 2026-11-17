@@ -1,4 +1,4 @@
-import { AccountAuditPanel } from './AccountAuditPanel';
+import { AccountAuditPanel, AccountAuditTriggers } from './AccountAuditPanel';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
@@ -785,12 +785,12 @@ export function AdminWorkspace() {
   );
 
   return (
-    <div
-      className={`min-h-dvh flex flex-col ${
-        isSwiss ? 'bg-[#F7F6F2] text-neutral-900' : 'bg-slate-50 text-slate-900'
-      }`}
-    >
-      <AccountAuditPanel />
+    <AccountAuditPanel>
+      <div
+        className={`min-h-dvh flex flex-col ${
+          isSwiss ? 'bg-[#F7F6F2] text-neutral-900' : 'bg-slate-50 text-slate-900'
+        }`}
+      >
       <input
         ref={fileInputRef}
         type="file"
@@ -1170,6 +1170,7 @@ export function AdminWorkspace() {
                           <span>Import</span>
                         </button>
                       </div>
+                      <AccountAuditTriggers placement="sidebar" />
                     </>
                   )}
 
@@ -1353,6 +1354,7 @@ export function AdminWorkspace() {
                       <Upload className="w-3.5 h-3.5 text-slate-500" />
                       <span>Import</span>
                     </button>
+                    <AccountAuditTriggers />
 
                     <button
                       type="button"
@@ -1800,6 +1802,8 @@ export function AdminWorkspace() {
                       </button>
                     </div>
 
+                    <AccountAuditTriggers placement="sidebar" />
+
                     <button
                       type="button"
                       onClick={() => {
@@ -2058,6 +2062,7 @@ export function AdminWorkspace() {
           </div>
         </nav>
       )}
-    </div>
+      </div>
+    </AccountAuditPanel>
   );
 }

@@ -1,4 +1,4 @@
-import { useId, useRef } from 'react';
+import { useId, useRef, useState } from 'react';
 import {
   FOUNDATION_SPECS,
   STATUS_META,
@@ -125,6 +125,7 @@ export function GroundAnchorPlan2D({
   frameless?: boolean;
 }) {
   const isGuyingMode = Boolean(anchorGuyStates);
+  const [showSelection, setShowSelection] = useState(true);
   const highlightedSet = new Set(highlightedIds ?? []);
   // SVG coordinate space: 1 meter = 4.2 px; origin at (380, 315)
   const cx = 380;
@@ -206,6 +207,8 @@ export function GroundAnchorPlan2D({
               svgRef={svgRef}
               filenameBase={title}
               frameless={frameless}
+              showSelection={showSelection}
+              onShowSelectionChange={setShowSelection}
             />
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -445,7 +448,8 @@ export function GroundAnchorPlan2D({
             const isNodePending = guyState
               ? guyState.stage === 'pending'
               : f.status === 'not_started';
-            const isSelected = f.id === selectedId || highlightedSet.has(f.id);
+            const isSelected =
+              showSelection && (f.id === selectedId || highlightedSet.has(f.id));
             const isPrincipal = f.type === 'principal';
 
             // Visual square size in px (scaled up slightly for comfortable clicking)
@@ -776,10 +780,11 @@ export function GroundAnchorPlan2D({
 
           {/* High-Visibility Leader & Callout for Currently Selected / Worked Foundation(s) */}
           {(() => {
-            const targets =
-              highlightedIds && highlightedIds.length > 0
+            const targets = showSelection
+              ? highlightedIds && highlightedIds.length > 0
                 ? foundations.filter((f) => highlightedSet.has(f.id))
-                : foundations.filter((f) => f.id === selectedId);
+                : foundations.filter((f) => f.id === selectedId)
+              : [];
             if (targets.length === 0) return null;
 
             const isSingle = targets.length === 1;

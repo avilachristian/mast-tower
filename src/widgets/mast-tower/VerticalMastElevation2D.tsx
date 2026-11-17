@@ -103,6 +103,7 @@ export function VerticalMastElevation2D({
   scaleOptions?: readonly MastVerticalScale[];
 }) {
   const [focus, setFocus] = useState<ElevationFocus>('all');
+  const [showSelection, setShowSelection] = useState(true);
   const [localScale, setLocalScale] = useState<MastVerticalScale>(defaultVerticalScale ?? 1);
   const mastVerticalScale = useUiStore((s) => s.mastVerticalScale);
   const setMastVerticalScale = useUiStore((s) => s.setMastVerticalScale);
@@ -143,11 +144,11 @@ export function VerticalMastElevation2D({
   );
 
   const selectedSection: TowerSectionRecord | undefined =
-    selectedTarget?.kind === 'section'
+    showSelection && selectedTarget?.kind === 'section'
       ? verticalMast.sections.find((s) => s.id === selectedTarget.id)
       : undefined;
   const selectedGuyLayer: GuyLayerRecord | undefined =
-    selectedTarget?.kind === 'guy_layer'
+    showSelection && selectedTarget?.kind === 'guy_layer'
       ? verticalMast.guyLayers.find((g) => g.id === selectedTarget.id)
       : undefined;
 
@@ -326,6 +327,8 @@ export function VerticalMastElevation2D({
               svgRef={svgRef}
               filenameBase={`${title}${focus !== 'all' ? `-${focus}` : ''}`}
               frameless={frameless}
+              showSelection={showSelection}
+              onShowSelectionChange={setShowSelection}
             />
           </div>
         </div>

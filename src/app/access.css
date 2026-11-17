@@ -162,10 +162,25 @@
 }
 .access-owner-tools {
   display: flex;
+  align-items: center;
   gap: 8px;
   justify-content: flex-end;
-  padding: 6px 12px;
-  background: #edf4f5;
+  padding: 0;
+  background: transparent;
+}
+.access-owner-tools button {
+  white-space: nowrap;
+}
+.access-owner-tools--sidebar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+.access-owner-tools--sidebar button {
+  width: 100%;
+  padding: 6px 4px;
+  font-size: 10px;
 }
 .access-overlay {
   position: fixed;
@@ -184,7 +199,8 @@
   min-height: 0;
   max-height: 94vh;
   overflow: auto;
-  background: #f3f6f7;
+  background: #f4f7f8;
+  border: 1px solid #d7e1e6;
   box-shadow: 0 24px 70px #0a24335c;
 }
 .access-accounts-dialog {padding:28px 36px 30px;}
@@ -214,6 +230,91 @@
 @media (max-width: 700px) {
   .access-accounts-dialog {padding:18px 16px 20px;}
   .access-account-credentials,.access-account-options {grid-template-columns:1fr;gap:8px;}
+}
+html[data-admin-style='swiss'] .access-owner-tools--sidebar button {
+  border-color: #a8a29e;
+  border-radius: 0;
+  background: #f7f6f2;
+  color: #262626;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+html[data-admin-style='swiss'] .access-owner-tools--sidebar button:hover {
+  border-color: #0a0a0a;
+  background: #f2f0ea;
+}
+html[data-admin-style='swiss'] .access-owner-tools--toolbar button {
+  border-color: #d6d3cd;
+  border-radius: 0;
+  background: #f7f6f2;
+  color: #262626;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+html[data-admin-style='swiss'] .access-owner-tools--toolbar button:hover {
+  border-color: #0a0a0a;
+  background: #f2f0ea;
+}
+html[data-admin-style='swiss'] .access-overlay {
+  background: rgb(10 10 10 / 56%);
+}
+html[data-admin-style='swiss'] .access-dialog {
+  border-color: #a8a29e;
+  border-radius: 0;
+  background: #f7f6f2;
+  color: #0a0a0a;
+  box-shadow: none;
+}
+html[data-admin-style='swiss'] .access-dialog h1,
+html[data-admin-style='swiss'] .access-dialog h2 {
+  color: #0a0a0a;
+  letter-spacing: -0.025em;
+}
+html[data-admin-style='swiss'] .access-dialog h3,
+html[data-admin-style='swiss'] .access-dialog label,
+html[data-admin-style='swiss'] .access-dialog th {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+html[data-admin-style='swiss'] .access-dialog th {
+  background: #f2f0ea;
+  color: #57534e;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+html[data-admin-style='swiss'] .access-dialog th,
+html[data-admin-style='swiss'] .access-dialog td {
+  border-color: #d6d3cd;
+}
+html[data-admin-style='swiss'] .access-dialog button {
+  border-color: #a8a29e;
+  border-radius: 0;
+  background: #f7f6f2;
+  color: #171717;
+}
+html[data-admin-style='swiss'] .access-dialog button:hover {
+  border-color: #0a0a0a;
+  background: #f2f0ea;
+}
+html[data-admin-style='swiss'] .access-dialog button[type='submit'] {
+  border-color: #0a0a0a;
+  background: #0a0a0a;
+  color: #fff;
+}
+html[data-admin-style='swiss'] .access-dialog input:not([type='checkbox']),
+html[data-admin-style='swiss'] .access-dialog select {
+  border-color: #a8a29e;
+  border-radius: 0;
+  background: #fff;
+  color: #0a0a0a;
+}
+html[data-admin-style='swiss'] .access-dialog input:focus,
+html[data-admin-style='swiss'] .access-dialog select:focus {
+  outline-color: #0a0a0a;
 }
 .access-dialog form fieldset {
   display: flex;

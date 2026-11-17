@@ -1,4 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { requestJson } from '@/shared/api/client';
 import type {
   AccessUser,
@@ -7,8 +14,36 @@ import type {
 } from '@/shared/api/access';
 import './access.css';
 
-export function AccountAuditPanel() {
-  const [open, setOpen] = useState<'accounts' | 'audit' | null>(null),
+type AccountAuditPanelKind = 'accounts' | 'audit';
+type AccountAuditContextValue = {
+  openAccounts: () => void;
+  openAudit: () => void;
+};
+
+const AccountAuditContext = createContext<AccountAuditContextValue | null>(null);
+
+export function AccountAuditTriggers({
+  placement = 'toolbar',
+}: {
+  placement?: 'toolbar' | 'sidebar';
+}) {
+  const context = useContext(AccountAuditContext);
+  if (!context) return null;
+
+  return (
+    <div className={`access-owner-tools access-owner-tools--${placement} print:hidden`}>
+      <button type="button" onClick={context.openAccounts}>
+        Team accounts
+      </button>
+      <button type="button" onClick={context.openAudit}>
+        Audit history
+      </button>
+    </div>
+  );
+}
+
+export function AccountAuditPanel({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState<AccountAuditPanelKind | null>(null),
     [users, setUsers] = useState<AccessUser[]>([]),
     [projects, setProjects] = useState<{ id: string; name: string }[]>([]),
     [editing, setEditing] = useState<AccessUser | null>(null),
@@ -97,26 +132,20 @@ export function AccountAuditPanel() {
       setBusy(false);
     }
   }
+  const contextValue: AccountAuditContextValue = {
+    openAccounts: () => {
+      setOpen('accounts');
+      setError('');
+    },
+    openAudit: () => {
+      setOpen('audit');
+      void loadAudit();
+    },
+  };
+
   return (
-    <>
-      <div className="access-owner-tools print:hidden">
-        <button
-          onClick={() => {
-            setOpen('accounts');
-            setError('');
-          }}
-        >
-          Team accounts
-        </button>
-        <button
-          onClick={() => {
-            setOpen('audit');
-            void loadAudit();
-          }}
-        >
-          Audit history
-        </button>
-      </div>
+    <AccountAuditContext.Provider value={contextValue}>
+      {children}
       {open && (
         <div
           className="access-overlay"
@@ -471,6 +500,6 @@ export function AccountAuditPanel() {
           </div>
         </div>
       )}
-    </>
+    </AccountAuditContext.Provider>
   );
 }

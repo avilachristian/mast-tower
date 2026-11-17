@@ -14,10 +14,14 @@ export function DiagramDownloadButtons({
   svgRef,
   filenameBase,
   frameless = false,
+  showSelection,
+  onShowSelectionChange,
 }: {
   svgRef: RefObject<SVGSVGElement | null>;
   filenameBase: string;
   frameless?: boolean;
+  showSelection: boolean;
+  onShowSelectionChange: (show: boolean) => void;
 }) {
   const [exportingPng, setExportingPng] = useState(false);
   const pushToast = useFeedbackStore((s) => s.pushToast);
@@ -78,6 +82,23 @@ export function DiagramDownloadButtons({
         )}
         <span className="hidden sm:inline">Save</span>
       </span>
+      <label
+        className={
+          frameless
+            ? 'inline-flex items-center gap-1 px-1.5 text-[10px] font-mono uppercase tracking-wider text-neutral-700 cursor-pointer select-none'
+            : 'inline-flex items-center gap-1 px-1.5 text-[10px] font-semibold text-slate-600 cursor-pointer select-none'
+        }
+        title="Show or hide the selected pad or section in the diagram and saved image"
+      >
+        <input
+          type="checkbox"
+          checked={showSelection}
+          onChange={(event) => onShowSelectionChange(event.target.checked)}
+          aria-label="Show selected pad or section"
+          className={frameless ? 'accent-neutral-950' : 'accent-sky-600'}
+        />
+        <span className="hidden sm:inline">Selection</span>
+      </label>
       <button
         type="button"
         onClick={() => void handleDownloadPng()}
