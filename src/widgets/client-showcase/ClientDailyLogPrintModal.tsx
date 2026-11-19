@@ -138,9 +138,11 @@ export function ClientDailyLogPrintModal({
     Boolean(vmOverview)
   );
 
+  const highlightSafetyOfficer = highlight.safetyOfficer?.trim() || '';
   const reportDetails = resolveReportDetails(renderProject, {
     reportDate: highlight.date,
     preparedBy: highlight.preparedBy || renderProject.preparedBy,
+    safetyOfficerBy: highlightSafetyOfficer,
   });
 
   const docTitle = `${dto.projectName} - Daily Construction Log - Day ${highlight.dayNumber} (${highlight.date})`;
@@ -494,6 +496,7 @@ export function ClientDailyLogPrintModal({
                 details={reportDetails}
                 fallbackPreparedBy={highlight.preparedBy || renderProject.preparedBy}
                 fallbackDate={highlight.date}
+                includeSafetyOfficer={Boolean(highlightSafetyOfficer)}
               />
             </div>
           </div>

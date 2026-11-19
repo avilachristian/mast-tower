@@ -508,6 +508,20 @@ export function ProjectReportDetailsPanel({
                   className="w-full h-8 px-2.5 border border-slate-300 rounded bg-white"
                 />
               </label>
+              <div className="sm:col-span-2 pb-1 space-y-1">
+                <SignatureUploadControl
+                  label="Safety Officer Signature"
+                  value={details.safetyOfficerSignatureUrl}
+                  emptyHint="No signature — line remains blank"
+                  defaultSignerName={details.safetyOfficerBy ?? DEFAULT_SAFETY_OFFICER_NAME}
+                  onChange={(nextUrl) =>
+                    update({ safetyOfficerSignatureUrl: nextUrl })
+                  }
+                />
+                <p className="text-[10px] text-slate-400">
+                  Included on Daily Logs by default. Toggle Safety Officer on or off per report under Print → Signatories.
+                </p>
+              </div>
 
               <div className="sm:col-span-2 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-[10.5px] text-slate-500">
                 Inspection-specific <span className="font-semibold text-slate-700">Inspected By</span> &amp;{' '}

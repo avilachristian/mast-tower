@@ -40,6 +40,7 @@ export interface InlineImageCapableState {
     preparedSignatureUrl?: string;
     checkedSignatureUrl?: string;
     approvedSignatureUrl?: string;
+    safetyOfficerSignatureUrl?: string;
     logos?: {
       left?: { dataUrl: string; caption?: string };
       center?: { dataUrl: string; caption?: string };
@@ -148,7 +149,11 @@ export function collectInlineImageRefs(
   const reportDetails = state.reportDetails;
   if (reportDetails) {
     const pushReportSig = (
-      field: 'preparedSignatureUrl' | 'checkedSignatureUrl' | 'approvedSignatureUrl',
+      field:
+        | 'preparedSignatureUrl'
+        | 'checkedSignatureUrl'
+        | 'approvedSignatureUrl'
+        | 'safetyOfficerSignatureUrl',
       nameHint: string
     ) => {
       const val = reportDetails[field];
@@ -166,6 +171,7 @@ export function collectInlineImageRefs(
     pushReportSig('preparedSignatureUrl', 'signature-prepared.png');
     pushReportSig('checkedSignatureUrl', 'signature-checked.png');
     pushReportSig('approvedSignatureUrl', 'signature-approved.png');
+    pushReportSig('safetyOfficerSignatureUrl', 'signature-safety-officer.png');
   }
 
   const collectMetaSignatures = (

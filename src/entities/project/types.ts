@@ -474,6 +474,7 @@ export interface ReportDetailsSpec {
   approvedTitle?: string;
   approvedSignatureUrl?: string;
   safetyOfficerBy?: string;
+  safetyOfficerSignatureUrl?: string;
   logoHeightPx?: number;
   logos?: {
     left?: ReportLogoItem;

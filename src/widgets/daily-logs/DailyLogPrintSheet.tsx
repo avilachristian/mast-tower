@@ -12,13 +12,16 @@ import {
 import type { DailyActivityLogEntry, MastProjectState } from '@/entities/project/types';
 import { buildVerticalMastOverviewData } from '@/entities/project/verticalMastCalculations';
 import type { MastSelectionTarget } from '@/shared/state/uiStore';
+import { DEFAULT_SAFETY_OFFICER_NAME } from '@/entities/project/materialConstants';
 import { GroundAnchorPlan2D } from '@/widgets/layout-plan/GroundAnchorPlan2D';
 import { VerticalMastElevation2D } from '@/widgets/mast-tower/VerticalMastElevation2D';
 import {
   ReportLetterhead,
   ReportSignoffFooter,
+  resolveMatchingSafetyOfficerSignature,
   resolveReportDetails,
 } from '@/widgets/report/ReportLetterhead';
+import { useReportSignoffOverrides } from '@/widgets/report/ReportSignoffOverrideContext';
 
 export function DailyLogPrintSheet({
   project,
@@ -515,15 +518,55 @@ export function DailyLogPrintSheet({
         )}
       </div>
 
-      <ReportSignoffFooter
-        details={{
-          ...effectiveDetails,
-          preparedBy,
-          safetyOfficerBy: safetyOfficer || undefined,
-        }}
-        fallbackPreparedBy={preparedBy}
+      <DailyLogFooterWithSafetyOfficer
+        project={project}
+        effectiveDetails={effectiveDetails}
+        preparedBy={preparedBy}
+        safetyOfficer={safetyOfficer}
         fallbackDate={log.date}
       />
     </>
+  );
+}
+
+function DailyLogFooterWithSafetyOfficer({
+  project,
+  effectiveDetails,
+  preparedBy,
+  safetyOfficer,
+  fallbackDate,
+}: {
+  project: MastProjectState;
+  effectiveDetails: ReturnType<typeof resolveReportDetails>;
+  preparedBy: string;
+  safetyOfficer: string;
+  fallbackDate: string;
+}) {
+  const signoffOverrides = useReportSignoffOverrides();
+  const hasExplicitOverrideToggle = signoffOverrides?.includeSafetyOfficer !== undefined;
+  const showSafetyOfficer = hasExplicitOverrideToggle
+    ? Boolean(signoffOverrides.includeSafetyOfficer)
+    : Boolean(safetyOfficer);
+  const effectiveSafetyOfficer =
+    safetyOfficer ||
+    (signoffOverrides?.includeSafetyOfficer === true
+      ? effectiveDetails.safetyOfficerBy?.trim() || DEFAULT_SAFETY_OFFICER_NAME
+      : '');
+  const matchingSafetySig = effectiveSafetyOfficer
+    ? resolveMatchingSafetyOfficerSignature(project, effectiveSafetyOfficer)
+    : undefined;
+
+  return (
+    <ReportSignoffFooter
+      details={{
+        ...effectiveDetails,
+        preparedBy,
+        safetyOfficerBy: effectiveSafetyOfficer || undefined,
+        safetyOfficerSignatureUrl: matchingSafetySig,
+      }}
+      fallbackPreparedBy={preparedBy}
+      fallbackDate={fallbackDate}
+      includeSafetyOfficer={showSafetyOfficer}
+    />
   );
 }

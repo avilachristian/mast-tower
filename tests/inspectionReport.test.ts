@@ -13,6 +13,7 @@ import {
 } from '../src/widgets/report/ReportLetterhead';
 import {
   applySignoffOverridesToDetails,
+  ReportSignoffOverrideProvider,
   resolveInspectionSignoffs,
   resolveOverriddenSignatureUrl,
 } from '../src/widgets/report/ReportSignoffOverrideContext';
@@ -218,9 +219,11 @@ describe('Inspection Report Verified By Handling', () => {
         preparedSignatureUrl: 'data:image/png;base64,RP',
         checkedSignatureUrl: 'data:image/png;base64,RC',
         approvedSignatureUrl: 'data:image/png;base64,RA',
+        safetyOfficerSignatureUrl: 'data:image/png;base64,RSO',
       },
     });
     expect(inlineRefs.map((r) => r.category)).toEqual([
+      'signature',
       'signature',
       'signature',
       'signature',
@@ -236,6 +239,7 @@ describe('Inspection Report Verified By Handling', () => {
         preparedSignatureUrl: '/api/images/p1/signature/p.png',
         checkedSignatureUrl: '/api/images/p1/signature/c.png',
         approvedSignatureUrl: '/api/images/p1/signature/a.png',
+        safetyOfficerSignatureUrl: '/api/images/p1/signature/so.png',
       },
       foundations: mastProject.foundations.map((f, idx) =>
         idx === 0
@@ -277,6 +281,7 @@ describe('Inspection Report Verified By Handling', () => {
         'p1/signature/p.png',
         'p1/signature/c.png',
         'p1/signature/a.png',
+        'p1/signature/so.png',
         'p1/signature/fi.png',
         'p1/signature/fv.png',
         'p1/signature/ms.png',
@@ -396,5 +401,65 @@ describe('Inspection Report Verified By Handling', () => {
     expect(inspResolved.inspectorSignatureUrl).toBe('data:image/png;base64,TEMPINSP');
     expect(inspResolved.verifiedBy).toBe('Engr. Temp Verifier');
     expect(inspResolved.verifiedSignatureUrl).toBe('data:image/png;base64,TEMPVER');
+  });
+
+  it('omits Safety Officer on non-daily-log reports by default and supports toggling Safety Officer with signature', () => {
+    const baseProject = createCleanBaselineProject();
+    const projectWithSafetySig = {
+      ...baseProject,
+      reportDetails: {
+        ...baseProject.reportDetails,
+        preparedBy: 'Engr. Avila',
+        safetyOfficerBy: 'Flordeliza Manjares',
+        safetyOfficerSignatureUrl: 'data:image/png;base64,SAFETYSIG',
+      },
+    };
+
+    const resolvedDetails = resolveReportDetails(projectWithSafetySig);
+    expect(resolvedDetails.safetyOfficerBy).toBe('Flordeliza Manjares');
+    expect(resolvedDetails.safetyOfficerSignatureUrl).toBe('data:image/png;base64,SAFETYSIG');
+
+    // Default ReportSignoffFooter (non-daily-log reports) omits Safety Officer
+    const defaultReportHtml = renderToStaticMarkup(
+      createElement(ReportSignoffOverrideProvider, {
+        project: projectWithSafetySig,
+        children: createElement(ReportSignoffFooter, {
+          details: resolvedDetails,
+          fallbackDate: '2026-11-16',
+        }),
+      })
+    );
+    expect(defaultReportHtml).not.toContain('Flordeliza Manjares');
+    expect(defaultReportHtml).not.toContain('Safety Officer');
+    expect(defaultReportHtml).not.toContain('SAFETYSIG');
+
+    // Non-daily-log inspection report omits Safety Officer by default
+    const inspHtml = renderToStaticMarkup(
+      createElement(InspectionReportSheet, {
+        project: projectWithSafetySig,
+        foundation: projectWithSafetySig.foundations[0],
+      })
+    );
+    expect(inspHtml).not.toContain('Flordeliza Manjares');
+    expect(inspHtml).not.toContain('SAFETYSIG');
+
+    // Including Safety Officer via prop or override toggle renders name + uploaded/drawn signature
+    const overriddenWithSafety = applySignoffOverridesToDetails(resolvedDetails, {
+      includeSafetyOfficer: true,
+      safetyOfficer: {
+        name: 'Engr. Safety Reliever',
+        signatureUrl: 'data:image/png;base64,RELSIG',
+      },
+    });
+    const includedHtml = renderToStaticMarkup(
+      createElement(ReportSignoffFooter, {
+        details: overriddenWithSafety,
+        fallbackDate: '2026-11-16',
+        includeSafetyOfficer: true,
+      })
+    );
+    expect(includedHtml).toContain('Safety Officer');
+    expect(includedHtml).toContain('Engr. Safety Reliever');
+    expect(includedHtml).toContain('src="data:image/png;base64,RELSIG"');
   });
 });

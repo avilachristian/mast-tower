@@ -6,9 +6,11 @@ import {
   formatDateWithWeekday,
 } from '@/entities/project/calculations';
 import type { DailyActivityLogEntry, MastProjectState } from '@/entities/project/types';
+import { DEFAULT_SAFETY_OFFICER_NAME } from '@/entities/project/materialConstants';
 import { PrintModalHeader, usePrintPageSetup } from '@/widgets/report/PrintPageControls';
 import {
   resolveMatchingPreparedSignature,
+  resolveMatchingSafetyOfficerSignature,
 } from '@/widgets/report/ReportLetterhead';
 import {
   ReportSignoffOverrideProvider,
@@ -31,13 +33,25 @@ export function DailyLogPrintModal({
     log.preparedBy?.trim() ||
     project.reportDetails?.preparedBy?.trim() ||
     project.preparedBy;
+  const logSafetyOfficer = log.safetyOfficer?.trim() || '';
+  const defaultSafetyOfficer =
+    logSafetyOfficer ||
+    (project.reportDetails?.safetyOfficerBy !== undefined
+      ? project.reportDetails.safetyOfficerBy.trim()
+      : DEFAULT_SAFETY_OFFICER_NAME);
 
   return (
     <ReportSignoffOverrideProvider
       project={project}
+      defaultIncludeSafetyOfficer={Boolean(logSafetyOfficer)}
       defaults={{
         preparedBy,
         preparedSignatureUrl: resolveMatchingPreparedSignature(project, preparedBy),
+        safetyOfficerBy: defaultSafetyOfficer,
+        safetyOfficerSignatureUrl: resolveMatchingSafetyOfficerSignature(
+          project,
+          defaultSafetyOfficer
+        ),
       }}
     >
       <DailyLogPrintModalContent

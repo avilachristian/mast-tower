@@ -181,6 +181,24 @@ export function resolveMatchingPreparedSignature(
     : undefined;
 }
 
+export function resolveMatchingSafetyOfficerSignature(
+  project: Pick<MastProjectState, 'reportDetails'>,
+  candidateName?: string
+): string | undefined {
+  const sigUrl = project.reportDetails?.safetyOfficerSignatureUrl?.trim();
+  if (!sigUrl) return undefined;
+  const candidate = candidateName?.trim();
+  if (!candidate) return sigUrl;
+  const baseSafetyOfficer =
+    project.reportDetails?.safetyOfficerBy !== undefined
+      ? project.reportDetails.safetyOfficerBy.trim()
+      : DEFAULT_SAFETY_OFFICER_NAME;
+  return baseSafetyOfficer &&
+    candidate.toLowerCase() === baseSafetyOfficer.toLowerCase()
+    ? sigUrl
+    : undefined;
+}
+
 export function resolveReportDetails(
   project: Pick<
     MastProjectState,
@@ -190,11 +208,21 @@ export function resolveReportDetails(
     reportDate?: string;
     preparedBy?: string;
     preparedSignatureUrl?: string;
+    safetyOfficerBy?: string;
+    safetyOfficerSignatureUrl?: string;
   }
 ): ReportDetailsSpec {
   const base = project.reportDetails ?? {};
   const basePreparedBy = base.preparedBy?.trim() || project.preparedBy?.trim() || '';
   const overridePreparedBy = overrides?.preparedBy?.trim() || '';
+  const baseSafetyOfficerBy =
+    base.safetyOfficerBy !== undefined
+      ? base.safetyOfficerBy
+      : DEFAULT_SAFETY_OFFICER_NAME;
+  const resolvedSafetyOfficerBy =
+    overrides?.safetyOfficerBy !== undefined
+      ? overrides.safetyOfficerBy
+      : baseSafetyOfficerBy;
 
   return {
     ...base,
@@ -208,10 +236,11 @@ export function resolveReportDetails(
         : resolveMatchingPreparedSignature(project, overridePreparedBy),
     reportDate:
       overrides?.reportDate?.trim() || base.reportDate?.trim() || project.lastUpdated,
-    safetyOfficerBy:
-      base.safetyOfficerBy !== undefined
-        ? base.safetyOfficerBy
-        : DEFAULT_SAFETY_OFFICER_NAME,
+    safetyOfficerBy: resolvedSafetyOfficerBy,
+    safetyOfficerSignatureUrl:
+      overrides?.safetyOfficerSignatureUrl !== undefined
+        ? overrides.safetyOfficerSignatureUrl.trim() || undefined
+        : resolveMatchingSafetyOfficerSignature(project, resolvedSafetyOfficerBy),
     logos: resolveReportLogos(base.logos),
   };
 }
@@ -380,10 +409,12 @@ export function ReportSignoffFooter({
   details,
   fallbackPreparedBy,
   fallbackDate,
+  includeSafetyOfficer = false,
 }: {
   details?: ReportDetailsSpec;
   fallbackPreparedBy?: string;
   fallbackDate?: string;
+  includeSafetyOfficer?: boolean;
 }) {
   const signoffOverrides = useReportSignoffOverrides();
   const effectiveDetails = applySignoffOverridesToDetails(
@@ -391,6 +422,10 @@ export function ReportSignoffFooter({
     signoffOverrides,
     fallbackPreparedBy
   );
+  const showSafetyOfficer =
+    signoffOverrides?.includeSafetyOfficer !== undefined
+      ? signoffOverrides.includeSafetyOfficer
+      : includeSafetyOfficer;
   const hasNotes = Boolean(effectiveDetails?.notes?.trim());
   const resolvedPreparedName =
     signoffOverrides?.prepared?.name !== undefined
@@ -415,12 +450,17 @@ export function ReportSignoffFooter({
       title: effectiveDetails?.approvedTitle?.trim(),
       signatureUrl: effectiveDetails?.approvedSignatureUrl?.trim() || undefined,
     },
-    {
-      role: 'Safety Officer',
-      name: effectiveDetails?.safetyOfficerBy?.trim(),
-      title: 'Safety Officer',
-      signatureUrl: undefined,
-    },
+    ...(showSafetyOfficer
+      ? [
+          {
+            role: 'Safety Officer',
+            name: effectiveDetails?.safetyOfficerBy?.trim(),
+            title: 'Safety Officer',
+            signatureUrl:
+              effectiveDetails?.safetyOfficerSignatureUrl?.trim() || undefined,
+          },
+        ]
+      : []),
   ].filter((sig) => Boolean(sig.name || sig.signatureUrl));
 
   if (!hasNotes && signatories.length === 0) {
@@ -435,7 +475,9 @@ export function ReportSignoffFooter({
       ? 'grid-cols-1 max-w-xs'
       : signatories.length === 2
         ? 'grid-cols-1 sm:grid-cols-2 pdf-desktop:grid-cols-2 print:grid-cols-2 max-w-2xl'
-        : 'grid-cols-1 sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3';
+        : signatories.length === 4
+          ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 pdf-desktop:grid-cols-4 print:grid-cols-4'
+          : 'grid-cols-1 sm:grid-cols-3 pdf-desktop:grid-cols-3 print:grid-cols-3';
 
   return (
     <div className="break-inside-avoid pt-3 mt-4 border-t border-slate-300 space-y-3">

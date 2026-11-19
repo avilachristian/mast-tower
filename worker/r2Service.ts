@@ -160,6 +160,7 @@ export function extractMediaKeysFromProjectState(
   collectUrl(state.reportDetails?.preparedSignatureUrl);
   collectUrl(state.reportDetails?.checkedSignatureUrl);
   collectUrl(state.reportDetails?.approvedSignatureUrl);
+  collectUrl(state.reportDetails?.safetyOfficerSignatureUrl);
 
   return keys;
 }

@@ -5,7 +5,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { PenLine, PenTool, RotateCcw, Upload, X } from 'lucide-react';
+import { PenLine, PenTool, RotateCcw, ShieldCheck, Upload, X } from 'lucide-react';
+import { DEFAULT_SAFETY_OFFICER_NAME } from '@/entities/project/materialConstants';
 import type {
   FoundationInspectionMeta,
   MastProjectState,
@@ -22,11 +23,21 @@ export interface SignatoryOverrideSlot {
   signatureUrl?: string | null;
 }
 
+export type SignatoryOverrideRole =
+  | 'prepared'
+  | 'verified'
+  | 'checked'
+  | 'approved'
+  | 'safetyOfficer';
+
 export interface ReportSignoffOverrideState {
   prepared?: SignatoryOverrideSlot;
   verified?: SignatoryOverrideSlot;
   checked?: SignatoryOverrideSlot;
   approved?: SignatoryOverrideSlot;
+  safetyOfficer?: SignatoryOverrideSlot;
+  /** `true` includes Safety Officer on this report; `false` omits it; `undefined` uses the report's default rule. */
+  includeSafetyOfficer?: boolean;
 }
 
 export interface ReportSignoffDefaults {
@@ -41,17 +52,22 @@ export interface ReportSignoffDefaults {
   approvedBy?: string;
   approvedTitle?: string;
   approvedSignatureUrl?: string;
+  safetyOfficerBy?: string;
+  safetyOfficerSignatureUrl?: string;
 }
 
 interface ReportSignoffOverrideContextValue {
   overrides: ReportSignoffOverrideState;
   defaults: ReportSignoffDefaults;
   includeVerified: boolean;
+  includeSafetyOfficer: boolean;
+  defaultIncludeSafetyOfficer: boolean;
+  setIncludeSafetyOfficer: (include: boolean) => void;
   setRoleOverride: (
-    role: keyof ReportSignoffOverrideState,
+    role: SignatoryOverrideRole,
     patch: Partial<SignatoryOverrideSlot>
   ) => void;
-  resetRole: (role: keyof ReportSignoffOverrideState) => void;
+  resetRole: (role: SignatoryOverrideRole) => void;
   resetAll: () => void;
   hasActiveOverrides: boolean;
 }
@@ -116,7 +132,8 @@ export function applySignoffOverridesToDetails(
   const hasAny =
     overrides.prepared !== undefined ||
     overrides.checked !== undefined ||
-    overrides.approved !== undefined;
+    overrides.approved !== undefined ||
+    overrides.safetyOfficer !== undefined;
   if (!hasAny) return details;
 
   const prep = resolveRoleFields(
@@ -137,6 +154,12 @@ export function applySignoffOverridesToDetails(
     details?.approvedSignatureUrl,
     overrides.approved
   );
+  const so = resolveRoleFields(
+    details?.safetyOfficerBy,
+    undefined,
+    details?.safetyOfficerSignatureUrl,
+    overrides.safetyOfficer
+  );
 
   return {
     ...details,
@@ -149,6 +172,8 @@ export function applySignoffOverridesToDetails(
     approvedBy: app.name,
     approvedTitle: app.title,
     approvedSignatureUrl: app.signatureUrl,
+    safetyOfficerBy: so.name,
+    safetyOfficerSignatureUrl: so.signatureUrl,
   };
 }
 
@@ -165,12 +190,14 @@ export function ReportSignoffOverrideProvider({
   project,
   enabled = true,
   includeVerified = false,
+  defaultIncludeSafetyOfficer = false,
   defaults: customDefaults,
   children,
 }: {
   project: Pick<MastProjectState, 'preparedBy' | 'reportDetails'>;
   enabled?: boolean;
   includeVerified?: boolean;
+  defaultIncludeSafetyOfficer?: boolean;
   defaults?: Partial<ReportSignoffDefaults>;
   children: ReactNode;
 }) {
@@ -187,9 +214,28 @@ export function ReportSignoffOverrideProvider({
   const customApprovedBy = customDefaults?.approvedBy;
   const customApprovedTitle = customDefaults?.approvedTitle;
   const customApprovedSig = customDefaults?.approvedSignatureUrl;
+  const customSafetyOfficerBy = customDefaults?.safetyOfficerBy;
+  const customSafetyOfficerSig = customDefaults?.safetyOfficerSignatureUrl;
 
   const defaults = useMemo<ReportSignoffDefaults>(() => {
     const rd = project.reportDetails ?? {};
+    const rdSafetyName =
+      rd.safetyOfficerBy !== undefined
+        ? rd.safetyOfficerBy.trim()
+        : DEFAULT_SAFETY_OFFICER_NAME;
+    const baseSafetyBy =
+      customSafetyOfficerBy !== undefined ? customSafetyOfficerBy : rdSafetyName;
+    const rdSafetySig = rd.safetyOfficerSignatureUrl?.trim() || undefined;
+    const resolvedSafetySig =
+      customSafetyOfficerSig !== undefined
+        ? customSafetyOfficerSig
+        : rdSafetySig &&
+            baseSafetyBy &&
+            rdSafetyName &&
+            baseSafetyBy.toLowerCase() === rdSafetyName.toLowerCase()
+          ? rdSafetySig
+          : undefined;
+
     return {
       preparedBy:
         customPreparedBy !== undefined
@@ -210,6 +256,8 @@ export function ReportSignoffOverrideProvider({
       approvedTitle: customApprovedTitle ?? rd.approvedTitle?.trim() ?? '',
       approvedSignatureUrl:
         customApprovedSig ?? (rd.approvedSignatureUrl?.trim() || undefined),
+      safetyOfficerBy: baseSafetyBy,
+      safetyOfficerSignatureUrl: resolvedSafetySig,
     };
   }, [
     project.preparedBy,
@@ -225,13 +273,28 @@ export function ReportSignoffOverrideProvider({
     customApprovedBy,
     customApprovedTitle,
     customApprovedSig,
+    customSafetyOfficerBy,
+    customSafetyOfficerSig,
   ]);
 
   const contextValue = useMemo<ReportSignoffOverrideContextValue | null>(() => {
     if (!enabled) return null;
 
+    const includeSafetyOfficer =
+      overrides.includeSafetyOfficer !== undefined
+        ? overrides.includeSafetyOfficer
+        : defaultIncludeSafetyOfficer;
+
+    const setIncludeSafetyOfficer = (include: boolean) => {
+      setOverrides((prev) => ({
+        ...prev,
+        includeSafetyOfficer:
+          include === defaultIncludeSafetyOfficer ? undefined : include,
+      }));
+    };
+
     const setRoleOverride = (
-      role: keyof ReportSignoffOverrideState,
+      role: SignatoryOverrideRole,
       patch: Partial<SignatoryOverrideSlot>
     ) => {
       setOverrides((prev) => ({
@@ -243,7 +306,7 @@ export function ReportSignoffOverrideProvider({
       }));
     };
 
-    const resetRole = (role: keyof ReportSignoffOverrideState) => {
+    const resetRole = (role: SignatoryOverrideRole) => {
       setOverrides((prev) => {
         const next = { ...prev };
         delete next[role];
@@ -257,18 +320,24 @@ export function ReportSignoffOverrideProvider({
       isSlotOverridden(overrides.prepared) ||
       isSlotOverridden(overrides.verified) ||
       isSlotOverridden(overrides.checked) ||
-      isSlotOverridden(overrides.approved);
+      isSlotOverridden(overrides.approved) ||
+      isSlotOverridden(overrides.safetyOfficer) ||
+      (overrides.includeSafetyOfficer !== undefined &&
+        overrides.includeSafetyOfficer !== defaultIncludeSafetyOfficer);
 
     return {
       overrides,
       defaults,
       includeVerified,
+      includeSafetyOfficer,
+      defaultIncludeSafetyOfficer,
+      setIncludeSafetyOfficer,
       setRoleOverride,
       resetRole,
       resetAll,
       hasActiveOverrides,
     };
-  }, [enabled, overrides, defaults, includeVerified]);
+  }, [enabled, overrides, defaults, includeVerified, defaultIncludeSafetyOfficer]);
 
   return (
     <ReportSignoffOverrideContext.Provider value={contextValue}>
@@ -337,7 +406,7 @@ export function SignatoriesOverridePanel({
   onClose: () => void;
 }) {
   const [drawTarget, setDrawTarget] = useState<{
-    role: keyof ReportSignoffOverrideState;
+    role: SignatoryOverrideRole;
     label: string;
     defaultName: string;
   } | null>(null);
@@ -348,6 +417,8 @@ export function SignatoriesOverridePanel({
     overrides,
     defaults,
     includeVerified,
+    includeSafetyOfficer,
+    setIncludeSafetyOfficer,
     setRoleOverride,
     resetRole,
     resetAll,
@@ -355,7 +426,7 @@ export function SignatoriesOverridePanel({
   } = ctrl;
 
   const handleUploadOverrideSignature = async (
-    role: keyof ReportSignoffOverrideState,
+    role: SignatoryOverrideRole,
     file?: File | null
   ) => {
     if (!file) return;
@@ -375,7 +446,7 @@ export function SignatoriesOverridePanel({
   };
 
   const roles: {
-    key: keyof ReportSignoffOverrideState;
+    key: SignatoryOverrideRole;
     label: string;
     namePlaceholder: string;
     showTitle: boolean;
@@ -426,7 +497,27 @@ export function SignatoriesOverridePanel({
       baseTitle: defaults.approvedTitle,
       baseSignature: defaults.approvedSignatureUrl,
     },
+    ...(includeSafetyOfficer
+      ? [
+          {
+            key: 'safetyOfficer' as const,
+            label: 'Safety Officer',
+            namePlaceholder:
+              defaults.safetyOfficerBy || DEFAULT_SAFETY_OFFICER_NAME,
+            showTitle: false,
+            baseName: defaults.safetyOfficerBy,
+            baseSignature: defaults.safetyOfficerSignatureUrl,
+          },
+        ]
+      : []),
   ];
+
+  const gridColsClass =
+    roles.length >= 5
+      ? 'lg:grid-cols-3 xl:grid-cols-5'
+      : roles.length === 4
+        ? 'lg:grid-cols-4'
+        : 'lg:grid-cols-3';
 
   return (
     <div className="mt-2.5 pt-2.5 border-t border-slate-200 space-y-2.5">
@@ -437,10 +528,31 @@ export function SignatoriesOverridePanel({
             <span>Override Signatories for This Report</span>
           </div>
           <p className="text-[10.5px] text-slate-500">
-            Temporarily change who prepared, verified, checked, or approved this printout without changing saved Project Report Details.
+            Temporarily change signatories or toggle Safety Officer for this printout without changing saved Project Report Details.
           </p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={includeSafetyOfficer}
+            onClick={() => setIncludeSafetyOfficer(!includeSafetyOfficer)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-semibold cursor-pointer transition-colors ${
+              includeSafetyOfficer
+                ? 'border-sky-400 bg-sky-50 text-sky-800 hover:bg-sky-100'
+                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+            <span>Include Safety Officer</span>
+            <span
+              className={`ml-0.5 text-[10px] font-bold uppercase ${
+                includeSafetyOfficer ? 'text-sky-700' : 'text-slate-400'
+              }`}
+            >
+              {includeSafetyOfficer ? 'On' : 'Off'}
+            </span>
+          </button>
           {hasActiveOverrides && (
             <button
               type="button"
@@ -462,11 +574,7 @@ export function SignatoriesOverridePanel({
         </div>
       </div>
 
-      <div
-        className={`grid grid-cols-1 sm:grid-cols-2 ${
-          includeVerified ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
-        } gap-2.5`}
-      >
+      <div className={`grid grid-cols-1 sm:grid-cols-2 ${gridColsClass} gap-2.5`}>
         {roles.map((r) => {
           const slot = overrides[r.key];
           const overridden = isSlotOverridden(slot);

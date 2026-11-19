@@ -204,5 +204,35 @@ describe('DailyLogPrintSheet and Batch PDF Export Layout', () => {
     expect(htmlHiddenMaterials).not.toContain('Materials on Site');
     expect(htmlHiddenMaterials).not.toContain('Portland Cement');
   });
+
+  it('renders matching Safety Officer signature on DailyLogPrintSheet and leaves non-matching signature blank', () => {
+    const projectWithSafetySig = {
+      ...baseProject,
+      reportDetails: {
+        ...baseProject.reportDetails,
+        safetyOfficerBy: 'Flordeliza Manjares',
+        safetyOfficerSignatureUrl: 'data:image/png;base64,SOSIG',
+      },
+    };
+
+    const matchingHtml = renderToStaticMarkup(
+      createElement(DailyLogPrintSheet, {
+        project: projectWithSafetySig,
+        log: { ...mockLog1, safetyOfficer: 'Flordeliza Manjares' },
+      })
+    );
+    expect(matchingHtml).toContain('Safety Officer');
+    expect(matchingHtml).toContain('Flordeliza Manjares');
+    expect(matchingHtml).toContain('src="data:image/png;base64,SOSIG"');
+
+    const nonMatchingHtml = renderToStaticMarkup(
+      createElement(DailyLogPrintSheet, {
+        project: projectWithSafetySig,
+        log: { ...mockLog1, safetyOfficer: 'Mark Santos' },
+      })
+    );
+    expect(nonMatchingHtml).toContain('Mark Santos');
+    expect(nonMatchingHtml).not.toContain('src="data:image/png;base64,SOSIG"');
+  });
 });
 

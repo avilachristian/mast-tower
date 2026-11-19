@@ -18,7 +18,12 @@ export function DailyLogBatchPrintModal({
   onClose: () => void;
 }) {
   return (
-    <ReportSignoffOverrideProvider project={project}>
+    <ReportSignoffOverrideProvider
+      project={project}
+      defaultIncludeSafetyOfficer={project.dailyLogs.some((l) =>
+        Boolean(l.safetyOfficer?.trim())
+      )}
+    >
       <DailyLogBatchPrintModalContent project={project} onClose={onClose} />
     </ReportSignoffOverrideProvider>
   );

@@ -140,6 +140,8 @@ export function workspaceDto(
     'approvedBy',
     'approvedTitle',
     'approvedSignatureUrl',
+    'safetyOfficerBy',
+    'safetyOfficerSignatureUrl',
     'logos',
     'logoHeightPx',
   ] as const;
