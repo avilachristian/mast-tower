@@ -6,6 +6,7 @@ import {
   computeHaulerCreditLedgers,
   resolveHaulingRateConfig,
 } from './haulingInventory';
+import { DEFAULT_SAFETY_OFFICER_NAME } from './materialConstants';
 import type {
   CivilWorksAttendanceRecord,
   CivilWorksPayrollLineItem,
@@ -18,6 +19,7 @@ import type {
   ManpowerMember,
   MastProjectState,
   PayrollPeriodType,
+  WorkerAttendanceEntry,
   WorkerRole,
 } from './types';
 
@@ -38,6 +40,176 @@ export const MANPOWER_POSITIONS: WorkerRole[] = [
 export const CIVIL_WORK_POSITIONS: WorkerRole[] = MANPOWER_POSITIONS.filter(
   (role) => role !== 'Horse Hauler'
 );
+
+export function getPresentCivilWorksMembersForDate(
+  project: Pick<
+    MastProjectState,
+    'manpowerRoster' | 'haulerRoster' | 'haulingLogs' | 'civilAttendance'
+  >,
+  date: string
+): ManpowerMember[] {
+  const attendanceRec = (project.civilAttendance ?? []).find(
+    (rec) => rec.date === date
+  );
+  if (!attendanceRec || attendanceRec.presentMemberIds.length === 0) {
+    return [];
+  }
+
+  const civilMemberById = new Map<string, ManpowerMember>();
+  for (const member of resolveManpowerRoster(project)) {
+    if (member.category === 'civil_works') {
+      civilMemberById.set(member.id, member);
+    }
+  }
+
+  const seenIds = new Set<string>();
+  const presentMembers: ManpowerMember[] = [];
+  for (const memberId of attendanceRec.presentMemberIds) {
+    if (seenIds.has(memberId)) continue;
+    seenIds.add(memberId);
+    const member = civilMemberById.get(memberId);
+    if (member) {
+      presentMembers.push(member);
+    }
+  }
+  return presentMembers;
+}
+
+export interface DailyLogManpowerSeedOptions {
+  preparedBy?: string;
+  safetyOfficer?: string;
+}
+
+const FOUNDATION_FALLBACK_ROLES: readonly WorkerRole[] = [
+  'Foreman',
+  'Mason',
+  'Steelman',
+  'Laborer',
+];
+
+const VERTICAL_MAST_FALLBACK_ROLES: readonly WorkerRole[] = [
+  'Foreman',
+  'Skilled',
+  'Operator',
+];
+
+/**
+ * Prefills Daily Log manpower rows from Civil Works workers toggled present on `date`,
+ * while always prefilling Site Engineer (from `preparedBy`) and Safety Officer.
+ */
+export function buildDailyLogManpowerFromAttendance(
+  project: Pick<
+    MastProjectState,
+    | 'projectType'
+    | 'preparedBy'
+    | 'reportDetails'
+    | 'manpowerRoster'
+    | 'haulerRoster'
+    | 'haulingLogs'
+    | 'civilAttendance'
+  >,
+  date: string,
+  options?: DailyLogManpowerSeedOptions
+): WorkerAttendanceEntry[] {
+  const engineerName = (
+    options?.preparedBy !== undefined
+      ? options.preparedBy
+      : project.reportDetails?.preparedBy?.trim() || project.preparedBy || ''
+  ).trim();
+
+  const defaultSafetyOfficer =
+    project.reportDetails?.safetyOfficerBy !== undefined
+      ? project.reportDetails.safetyOfficerBy.trim()
+      : DEFAULT_SAFETY_OFFICER_NAME;
+  const safetyOfficerName = (
+    options?.safetyOfficer !== undefined
+      ? options.safetyOfficer
+      : defaultSafetyOfficer
+  ).trim();
+
+  const presentMembers = getPresentCivilWorksMembersForDate(project, date);
+
+  const namesByRole = new Map<WorkerRole, string[]>();
+  const seenNamesByRole = new Map<WorkerRole, Set<string>>();
+
+  const addRoleName = (role: WorkerRole, rawName: string) => {
+    const trimmed = rawName.trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (!namesByRole.has(role)) {
+      namesByRole.set(role, []);
+      seenNamesByRole.set(role, new Set());
+    }
+    const seen = seenNamesByRole.get(role)!;
+    if (seen.has(key)) return;
+    seen.add(key);
+    namesByRole.get(role)!.push(trimmed);
+  };
+
+  if (engineerName) {
+    addRoleName('Site Engineer', engineerName);
+  }
+  if (safetyOfficerName) {
+    addRoleName('Safety Officer', safetyOfficerName);
+  }
+  for (const member of presentMembers) {
+    addRoleName(member.position, member.name);
+  }
+
+  const fallbackRoles = new Set<WorkerRole>(
+    project.projectType === 'vertical_mast'
+      ? VERTICAL_MAST_FALLBACK_ROLES
+      : FOUNDATION_FALLBACK_ROLES
+  );
+  const hasPresentMembers = presentMembers.length > 0;
+
+  const entries: WorkerAttendanceEntry[] = [];
+  for (const role of MANPOWER_POSITIONS) {
+    const names = namesByRole.get(role) ?? [];
+    if (role === 'Site Engineer') {
+      entries.push({
+        role,
+        count: Math.max(1, names.length),
+        names: names.join(', '),
+        hours: 0,
+      });
+      continue;
+    }
+
+    if (role === 'Safety Officer') {
+      if (names.length > 0 || !hasPresentMembers) {
+        entries.push({
+          role,
+          count: names.length,
+          names: names.join(', '),
+          hours: 0,
+        });
+      }
+      continue;
+    }
+
+    if (names.length > 0) {
+      entries.push({
+        role,
+        count: names.length,
+        names: names.join(', '),
+        hours: 0,
+      });
+      continue;
+    }
+
+    if (!hasPresentMembers && fallbackRoles.has(role)) {
+      entries.push({
+        role,
+        count: 0,
+        names: '',
+        hours: 0,
+      });
+    }
+  }
+
+  return entries;
+}
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;

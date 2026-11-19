@@ -271,12 +271,24 @@ export async function getSessionUserFromRequest(
   return sessionDto(c.env, row);
 }
 
+function isHttpsRequest(c: WorkerContext): boolean {
+  const forwardedProto = c.req
+    .header('x-forwarded-proto')
+    ?.split(',')[0]
+    ?.trim()
+    .toLowerCase();
+  if (forwardedProto) {
+    return forwardedProto === 'https';
+  }
+  return new URL(c.req.url).protocol === 'https:';
+}
+
 export function setSessionCookie(c: WorkerContext, token: string): void {
-  const isHttps = new URL(c.req.url).protocol === 'https:';
+  const isHttps = isHttpsRequest(c);
   setCookie(c, SESSION_COOKIE_NAME, token, {
     path: '/',
     httpOnly: true,
-    sameSite: 'Lax',
+    sameSite: isHttps ? 'None' : 'Lax',
     secure: isHttps,
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
@@ -292,11 +304,11 @@ export async function destroySessionFromRequest(
       .bind(tokenHash)
       .run();
   }
-  const isHttps = new URL(c.req.url).protocol === 'https:';
+  const isHttps = isHttpsRequest(c);
   deleteCookie(c, SESSION_COOKIE_NAME, {
     path: '/',
     httpOnly: true,
-    sameSite: 'Lax',
+    sameSite: isHttps ? 'None' : 'Lax',
     secure: isHttps,
   });
 }

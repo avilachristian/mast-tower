@@ -357,6 +357,7 @@ export function VerticalMastInspectionView() {
                   value={meta.inspectorSignatureUrl}
                   inheritedValue={inheritedInspectorSignature}
                   emptyHint="No signature — left blank"
+                  defaultSignerName={meta.inspectorName || project.preparedBy}
                   onChange={(nextUrl) =>
                     updateMastInspectionMeta(selectedMastTarget.kind, activeId, {
                       inspectorSignatureUrl: nextUrl,
@@ -366,6 +367,7 @@ export function VerticalMastInspectionView() {
                 <SignatureUploadControl
                   label="Verified by Signature"
                   value={meta.verifiedSignatureUrl}
+                  defaultSignerName={meta.contractorRep}
                   emptyHint={
                     meta.contractorRep?.trim()
                       ? 'No signature — left blank'

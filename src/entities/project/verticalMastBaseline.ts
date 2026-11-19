@@ -1,5 +1,6 @@
 import { createDefaultReportLogos } from '@/shared/assets/defaultLogos';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
+import { DEFAULT_SAFETY_OFFICER_NAME } from './materialConstants';
 import {
   checklistFromStatus,
   createInitialFoundations,
@@ -638,6 +639,7 @@ export function createCleanVerticalMastProject(): MastProjectState {
       projectLocation: 'Mt. Labo, Camarines Norte',
       contractor: 'GSL Utility Builders',
       preparedBy: 'Engr. Christian C. Avila',
+      safetyOfficerBy: DEFAULT_SAFETY_OFFICER_NAME,
       documentTitle: 'VERTICAL MAST TOWER ERECTION STATUS REPORT',
       referenceNo: 'ZT-120-01',
       logos: createDefaultReportLogos(),
@@ -747,7 +749,7 @@ export function createSampleVerticalMastProject(): MastProjectState {
           { role: 'Site Engineer', count: 1, names: 'Engr. Christian', hours: 8 },
           { role: 'Foreman', count: 1, names: 'Tower Rigging Lead', hours: 8 },
           { role: 'Skilled', count: 6, names: 'Tower Riggers & Bolt Crew', hours: 8 },
-          { role: 'Safety Officer', count: 1, names: 'Harness & Rescue Watch', hours: 8 },
+          { role: 'Safety Officer', count: 1, names: DEFAULT_SAFETY_OFFICER_NAME, hours: 8 },
         ],
         totalWorkers: 9,
         totalManHours: 72,
@@ -816,6 +818,7 @@ export function createSampleVerticalMastProject(): MastProjectState {
         cementUsedBags: 0,
         sandUsedBags: 0,
         gravelUsedBags: 0,
+        safetyOfficer: DEFAULT_SAFETY_OFFICER_NAME,
         issuesOrDelays: 'Afternoon gusty wind paused gin-pole lift for 45 mins after 3:00 PM.',
       },
     ],

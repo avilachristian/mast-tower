@@ -1,4 +1,5 @@
 import { ImagePlus, Printer, RotateCcw, Trash2 } from 'lucide-react';
+import { DEFAULT_SAFETY_OFFICER_NAME } from '@/entities/project/materialConstants';
 import type { MastProjectState, ReportDetailsSpec } from '@/entities/project/types';
 import { createDefaultReportLogos, resolveReportLogos } from '@/shared/assets/defaultLogos';
 import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
@@ -416,6 +417,7 @@ export function ProjectReportDetailsPanel({
                   label="Prepared By Signature"
                   value={details.preparedSignatureUrl}
                   emptyHint="No signature — line remains blank"
+                  defaultSignerName={details.preparedBy ?? project.preparedBy}
                   onChange={(nextUrl) =>
                     update({ preparedSignatureUrl: nextUrl })
                   }
@@ -451,6 +453,7 @@ export function ProjectReportDetailsPanel({
                   label="Checked / Reviewed By Signature"
                   value={details.checkedSignatureUrl}
                   emptyHint="No signature — line remains blank"
+                  defaultSignerName={details.checkedBy}
                   onChange={(nextUrl) =>
                     update({ checkedSignatureUrl: nextUrl })
                   }
@@ -486,11 +489,25 @@ export function ProjectReportDetailsPanel({
                   label="Approved By Signature"
                   value={details.approvedSignatureUrl}
                   emptyHint="No signature — line remains blank"
+                  defaultSignerName={details.approvedBy}
                   onChange={(nextUrl) =>
                     update({ approvedSignatureUrl: nextUrl })
                   }
                 />
               </div>
+
+              <label className="sm:col-span-2 block">
+                <span className="block text-[11px] font-semibold text-slate-600 mb-1">
+                  Safety Officer
+                </span>
+                <input
+                  type="text"
+                  placeholder={DEFAULT_SAFETY_OFFICER_NAME}
+                  value={details.safetyOfficerBy ?? DEFAULT_SAFETY_OFFICER_NAME}
+                  onChange={(e) => update({ safetyOfficerBy: e.target.value })}
+                  className="w-full h-8 px-2.5 border border-slate-300 rounded bg-white"
+                />
+              </label>
 
               <div className="sm:col-span-2 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-[10.5px] text-slate-500">
                 Inspection-specific <span className="font-semibold text-slate-700">Inspected By</span> &amp;{' '}

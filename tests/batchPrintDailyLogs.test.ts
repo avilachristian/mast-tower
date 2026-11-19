@@ -132,4 +132,77 @@ describe('DailyLogPrintSheet and Batch PDF Export Layout', () => {
     expect(html).toContain('page-break-after:always');
     expect(html).toContain('break-after-page');
   });
+
+  it('leaves Safety Officer blank, removes blank sections, and toggles materials on DailyLogPrintSheet', () => {
+    const { safetyOfficer: _omitted, ...logWithoutSafetyOfficer } = mockLog1;
+    const htmlWithoutSafetyOfficer = renderToStaticMarkup(
+      createElement(DailyLogPrintSheet, {
+        project: baseProject,
+        log: logWithoutSafetyOfficer,
+      })
+    );
+    expect(htmlWithoutSafetyOfficer).not.toContain('Flordeliza Manjares');
+    expect(htmlWithoutSafetyOfficer).not.toContain('Safety Officer:');
+    expect(htmlWithoutSafetyOfficer).toContain('Portland Cement');
+    // Empty sections (delays, documentation) are omitted
+    expect(htmlWithoutSafetyOfficer).not.toContain('Delays / Issues');
+    expect(htmlWithoutSafetyOfficer).not.toContain('Documentation');
+
+    const minimalLog: DailyActivityLogEntry = {
+      id: 'log-minimal',
+      dayNumber: 3,
+      date: '2026-11-18',
+      weather: 'Sunny',
+      foundationsWorked: ['PF-0'],
+      workers: [{ role: 'Foreman', count: 1, names: 'Juan', hours: 8 }],
+      totalWorkers: 1,
+      totalManHours: 8,
+      cementUsedBags: 0,
+      sandUsedBags: 0,
+      gravelUsedBags: 0,
+      activities: [
+        {
+          id: 'act-min',
+          foundationId: 'PF-0',
+          description: 'Site layout',
+          status: 'Completed',
+          remarks: '',
+        },
+      ],
+      activitiesSummary: '',
+      materialsOnSite: mockLog1.materialsOnSite,
+      equipmentItems: [],
+      delayItems: [],
+      visitorItems: [],
+      safetyLogs: [],
+      documentationItems: [],
+      issuesOrDelays: '',
+    };
+
+    const htmlWithMaterials = renderToStaticMarkup(
+      createElement(DailyLogPrintSheet, {
+        project: baseProject,
+        log: minimalLog,
+        showMaterials: true,
+      })
+    );
+    expect(htmlWithMaterials).toContain('Materials on Site');
+    expect(htmlWithMaterials).toContain('Portland Cement');
+    expect(htmlWithMaterials).not.toContain('Safety Logs');
+    expect(htmlWithMaterials).not.toContain('Equipments');
+    expect(htmlWithMaterials).not.toContain('Delays / Issues');
+    expect(htmlWithMaterials).not.toContain('Visitors');
+    expect(htmlWithMaterials).not.toContain('Documentation');
+
+    const htmlHiddenMaterials = renderToStaticMarkup(
+      createElement(DailyLogPrintSheet, {
+        project: baseProject,
+        log: minimalLog,
+        showMaterials: false,
+      })
+    );
+    expect(htmlHiddenMaterials).not.toContain('Materials on Site');
+    expect(htmlHiddenMaterials).not.toContain('Portland Cement');
+  });
 });
+

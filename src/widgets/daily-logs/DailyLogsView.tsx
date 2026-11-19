@@ -32,6 +32,7 @@ import {
   buildCentralizedDailyLogMaterials,
   syncDailyLogMaterialsWithHauling,
 } from '@/entities/project/haulingInventory';
+import { DEFAULT_SAFETY_OFFICER_NAME } from '@/entities/project/materialConstants';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
 import { DailyLogBatchPrintModal } from './DailyLogBatchPrintModal';
 import { DailyLogsHistoryFeed } from './sections/DailyLogsHistoryFeed';
@@ -57,7 +58,11 @@ import type {
   WorkerRole,
 } from '@/entities/project/types';
 import { uploadOrStageProjectImage } from '@/shared/lib/imageUpload';
-import { MANPOWER_POSITIONS } from '@/entities/project/manpowerPayroll';
+import {
+  MANPOWER_POSITIONS,
+  buildDailyLogManpowerFromAttendance,
+  getPresentCivilWorksMembersForDate,
+} from '@/entities/project/manpowerPayroll';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
 import {
@@ -143,23 +148,6 @@ function createEmptyDocumentation(): DailyLogDocumentationItem {
   };
 }
 
-function createDefaultWorkers(isVerticalMast = false): WorkerAttendanceEntry[] {
-  if (isVerticalMast) {
-    return [
-      { role: 'Foreman', count: 1, names: '', hours: 0 },
-      { role: 'Skilled', count: 0, names: '', hours: 0 },
-      { role: 'Safety Officer', count: 0, names: '', hours: 0 },
-      { role: 'Operator', count: 0, names: '', hours: 0 },
-    ];
-  }
-  return [
-    { role: 'Foreman', count: 1, names: '', hours: 0 },
-    { role: 'Mason', count: 0, names: '', hours: 0 },
-    { role: 'Steelman', count: 0, names: '', hours: 0 },
-    { role: 'Laborer', count: 0, names: '', hours: 0 },
-  ];
-}
-
 export function DailyLogsView({
   project: projectProp,
   foundations,
@@ -208,8 +196,17 @@ export function DailyLogsView({
   const [weather, setWeather] = useState<DailyLogWeather>('Sunny');
   const [weatherNotes, setWeatherNotes] = useState('');
   const [selectedFoundations, setSelectedFoundations] = useState<string[]>([]);
-  const [workers, setWorkers] = useState<WorkerAttendanceEntry[]>(
-    () => createDefaultWorkers(isVerticalMast)
+  const defaultSafetyOfficer =
+    project.reportDetails?.safetyOfficerBy !== undefined
+      ? project.reportDetails.safetyOfficerBy.trim()
+      : DEFAULT_SAFETY_OFFICER_NAME;
+  const initialSafetyOfficer =
+    latestLog?.safetyOfficer?.trim() || defaultSafetyOfficer;
+  const [workers, setWorkers] = useState<WorkerAttendanceEntry[]>(() =>
+    buildDailyLogManpowerFromAttendance(project, todayLocalIso(), {
+      preparedBy: project.preparedBy,
+      safetyOfficer: initialSafetyOfficer,
+    })
   );
   const [materialsOnSite, setMaterialsOnSite] = useState<DailyLogMaterialItem[]>(
     () =>
@@ -232,8 +229,9 @@ export function DailyLogsView({
   const [visitorItems, setVisitorItems] = useState<DailyLogVisitorItem[]>([
     createEmptyVisitor(),
   ]);
+  const [safetyOfficerTouched, setSafetyOfficerTouched] = useState(false);
   const [safetyOfficer, setSafetyOfficer] = useState(
-    () => latestLog?.safetyOfficer ?? ''
+    () => initialSafetyOfficer
   );
   const [safetyLogs, setSafetyLogs] = useState<DailyLogSafetyItem[]>([
     createEmptySafetyLog(),
@@ -268,6 +266,32 @@ export function DailyLogsView({
     ]
   );
 
+  const manpowerSeedProject = useMemo(
+    () => ({
+      projectType: project.projectType,
+      preparedBy: project.preparedBy,
+      reportDetails: project.reportDetails,
+      manpowerRoster: project.manpowerRoster,
+      haulerRoster: project.haulerRoster,
+      haulingLogs: project.haulingLogs,
+      civilAttendance: project.civilAttendance,
+    }),
+    [
+      project.projectType,
+      project.preparedBy,
+      project.reportDetails,
+      project.manpowerRoster,
+      project.haulerRoster,
+      project.haulingLogs,
+      project.civilAttendance,
+    ]
+  );
+
+  const presentAttendanceOnDate = useMemo(
+    () => getPresentCivilWorksMembersForDate(manpowerSeedProject, date),
+    [manpowerSeedProject, date]
+  );
+
   useEffect(() => {
     if (editingLogId || metaTouched) return;
     setProjectName(project.projectName);
@@ -280,6 +304,11 @@ export function DailyLogsView({
     project.location,
     project.preparedBy,
   ]);
+
+  useEffect(() => {
+    if (editingLogId || safetyOfficerTouched) return;
+    setSafetyOfficer(latestLog?.safetyOfficer?.trim() || defaultSafetyOfficer);
+  }, [editingLogId, safetyOfficerTouched, latestLog?.safetyOfficer, defaultSafetyOfficer]);
 
   useEffect(() => {
     if (editingLogId || dayNumberTouched) return;
@@ -300,8 +329,20 @@ export function DailyLogsView({
 
   useEffect(() => {
     if (editingLogId || workersTouched) return;
-    setWorkers(createDefaultWorkers(isVerticalMast));
-  }, [editingLogId, workersTouched, isVerticalMast]);
+    setWorkers(
+      buildDailyLogManpowerFromAttendance(manpowerSeedProject, date, {
+        preparedBy,
+        safetyOfficer,
+      })
+    );
+  }, [
+    editingLogId,
+    workersTouched,
+    manpowerSeedProject,
+    date,
+    preparedBy,
+    safetyOfficer,
+  ]);
 
   useEffect(() => {
     if (editingLogId) return;
@@ -332,7 +373,14 @@ export function DailyLogsView({
     setWeatherNotes('');
     setSelectedFoundations([]);
     setWorkersTouched(false);
-    setWorkers(createDefaultWorkers(isVerticalMast));
+    const nextSafetyOfficer =
+      sourceLog?.safetyOfficer?.trim() || defaultSafetyOfficer;
+    setWorkers(
+      buildDailyLogManpowerFromAttendance(manpowerSeedProject, todayIso, {
+        preparedBy: project.preparedBy,
+        safetyOfficer: nextSafetyOfficer,
+      })
+    );
     setMaterialsOnSite(
       buildCentralizedDailyLogMaterials(
         project,
@@ -345,7 +393,8 @@ export function DailyLogsView({
     setEquipmentItems([createEmptyEquipment()]);
     setDelayItems([createEmptyDelay()]);
     setVisitorItems([createEmptyVisitor()]);
-    setSafetyOfficer(sourceLog?.safetyOfficer ?? '');
+    setSafetyOfficerTouched(false);
+    setSafetyOfficer(nextSafetyOfficer);
     setSafetyLogs([createEmptySafetyLog()]);
     setDocumentationItems([createEmptyDocumentation()]);
     setActivitiesSummary('');
@@ -368,7 +417,10 @@ export function DailyLogsView({
     setWorkers(
       log.workers.length > 0
         ? log.workers.map((w) => ({ ...w }))
-        : createDefaultWorkers(isVerticalMast)
+        : buildDailyLogManpowerFromAttendance(manpowerSeedProject, log.date, {
+            preparedBy: log.preparedBy ?? project.preparedBy,
+            safetyOfficer: log.safetyOfficer ?? '',
+          })
     );
     const resolvedMats = getDailyLogMaterialRows(log);
     setMaterialsOnSite(
@@ -400,6 +452,7 @@ export function DailyLogsView({
         ? resolvedVisitors.map((v) => ({ ...v }))
         : [createEmptyVisitor()]
     );
+    setSafetyOfficerTouched(true);
     setSafetyOfficer(log.safetyOfficer ?? '');
     const resolvedSafety = getDailyLogSafetyRows(log);
     setSafetyLogs(
@@ -1181,6 +1234,18 @@ export function DailyLogsView({
               workers={workers}
               roles={ROLES}
               totalWorkers={totalPreviewWorkers}
+              date={date}
+              presentAttendanceCount={presentAttendanceOnDate.length}
+              onSyncAttendance={() => {
+                setWorkersTouched(false);
+                setWorkers(
+                  buildDailyLogManpowerFromAttendance(
+                    manpowerSeedProject,
+                    date,
+                    { preparedBy, safetyOfficer }
+                  )
+                );
+              }}
               onAddWorkerRow={addWorkerRow}
               onOpenAddModal={() => openAddModal('worker')}
               onOpenEditModal={(w, idx) =>
@@ -1703,7 +1768,10 @@ export function DailyLogsView({
 
             <DailyLogSafetySection
               safetyOfficer={safetyOfficer}
-              onSafetyOfficerChange={setSafetyOfficer}
+              onSafetyOfficerChange={(name) => {
+                setSafetyOfficerTouched(true);
+                setSafetyOfficer(name);
+              }}
               safetyLogs={safetyLogs}
               onAddRow={addSafetyRow}
               onOpenModal={(item, idx) =>

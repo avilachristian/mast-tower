@@ -1,4 +1,4 @@
-import type { D1PreparedStatement } from '@cloudflare/workers-types';
+import type { D1PreparedStatement } from './cloudflareTypes';
 import type { AdminSessionUser, Env } from './types';
 
 export interface Change {

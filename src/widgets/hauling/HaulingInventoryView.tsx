@@ -196,12 +196,20 @@ export function HaulingInventoryView() {
     }
   };
 
-  const handleDeleteCustomMaterial = async (item: CentralMaterialItem) => {
+  const handleDeleteMaterial = async (
+    item: CentralMaterialItem,
+    hauledQty = 0,
+    usedOnSiteQty = 0
+  ) => {
+    const hasActivity = hauledQty > 0 || usedOnSiteQty > 0;
     const ok = await requestConfirm({
       tone: 'danger',
       title: 'Delete Material Item?',
       message: `Remove "${item.name}" from Centralized Inventory?`,
-      confirmLabel: 'Delete Item',
+      detail: hasActivity
+        ? 'Existing hauling trips and daily log records for this item will remain in history, while the item is removed from the centralized inventory list.'
+        : 'This material will be removed from the centralized inventory list.',
+      confirmLabel: 'Delete Material',
     });
     if (ok) {
       deleteCentralMaterial(item.id);
@@ -493,57 +501,68 @@ export function HaulingInventoryView() {
 
           {/* Mobile Cards (Inventory) */}
           <div className="md:hidden space-y-2.5">
-            {filteredInventoryRows.map((row) => {
-              const { item } = row;
-              const isCustom = item.id.startsWith('cmat-');
-              const hasCuM = Boolean(item.unitsPerPurchaseUnit);
-              const yardWarning = row.stockYardRemainingQty < 0;
-              return (
-                <div
-                  key={item.id}
-                  className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-3 shadow-2xs"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-sm font-bold text-slate-900">
-                          {item.name}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-semibold">
-                          {item.unit}
-                        </span>
-                      </div>
-                      {item.remarks && (
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          {item.remarks}
+            {filteredInventoryRows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center space-y-2">
+                <Package className="w-7 h-7 text-slate-300 mx-auto" />
+                <div className="text-sm font-bold text-slate-700">
+                  No materials in this view
+                </div>
+                <p className="text-xs text-slate-500">
+                  Adjust the search filter or add a new material item.
+                </p>
+              </div>
+            ) : (
+              filteredInventoryRows.map((row) => {
+                const { item } = row;
+                const hasCuM = Boolean(item.unitsPerPurchaseUnit);
+                const yardWarning = row.stockYardRemainingQty < 0;
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-3 shadow-2xs"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-bold text-slate-900">
+                            {item.name}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[10px] font-semibold">
+                            {item.unit}
+                          </span>
                         </div>
-                      )}
-                    </div>
+                        {item.remarks && (
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {item.remarks}
+                          </div>
+                        )}
+                      </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {row.stillNeededOnSiteQty > 0 ? (
-                        <span className="px-2 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold">
-                          Need {formatNum(row.stillNeededOnSiteQty)} {item.unit}
-                          {row.stillNeededCuM !== null ? ` (${row.stillNeededCuM} cu.m)` : ''}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Site Complete
-                        </span>
-                      )}
-                      {isCustom && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {row.stillNeededOnSiteQty > 0 ? (
+                          <span className="px-2 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold">
+                            Need {formatNum(row.stillNeededOnSiteQty)} {item.unit}
+                            {row.stillNeededCuM !== null ? ` (${row.stillNeededCuM} cu.m)` : ''}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Site Complete
+                          </span>
+                        )}
                         <button
                           type="button"
-                          onClick={() => void handleDeleteCustomMaterial(item)}
+                          onClick={() =>
+                            void handleDeleteMaterial(item, row.hauledQty, row.usedOnSiteQty)
+                          }
                           aria-label={`Delete ${item.name}`}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                          title={`Delete ${item.name}`}
+                          className="p-1.5 rounded-lg border border-rose-200 text-rose-500 hover:text-rose-700 hover:bg-rose-50 cursor-pointer"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
-                      )}
+                      </div>
                     </div>
-                  </div>
 
                   {/* Editable Yard Stock & Target */}
                   <div className="grid grid-cols-2 gap-2">
@@ -648,8 +667,9 @@ export function HaulingInventoryView() {
                     </div>
                   </div>
                 </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
 
           {/* Desktop Table (Inventory) */}
@@ -672,11 +692,20 @@ export function HaulingInventoryView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredInventoryRows.map((row) => {
-                  const { item } = row;
-                  const isCustom = item.id.startsWith('cmat-');
-                  const hasCuM = Boolean(item.unitsPerPurchaseUnit);
-                  const yardWarning = row.stockYardRemainingQty < 0;
+                {filteredInventoryRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      className="px-4 py-8 text-center text-xs text-slate-500"
+                    >
+                      No materials match the current filter. Adjust search or add a new material item.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredInventoryRows.map((row) => {
+                    const { item } = row;
+                    const hasCuM = Boolean(item.unitsPerPurchaseUnit);
+                    const yardWarning = row.stockYardRemainingQty < 0;
 
                   return (
                     <tr key={item.id} className="hover:bg-slate-50/70">
@@ -809,20 +838,22 @@ export function HaulingInventoryView() {
                         )}
                       </td>
                       <td className="pr-2 py-2 text-center">
-                        {isCustom && (
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteCustomMaterial(item)}
-                            aria-label={`Delete ${item.name}`}
-                            className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleDeleteMaterial(item, row.hauledQty, row.usedOnSiteQty)
+                          }
+                          aria-label={`Delete ${item.name}`}
+                          title={`Delete ${item.name}`}
+                          className="p-1.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </td>
                     </tr>
                   );
-                })}
+                })
+                )}
               </tbody>
             </table>
           </div>

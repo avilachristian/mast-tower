@@ -1,11 +1,14 @@
 import { memo } from 'react';
-import { Pencil, Plus, Trash2, Users } from 'lucide-react';
+import { Pencil, Plus, Trash2, UserCheck, Users } from 'lucide-react';
 import type { WorkerAttendanceEntry, WorkerRole } from '@/entities/project/types';
 
 export interface DailyLogManpowerSectionProps {
   workers: WorkerAttendanceEntry[];
   roles: readonly WorkerRole[];
   totalWorkers: number;
+  date: string;
+  presentAttendanceCount: number;
+  onSyncAttendance: () => void;
   onAddWorkerRow: () => void;
   onOpenAddModal: () => void;
   onOpenEditModal: (worker: WorkerAttendanceEntry, index: number) => void;
@@ -17,6 +20,9 @@ export const DailyLogManpowerSection = memo(function DailyLogManpowerSection({
   workers,
   roles,
   totalWorkers,
+  date,
+  presentAttendanceCount,
+  onSyncAttendance,
   onAddWorkerRow,
   onOpenAddModal,
   onOpenEditModal,
@@ -25,15 +31,26 @@ export const DailyLogManpowerSection = memo(function DailyLogManpowerSection({
 }: DailyLogManpowerSectionProps) {
   return (
     <section className="space-y-2 pt-2 border-t border-slate-100">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500">
           <Users className="w-3.5 h-3.5 text-sky-600" />
           3. Manpower
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="px-2 py-0.5 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-[11px] font-bold">
             {totalWorkers} crew
           </span>
+          {presentAttendanceCount > 0 && (
+            <button
+              type="button"
+              onClick={onSyncAttendance}
+              title={`Prefill Manpower from ${presentAttendanceCount} Civil Works worker(s) present on ${date} plus Site Engineer & Safety Officer`}
+              className="inline-flex items-center gap-1 min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-1 sm:py-0.5 rounded-lg sm:rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 text-[11px] sm:text-[10px] font-semibold cursor-pointer"
+            >
+              <UserCheck className="w-3 h-3" />
+              Sync Attendance ({presentAttendanceCount})
+            </button>
+          )}
           <button
             type="button"
             onClick={onAddWorkerRow}

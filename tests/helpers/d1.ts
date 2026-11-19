@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { D1Database } from '@cloudflare/workers-types';
+import type { D1Database } from '../../worker/cloudflareTypes';
 
 /** Real SQLite transactions and JSON functions, exposed through D1's async API. */
 export function createTestD1() {

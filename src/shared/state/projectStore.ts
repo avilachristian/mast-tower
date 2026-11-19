@@ -4,7 +4,6 @@ import {
   recalculateDailyLogCarryOver,
 } from '@/entities/project/calculations';
 import {
-  createDefaultCentralMaterials,
   resolveCentralMaterials,
   resolveHaulingRateConfig,
   syncDailyLogMaterialsWithHauling,
@@ -1645,8 +1644,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => {
         const next: MastProjectState = {
           ...s.project,
           lastUpdated: todayLocalIso(),
-          centralMaterials:
-            centralMaterials.length > 0 ? centralMaterials : createDefaultCentralMaterials(),
+          centralMaterials,
         };
         return commitActiveProject(s, next);
       }),

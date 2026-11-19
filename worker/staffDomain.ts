@@ -202,6 +202,7 @@ export function parseCommand(raw: unknown): StaffCommand {
       'payout.save',
       'hauling.save',
       'material.save',
+      'material.delete',
       'rates.save',
     ] as const),
     payload: object(v.payload),
@@ -249,9 +250,12 @@ export function applyCommand(
 ): MastProjectState {
   const p = command.payload,
     s = structuredClone(state),
-    hauling = ['hauling.save', 'material.save', 'rates.save'].includes(
-      command.type
-    );
+    hauling = [
+      'hauling.save',
+      'material.save',
+      'material.delete',
+      'rates.save',
+    ].includes(command.type);
   if (!permissions.includes(hauling ? 'hauling_inventory' : 'manpower_payroll'))
     throw new CommandError('This action is not permitted.', 403);
   const roster = resolveManpowerRoster(s),
@@ -391,6 +395,16 @@ export function applyCommand(
         item.purchaseUnit = str(p.purchaseUnit, 30, true);
       if (p.remarks !== undefined) item.remarks = str(p.remarks, 2000, true);
       s.centralMaterials = put(resolveCentralMaterials(s), item, updating);
+      break;
+    }
+    case 'material.delete': {
+      exact(p, ['id']);
+      const targetId = str(p.id);
+      const current = resolveCentralMaterials(s);
+      if (!current.some((m) => m.id === targetId)) {
+        throw new CommandError('Record no longer exists.', 409);
+      }
+      s.centralMaterials = current.filter((m) => m.id !== targetId);
       break;
     }
     case 'hauling.save': {

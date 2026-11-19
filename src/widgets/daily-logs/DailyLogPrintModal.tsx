@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, Eye, EyeOff } from 'lucide-react';
 import {
   formatDailyLogPlainText,
   formatDateWithWeekday,
@@ -63,6 +63,7 @@ function DailyLogPrintModalContent({
 }) {
   const signoffCtrl = useReportSignoffOverrideControls();
   const [copied, setCopied] = useState(false);
+  const [showMaterials, setShowMaterials] = useState(true);
   const sheetRef = useRef<HTMLDivElement>(null);
 
   const projectName =
@@ -132,14 +133,34 @@ function DailyLogPrintModalContent({
             ) : undefined
           }
           extraActions={
-            <button
-              type="button"
-              onClick={handleCopyText}
-              className="inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-8 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-200/70 border border-slate-300 text-slate-700 text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <Copy className="w-3.5 h-3.5 shrink-0" />}
-              <span>{copied ? 'Copied' : 'Copy Text'}</span>
-            </button>
+            <>
+              <button
+                type="button"
+                aria-pressed={showMaterials}
+                onClick={() => setShowMaterials((v) => !v)}
+                className={`inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-8 px-3 py-1.5 rounded-lg border text-xs font-semibold shadow-2xs transition-colors cursor-pointer ${
+                  showMaterials
+                    ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                    : 'bg-white border-slate-300 text-slate-500 hover:bg-slate-100'
+                }`}
+                title="Toggle materials table on printed daily log"
+              >
+                {showMaterials ? (
+                  <Eye className="w-3.5 h-3.5 shrink-0" />
+                ) : (
+                  <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                )}
+                <span>{showMaterials ? 'Materials: On' : 'Materials: Off'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyText}
+                className="inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-8 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-200/70 border border-slate-300 text-slate-700 text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> : <Copy className="w-3.5 h-3.5 shrink-0" />}
+                <span>{copied ? 'Copied' : 'Copy Text'}</span>
+              </button>
+            </>
           }
           targetRef={sheetRef}
           documentTitle={reportDocTitle}
@@ -153,7 +174,11 @@ function DailyLogPrintModalContent({
             style={{ width: `${sheetWidthPx}px`, minWidth: `${sheetWidthPx}px` }}
             className="report-modal-scroll-area report-printable-card pdf-desktop-layout mx-auto bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2 shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none"
           >
-            <DailyLogPrintSheet project={project} log={log} />
+            <DailyLogPrintSheet
+              project={project}
+              log={log}
+              showMaterials={showMaterials}
+            />
           </div>
         </div>
       </div>

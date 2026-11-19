@@ -1,3 +1,4 @@
+import { DEFAULT_SAFETY_OFFICER_NAME } from '@/entities/project/materialConstants';
 import { formatDateWithWeekday } from '@/entities/project/calculations';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
 import type { MastProjectState, ReportDetailsSpec } from '@/entities/project/types';
@@ -207,6 +208,10 @@ export function resolveReportDetails(
         : resolveMatchingPreparedSignature(project, overridePreparedBy),
     reportDate:
       overrides?.reportDate?.trim() || base.reportDate?.trim() || project.lastUpdated,
+    safetyOfficerBy:
+      base.safetyOfficerBy !== undefined
+        ? base.safetyOfficerBy
+        : DEFAULT_SAFETY_OFFICER_NAME,
     logos: resolveReportLogos(base.logos),
   };
 }

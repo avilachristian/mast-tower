@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { PenLine, RotateCcw, Upload, X } from 'lucide-react';
+import { PenLine, PenTool, RotateCcw, Upload, X } from 'lucide-react';
 import type {
   FoundationInspectionMeta,
   MastProjectState,
@@ -13,6 +13,7 @@ import type {
 } from '@/entities/project/types';
 import { resizeLogoFileToDataUrl } from '@/shared/lib/imageUpload';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
+import { SignaturePadModal } from './SignaturePadModal';
 
 export interface SignatoryOverrideSlot {
   name?: string;
@@ -335,6 +336,11 @@ export function SignatoriesOverridePanel({
 }: {
   onClose: () => void;
 }) {
+  const [drawTarget, setDrawTarget] = useState<{
+    role: keyof ReportSignoffOverrideState;
+    label: string;
+    defaultName: string;
+  } | null>(null);
   const ctrl = useReportSignoffOverrideControls();
   if (!ctrl) return null;
 
@@ -537,6 +543,21 @@ export function SignatoriesOverridePanel({
                   )}
                 </div>
 
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDrawTarget({
+                      role: r.key,
+                      label: r.label,
+                      defaultName: effectiveName,
+                    })
+                  }
+                  className="inline-flex items-center gap-1 h-8 px-2 rounded border border-sky-300 bg-sky-50 hover:bg-sky-100 text-[10px] font-semibold text-sky-700 cursor-pointer shrink-0"
+                >
+                  <PenTool className="w-3 h-3" />
+                  <span>Draw</span>
+                </button>
+
                 <label className="inline-flex items-center gap-1 h-8 px-2 rounded border border-slate-300 bg-white hover:bg-slate-100 text-[10px] font-semibold text-slate-700 cursor-pointer shrink-0">
                   <Upload className="w-3 h-3" />
                   <span>{effectiveSig ? 'Replace' : 'Upload'}</span>
@@ -579,6 +600,17 @@ export function SignatoriesOverridePanel({
           );
         })}
       </div>
+
+      <SignaturePadModal
+        open={Boolean(drawTarget)}
+        title={drawTarget ? `Create ${drawTarget.label} Signature` : 'Create Signature'}
+        defaultTypedName={drawTarget?.defaultName ?? ''}
+        onClose={() => setDrawTarget(null)}
+        onSave={async (file) => {
+          if (!drawTarget) return;
+          await handleUploadOverrideSignature(drawTarget.role, file);
+        }}
+      />
     </div>
   );
 }

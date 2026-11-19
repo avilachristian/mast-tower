@@ -13,7 +13,7 @@ import {
 } from './staffDomain';
 import type { StaffPermission } from '../src/shared/api/access';
 import type { MastProjectState } from '../src/entities/project/types';
-import type { D1PreparedStatement } from '@cloudflare/workers-types';
+import type { D1PreparedStatement } from './cloudflareTypes';
 
 type Persist = (
   env: Env,
@@ -310,9 +310,12 @@ export function accessRoutes(
       row = await assigned(c.env, user, c.req.param('id')),
       command = parseCommand(await c.req.json());
     // Validate current permission even for a replay, before looking up its receipt.
-    const permission = ['hauling.save', 'material.save', 'rates.save'].includes(
-      command.type
-    )
+    const permission = [
+      'hauling.save',
+      'material.save',
+      'material.delete',
+      'rates.save',
+    ].includes(command.type)
       ? 'hauling_inventory'
       : 'manpower_payroll';
     if (!user.permissions.includes(permission))

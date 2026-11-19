@@ -23,9 +23,11 @@ import {
 export function DailyLogPrintSheet({
   project,
   log,
+  showMaterials = true,
 }: {
   project: MastProjectState;
   log: DailyActivityLogEntry;
+  showMaterials?: boolean;
 }) {
   const projectName =
     log.projectName?.trim() ||
@@ -43,6 +45,7 @@ export function DailyLogPrintSheet({
     reportDate: log.date,
     preparedBy,
   });
+  const safetyOfficer = log.safetyOfficer?.trim() || '';
 
   const activityRows = useMemo(() => getDailyLogActivityRows(log), [log]);
   const materialRows = useMemo(() => getDailyLogMaterialRows(log), [log]);
@@ -111,9 +114,9 @@ export function DailyLogPrintSheet({
         fallbackDate={log.date}
       />
 
-      <div className="border-2 border-slate-900 text-xs">
+      <div className="border-2 border-slate-900 text-xs divide-y-2 divide-slate-900">
         {/* Top Split Row: Left 2D Tower Layout Highlighting Current Work | Right Project Metadata & Manpower */}
-        <div className="grid grid-cols-12 border-b-2 border-slate-900">
+        <div className="grid grid-cols-12">
           {/* Left: 2D Tower & Foundation Layout */}
           <div className="col-span-12 md:col-span-7 pdf-desktop:col-span-7 print:col-span-7 border-b-2 md:border-b-0 md:border-r-2 pdf-desktop:border-b-0 pdf-desktop:border-r-2 print:border-b-0 print:border-r-2 border-slate-900 flex flex-col p-1.5">
             <div className="text-[11px] font-bold text-slate-700 text-center py-0.5 px-2 shrink-0 uppercase tracking-wide leading-tight">
@@ -242,80 +245,72 @@ export function DailyLogPrintSheet({
         </div>
 
         {/* Activities & Status Table */}
-        <div className="border-b-2 border-slate-900">
-          <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
-            Activities &amp; Status
-          </div>
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
-                <th className="px-2 py-1 border-r border-slate-900 w-24">Location</th>
-                <th className="px-2 py-1 border-r border-slate-900">Activity Description</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-28 text-center">Status</th>
-                <th className="px-2 py-1">Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activityRows.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-2 py-2 text-slate-400 italic text-center">
-                    No activities recorded
-                  </td>
-                </tr>
-              ) : (
-                activityRows.map((act) => (
-                  <tr key={act.id} className="border-b last:border-b-0 border-slate-300">
-                    <td className="px-2 py-1 border-r border-slate-900 font-semibold">
-                      {act.foundationId || 'Site'}
-                    </td>
-                    <td className="px-2 py-1 border-r border-slate-900">{act.description}</td>
-                    <td className="px-2 py-1 border-r border-slate-900 text-center font-semibold">
-                      {act.status}
-                    </td>
-                    <td className="px-2 py-1 text-slate-700">{act.remarks || '—'}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          {log.activitiesSummary.trim() && log.activities && log.activities.length > 0 && (
-            <div className="px-2 py-1.5 border-t border-slate-900 text-slate-800 leading-relaxed">
-              <span className="font-bold">Summary Notes: </span>
-              {log.activitiesSummary}
+        {(activityRows.length > 0 || Boolean(log.activitiesSummary.trim())) && (
+          <div>
+            <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
+              Activities &amp; Status
             </div>
-          )}
-        </div>
+            {activityRows.length > 0 && (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
+                    <th className="px-2 py-1 border-r border-slate-900 w-24">Location</th>
+                    <th className="px-2 py-1 border-r border-slate-900">Activity Description</th>
+                    <th className="px-2 py-1 border-r border-slate-900 w-28 text-center">Status</th>
+                    <th className="px-2 py-1">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activityRows.map((act) => (
+                    <tr key={act.id} className="border-b last:border-b-0 border-slate-300">
+                      <td className="px-2 py-1 border-r border-slate-900 font-semibold">
+                        {act.foundationId || 'Site'}
+                      </td>
+                      <td className="px-2 py-1 border-r border-slate-900">{act.description}</td>
+                      <td className="px-2 py-1 border-r border-slate-900 text-center font-semibold">
+                        {act.status}
+                      </td>
+                      <td className="px-2 py-1 text-slate-700">{act.remarks || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {log.activitiesSummary.trim() && log.activities && log.activities.length > 0 && (
+              <div className="px-2 py-1.5 border-t border-slate-900 text-slate-800 leading-relaxed">
+                <span className="font-bold">Summary Notes: </span>
+                {log.activitiesSummary}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Safety Logs Table (Safety Officer) */}
-        <div className="border-b-2 border-slate-900">
-          <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase flex flex-wrap items-center justify-between gap-2">
-            <span>Safety Logs</span>
-            <span className="text-[11px] font-semibold text-slate-700 normal-case">
-              Safety Officer: {log.safetyOfficer?.trim() || '—'}
-            </span>
-          </div>
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
-                <th className="px-2 py-1 border-r border-slate-900 w-36">Time / Activity</th>
-                <th className="px-2 py-1 border-r border-slate-900">
-                  Safety Observation / Hazard
-                </th>
-                <th className="px-2 py-1 border-r border-slate-900">
-                  Action Taken / Control
-                </th>
-                <th className="px-2 py-1 w-24 text-center">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {safetyRows.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-2 py-2 text-slate-400 italic text-center">
-                    No safety logs recorded
-                  </td>
+        {safetyRows.length > 0 && (
+          <div>
+            <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase flex flex-wrap items-center justify-between gap-2">
+              <span>Safety Logs</span>
+              {safetyOfficer && (
+                <span className="text-[11px] font-semibold text-slate-700 normal-case">
+                  Safety Officer: {safetyOfficer}
+                </span>
+              )}
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
+                  <th className="px-2 py-1 border-r border-slate-900 w-36">Time / Activity</th>
+                  <th className="px-2 py-1 border-r border-slate-900">
+                    Safety Observation / Hazard
+                  </th>
+                  <th className="px-2 py-1 border-r border-slate-900">
+                    Action Taken / Control
+                  </th>
+                  <th className="px-2 py-1 w-24 text-center">Status</th>
                 </tr>
-              ) : (
-                safetyRows.map((s) => (
+              </thead>
+              <tbody>
+                {safetyRows.map((s) => (
                   <tr key={s.id} className="border-b last:border-b-0 border-slate-300">
                     <td className="px-2 py-1 border-r border-slate-900 font-semibold">
                       {s.timeOrActivity || '—'}
@@ -330,42 +325,36 @@ export function DailyLogPrintSheet({
                       {s.status || 'Compliant'}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Materials / Tower Parts on Site Table */}
-        <div className="border-b-2 border-slate-900">
-          <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
-            {project.projectType === 'vertical_mast'
-              ? 'Tower Parts & Materials on Site'
-              : 'Materials on Site'}
-          </div>
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
-                <th className="px-2 py-1 border-r border-slate-900">
-                  {project.projectType === 'vertical_mast' ? 'Tower Part' : 'Material'}
-                </th>
-                <th className="px-2 py-1 border-r border-slate-900 w-14 text-center">Unit</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">On Site</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Delivered</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Used</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Remaining</th>
-                <th className="px-2 py-1">Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {materialRows.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-2 py-2 text-slate-400 italic text-center">
-                    No materials recorded
-                  </td>
+        {showMaterials && materialRows.length > 0 && (
+          <div>
+            <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
+              {project.projectType === 'vertical_mast'
+                ? 'Tower Parts & Materials on Site'
+                : 'Materials on Site'}
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
+                  <th className="px-2 py-1 border-r border-slate-900">
+                    {project.projectType === 'vertical_mast' ? 'Tower Part' : 'Material'}
+                  </th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-14 text-center">Unit</th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">On Site</th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Delivered</th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Used</th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Remaining</th>
+                  <th className="px-2 py-1">Remarks</th>
                 </tr>
-              ) : (
-                materialRows.map((m) => {
+              </thead>
+              <tbody>
+                {materialRows.map((m) => {
                   const delivered = m.deliveredQty ?? 0;
                   const remaining =
                     m.remainingQty ?? computeDailyLogMaterialRemaining(m);
@@ -388,138 +377,114 @@ export function DailyLogPrintSheet({
                       <td className="px-2 py-1 text-slate-700">{m.remarks || '—'}</td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Equipments Table */}
-        <div className="border-b-2 border-slate-900">
-          <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
-            Equipments
-          </div>
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
-                <th className="px-2 py-1 border-r border-slate-900">Equipment / Tool</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Qty</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-28 text-center">Status</th>
-                <th className="px-2 py-1">Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {equipmentRows.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-2 py-2 text-slate-400 italic text-center">
-                    No equipment logged
-                  </td>
+        {equipmentRows.length > 0 && (
+          <div>
+            <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
+              Equipments
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
+                  <th className="px-2 py-1 border-r border-slate-900">Equipment / Tool</th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-20 text-center">Qty</th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-28 text-center">Status</th>
+                  <th className="px-2 py-1">Remarks</th>
                 </tr>
-              ) : (
-                equipmentRows.map((eq) => (
+              </thead>
+              <tbody>
+                {equipmentRows.map((eq) => (
                   <tr key={eq.id} className="border-b last:border-b-0 border-slate-300">
                     <td className="px-2 py-1 border-r border-slate-900 font-semibold">{eq.name}</td>
                     <td className="px-2 py-1 border-r border-slate-900 text-center">{eq.qty}</td>
                     <td className="px-2 py-1 border-r border-slate-900 text-center">{eq.status}</td>
                     <td className="px-2 py-1 text-slate-700">{eq.remarks || '—'}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Delays Table */}
-        <div className="border-b-2 border-slate-900">
-          <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
-            Delays / Issues
-          </div>
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
-                <th className="px-2 py-1 border-r border-slate-900">Delay / Issue Description</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-32 text-center">Impact / Hours</th>
-                <th className="px-2 py-1">Action / Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {delayRows.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="px-2 py-2 text-slate-400 italic text-center">
-                    No delays reported
-                  </td>
+        {delayRows.length > 0 && (
+          <div>
+            <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
+              Delays / Issues
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
+                  <th className="px-2 py-1 border-r border-slate-900">Delay / Issue Description</th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-32 text-center">Impact / Hours</th>
+                  <th className="px-2 py-1">Action / Remarks</th>
                 </tr>
-              ) : (
-                delayRows.map((d) => (
+              </thead>
+              <tbody>
+                {delayRows.map((d) => (
                   <tr key={d.id} className="border-b last:border-b-0 border-slate-300">
                     <td className="px-2 py-1 border-r border-slate-900 font-medium">{d.description}</td>
                     <td className="px-2 py-1 border-r border-slate-900 text-center">{d.impact || '—'}</td>
                     <td className="px-2 py-1 text-slate-700">{d.remarks || '—'}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Visitors Table */}
-        <div className="border-b-2 border-slate-900">
-          <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
-            Visitors
-          </div>
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
-                <th className="px-2 py-1 border-r border-slate-900">Visitor Name</th>
-                <th className="px-2 py-1 border-r border-slate-900 w-36">Company / Role</th>
-                <th className="px-2 py-1 border-r border-slate-900">Purpose</th>
-                <th className="px-2 py-1">Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visitorRows.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-2 py-2 text-slate-400 italic text-center">
-                    No visitors recorded
-                  </td>
+        {visitorRows.length > 0 && (
+          <div>
+            <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
+              Visitors
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
+                  <th className="px-2 py-1 border-r border-slate-900">Visitor Name</th>
+                  <th className="px-2 py-1 border-r border-slate-900 w-36">Company / Role</th>
+                  <th className="px-2 py-1 border-r border-slate-900">Purpose</th>
+                  <th className="px-2 py-1">Remarks</th>
                 </tr>
-              ) : (
-                visitorRows.map((v) => (
+              </thead>
+              <tbody>
+                {visitorRows.map((v) => (
                   <tr key={v.id} className="border-b last:border-b-0 border-slate-300">
                     <td className="px-2 py-1 border-r border-slate-900 font-semibold">{v.name}</td>
                     <td className="px-2 py-1 border-r border-slate-900">{v.roleOrCompany || '—'}</td>
                     <td className="px-2 py-1 border-r border-slate-900">{v.purpose || '—'}</td>
                     <td className="px-2 py-1 text-slate-700">{v.remarks || '—'}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Documentation Table (Image left, Description / Remarks right) */}
-        <div>
-          <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
-            Documentation
-          </div>
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
-                <th className="px-2 py-1 border-r border-slate-900 w-5/12 text-center">
-                  Photo
-                </th>
-                <th className="px-2 py-1 w-7/12">Description / Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documentationRows.length === 0 ? (
-                <tr>
-                  <td colSpan={2} className="px-2 py-3 text-slate-400 italic text-center">
-                    No documentation photos attached
-                  </td>
+        {documentationRows.length > 0 && (
+          <div>
+            <div className="px-2 py-1 bg-slate-100 border-b border-slate-900 font-bold uppercase">
+              Documentation
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-900 bg-slate-50 text-[11px]">
+                  <th className="px-2 py-1 border-r border-slate-900 w-5/12 text-center">
+                    Photo
+                  </th>
+                  <th className="px-2 py-1 w-7/12">Description / Remarks</th>
                 </tr>
-              ) : (
-                documentationRows.map((doc) => (
+              </thead>
+              <tbody>
+                {documentationRows.map((doc) => (
                   <tr key={doc.id} className="border-b last:border-b-0 border-slate-900">
                     <td className="p-2 border-r border-slate-900 align-middle text-center">
                       {doc.photoDataUrl ? (
@@ -543,18 +508,18 @@ export function DailyLogPrintSheet({
                       )}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <ReportSignoffFooter
         details={{
           ...effectiveDetails,
           preparedBy,
-          safetyOfficerBy: log.safetyOfficer?.trim() || undefined,
+          safetyOfficerBy: safetyOfficer || undefined,
         }}
         fallbackPreparedBy={preparedBy}
         fallbackDate={log.date}

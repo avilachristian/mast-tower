@@ -4,29 +4,29 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:api": "wrangler dev",
+    "dev": "tsx --tsconfig tsconfig.worker.json server.ts",
     "build": "tsc -b && vite build",
-    "deploy": "npm run build && wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply mast-tower-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply mast-tower-db --remote",
+    "start": "NODE_ENV=production tsx --tsconfig tsconfig.worker.json server.ts",
+    "lint": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "preview": "vite preview"
+    "preview": "vite preview --host 0.0.0.0 --port 3000"
   },
   "dependencies": {
     "@fontsource/noto-sans": "^5.2.8",
     "@tailwindcss/vite": "^4.1.18",
+    "@types/express": "^5.0.6",
+    "express": "^5.3.0",
     "hono": "^4.13.18",
     "lucide-react": "^1.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tailwindcss": "^4.1.18",
     "three": "^0.187.0",
+    "tsx": "^4.23.15",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261115.1",
     "@types/node": "^24.10.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -35,7 +35,6 @@
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18",
-    "web-ifc": "^0.0.79",
-    "wrangler": "^4.162.0"
+    "web-ifc": "^0.0.79"
   }
 }

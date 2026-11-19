@@ -1889,5 +1889,76 @@ describe('Hauling & Centralized Inventory System', () => {
     expect(importedProject.verticalMast?.sections.length).toBe(41);
     expect(importedProject.verticalMast?.guyLayers.length).toBe(16);
   });
+
+  it('deletes default and custom central materials without restoring defaults', () => {
+    const clean = createCleanBaselineProject();
+    useProjectStore.setState({ project: clean });
+
+    const initialCount = createDefaultCentralMaterials().length;
+    const customId = useProjectStore.getState().addCentralMaterial({
+      name: 'Custom Washer',
+      category: 'shared',
+      unit: 'pcs',
+      haulingMaterialKey: 'other',
+      targetQty: 20,
+      stockYardTotalQty: 10,
+      onSiteOpeningQty: 0,
+    });
+    expect(useProjectStore.getState().project.centralMaterials).toHaveLength(
+      initialCount + 1
+    );
+
+    // Delete a default material
+    useProjectStore.getState().deleteCentralMaterial('mat-cement');
+    const afterDefaultDelete = useProjectStore.getState().project.centralMaterials ?? [];
+    expect(afterDefaultDelete.some((m) => m.id === 'mat-cement')).toBe(false);
+    expect(afterDefaultDelete).toHaveLength(initialCount);
+
+    // Delete the custom material
+    useProjectStore.getState().deleteCentralMaterial(customId);
+    const afterCustomDelete = useProjectStore.getState().project.centralMaterials ?? [];
+    expect(afterCustomDelete.some((m) => m.id === customId)).toBe(false);
+
+    // Delete all remaining materials -> stays empty instead of resurrecting defaults
+    for (const m of [...afterCustomDelete]) {
+      useProjectStore.getState().deleteCentralMaterial(m.id);
+    }
+    expect(useProjectStore.getState().project.centralMaterials).toEqual([]);
+  });
+
+  it('defaults Safety Officer to Flordeliza Manjares across baselines and report details', () => {
+    for (const factory of [
+      createSampleMast2Project,
+      createCleanBaselineProject,
+      createCleanVerticalMastProject,
+      createSampleVerticalMastProject,
+    ]) {
+      const proj = factory();
+      expect(proj.reportDetails?.safetyOfficerBy).toBe('Flordeliza Manjares');
+      expect(resolveReportDetails(proj).safetyOfficerBy).toBe('Flordeliza Manjares');
+      for (const log of proj.dailyLogs) {
+        expect(log.safetyOfficer).toBe('Flordeliza Manjares');
+      }
+    }
+
+    const legacyResolved = resolveReportDetails({
+      projectName: 'Legacy Project',
+      location: 'Site',
+      preparedBy: 'Engr.',
+      contractor: 'Contractor',
+      lastUpdated: '2026-11-13',
+    });
+    expect(legacyResolved.safetyOfficerBy).toBe('Flordeliza Manjares');
+
+    const clearedResolved = resolveReportDetails({
+      projectName: 'Cleared Project',
+      location: 'Site',
+      preparedBy: 'Engr.',
+      contractor: 'Contractor',
+      lastUpdated: '2026-11-13',
+      reportDetails: { safetyOfficerBy: '' },
+    });
+    expect(clearedResolved.safetyOfficerBy).toBe('');
+  });
 });
 

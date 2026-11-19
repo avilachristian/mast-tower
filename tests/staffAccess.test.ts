@@ -4,7 +4,7 @@ import { ensureSeededAdminUser } from '../worker/auth';
 import { describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
-import type { R2Bucket } from '@cloudflare/workers-types';
+import type { R2Bucket } from '../worker/cloudflareTypes';
 import { createTestD1 } from './helpers/d1';
 import { createWorkerApp } from '../worker/index';
 import { createSampleMast2Project } from '../src/entities/project/mast2Baseline';
@@ -805,5 +805,48 @@ describe('Concurrent saves, payroll settlement and session transitions', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('supports material.delete command with hauling_inventory permission', () => {
+    const state = createSampleMast2Project();
+    const afterDelete = applyCommand(
+      state,
+      parseCommand({
+        operationId: 'op-del-mat-1',
+        expectedVersion: 1,
+        type: 'material.delete',
+        payload: { id: 'mat-cement' },
+      }),
+      ['hauling_inventory']
+    );
+    expect(
+      afterDelete.centralMaterials?.some((m) => m.id === 'mat-cement')
+    ).toBe(false);
+
+    expect(() =>
+      applyCommand(
+        afterDelete,
+        parseCommand({
+          operationId: 'op-del-mat-2',
+          expectedVersion: 2,
+          type: 'material.delete',
+          payload: { id: 'mat-cement' },
+        }),
+        ['hauling_inventory']
+      )
+    ).toThrow('Record no longer exists.');
+
+    expect(() =>
+      applyCommand(
+        state,
+        parseCommand({
+          operationId: 'op-del-mat-3',
+          expectedVersion: 1,
+          type: 'material.delete',
+          payload: { id: 'mat-sand' },
+        }),
+        ['manpower_payroll']
+      )
+    ).toThrow('This action is not permitted.');
   });
 });

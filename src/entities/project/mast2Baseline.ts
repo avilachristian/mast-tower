@@ -13,8 +13,13 @@ import type {
   SiteEquipmentItem,
 } from './types';
 
-import { BAGS_PER_CUBIC_METER } from './materialConstants';
-export { BAGS_PER_CUBIC_METER, DEFAULT_KG_PER_BAG, PROJECT_MATERIAL_TARGETS } from './materialConstants';
+import { BAGS_PER_CUBIC_METER, DEFAULT_SAFETY_OFFICER_NAME } from './materialConstants';
+export {
+  BAGS_PER_CUBIC_METER,
+  DEFAULT_KG_PER_BAG,
+  DEFAULT_SAFETY_OFFICER_NAME,
+  PROJECT_MATERIAL_TARGETS,
+} from './materialConstants';
 
 export const FOUNDATION_SPECS: Record<FoundationType, FoundationSpec> = {
   principal: {
@@ -729,6 +734,7 @@ export function createSampleMast2Project(): MastProjectState {
     towerHeightM: 120,
     lastUpdated: '2026-11-13',
     reportDetails: {
+      safetyOfficerBy: DEFAULT_SAFETY_OFFICER_NAME,
       logos: createDefaultReportLogos(),
     },
     foundations,
@@ -874,6 +880,7 @@ export function createSampleMast2Project(): MastProjectState {
         cementUsedBags: 50,
         sandUsedBags: 76,
         gravelUsedBags: 152,
+        safetyOfficer: DEFAULT_SAFETY_OFFICER_NAME,
         issuesOrDelays: 'Brief drizzle at 2:00 PM; tarpaulin shelter deployed over mixer.',
       },
       {
@@ -904,6 +911,7 @@ export function createSampleMast2Project(): MastProjectState {
         cementUsedBags: 21,
         sandUsedBags: 36,
         gravelUsedBags: 65,
+        safetyOfficer: DEFAULT_SAFETY_OFFICER_NAME,
         issuesOrDelays: 'None.',
       },
       {
@@ -933,6 +941,7 @@ export function createSampleMast2Project(): MastProjectState {
         cementUsedBags: 21,
         sandUsedBags: 36,
         gravelUsedBags: 65,
+        safetyOfficer: DEFAULT_SAFETY_OFFICER_NAME,
         issuesOrDelays: 'Muddy haul trail slowed afternoon horse trips; raincoats needed for crew.',
       },
     ],
@@ -948,6 +957,7 @@ export function createCleanBaselineProject(): MastProjectState {
     towerHeightM: 120,
     lastUpdated: todayLocalIso(),
     reportDetails: {
+      safetyOfficerBy: DEFAULT_SAFETY_OFFICER_NAME,
       logos: createDefaultReportLogos(),
     },
     foundations: createInitialFoundations(),

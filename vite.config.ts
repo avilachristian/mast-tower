@@ -246,14 +246,9 @@ export default defineConfig({
     __APP_BUILD_TIME__: JSON.stringify(BUILD_TIME),
   },
   server: {
-    port: 5175,
-    strictPort: true,
-    proxy: {
-      '/api': {
-        target: 'http://127.0.0.1:8787',
-        changeOrigin: true,
-      },
-    },
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: true,
   },
   resolve: {
     alias: {

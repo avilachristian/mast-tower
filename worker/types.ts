@@ -1,5 +1,5 @@
 import type { AccessUser } from '../src/shared/api/access';
-import type { D1Database, Fetcher, R2Bucket } from '@cloudflare/workers-types';
+import type { D1Database, Fetcher, R2Bucket } from './cloudflareTypes';
 
 export interface Env {
   DB: D1Database;

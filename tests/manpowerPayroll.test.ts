@@ -9,6 +9,7 @@ import {
 import {
   CIVIL_WORK_POSITIONS,
   MANPOWER_POSITIONS,
+  buildDailyLogManpowerFromAttendance,
   computeCivilWorksPayrollPreview,
   computeHaulerPayrollPreview,
   formatCivilPayrollPlainText,
@@ -17,6 +18,7 @@ import {
   resolveKnownHaulerNames,
   resolveManpowerRoster,
 } from '@/entities/project/manpowerPayroll';
+import { DEFAULT_SAFETY_OFFICER_NAME } from '@/entities/project/materialConstants';
 import { createCleanBaselineProject } from '@/entities/project/mast2Baseline';
 import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useProjectStore } from '@/shared/state/projectStore';
@@ -775,5 +777,141 @@ describe('Manpower roster and Civil Works / Individual Hauler payroll', () => {
     expect(previewAfterCa.rows[0].alreadyDeductedInRangePhp).toBe(3800);
     expect(previewAfterCa.rows[0].overallBalanceDuePhp).toBe(-500);
     expect(previewAfterCa.rows[0].payoutReleasedPhp).toBe(0);
+  });
+
+  it('prefills Daily Log Manpower from Civil Works attendance for that date and always includes Engineer (preparedBy) and Safety Officer', () => {
+    const clean = createCleanBaselineProject();
+    clean.preparedBy = 'Engr. Christian C. Avila';
+    clean.manpowerRoster = [
+      {
+        id: 'cw-foreman',
+        name: 'Pedro Santos',
+        category: 'civil_works',
+        position: 'Foreman',
+        dailyRatePhp: 1200,
+        active: true,
+      },
+      {
+        id: 'cw-mason-1',
+        name: 'Juan Dela Cruz',
+        category: 'civil_works',
+        position: 'Mason',
+        dailyRatePhp: 850,
+        active: true,
+      },
+      {
+        id: 'cw-mason-2',
+        name: 'Jose Reyes',
+        category: 'civil_works',
+        position: 'Mason',
+        dailyRatePhp: 850,
+        active: true,
+      },
+      {
+        id: 'cw-laborer-absent',
+        name: 'Mario Absent',
+        category: 'civil_works',
+        position: 'Laborer',
+        dailyRatePhp: 600,
+        active: true,
+      },
+      {
+        id: 'cw-eng-dup',
+        name: 'engr. christian c. avila',
+        category: 'civil_works',
+        position: 'Site Engineer',
+        dailyRatePhp: 1800,
+        active: true,
+      },
+      {
+        id: 'cw-so-dup',
+        name: DEFAULT_SAFETY_OFFICER_NAME,
+        category: 'civil_works',
+        position: 'Safety Officer',
+        dailyRatePhp: 1100,
+        active: true,
+      },
+    ];
+    clean.civilAttendance = [
+      {
+        date: '2026-11-19',
+        presentMemberIds: [
+          'cw-foreman',
+          'cw-mason-1',
+          'cw-mason-2',
+          'cw-eng-dup',
+          'cw-so-dup',
+        ],
+      },
+    ];
+
+    const onPresentDate = buildDailyLogManpowerFromAttendance(
+      clean,
+      '2026-11-19'
+    );
+    expect(onPresentDate).toEqual([
+      {
+        role: 'Site Engineer',
+        count: 1,
+        names: 'Engr. Christian C. Avila',
+        hours: 0,
+      },
+      { role: 'Foreman', count: 1, names: 'Pedro Santos', hours: 0 },
+      {
+        role: 'Safety Officer',
+        count: 1,
+        names: DEFAULT_SAFETY_OFFICER_NAME,
+        hours: 0,
+      },
+      {
+        role: 'Mason',
+        count: 2,
+        names: 'Juan Dela Cruz, Jose Reyes',
+        hours: 0,
+      },
+    ]);
+
+    // Different date with no civil works attendance still prefills Site Engineer & Safety Officer
+    const onEmptyDate = buildDailyLogManpowerFromAttendance(clean, '2026-11-20');
+    expect(onEmptyDate).toEqual([
+      {
+        role: 'Site Engineer',
+        count: 1,
+        names: 'Engr. Christian C. Avila',
+        hours: 0,
+      },
+      { role: 'Foreman', count: 0, names: '', hours: 0 },
+      {
+        role: 'Safety Officer',
+        count: 1,
+        names: DEFAULT_SAFETY_OFFICER_NAME,
+        hours: 0,
+      },
+      { role: 'Mason', count: 0, names: '', hours: 0 },
+      { role: 'Steelman', count: 0, names: '', hours: 0 },
+      { role: 'Laborer', count: 0, names: '', hours: 0 },
+    ]);
+
+    // Custom preparedBy override and cleared Safety Officer on log
+    const customOverride = buildDailyLogManpowerFromAttendance(
+      clean,
+      '2026-11-20',
+      {
+        preparedBy: 'Engr. Maria Clara',
+        safetyOfficer: '',
+      }
+    );
+    expect(customOverride.find((w) => w.role === 'Site Engineer')).toEqual({
+      role: 'Site Engineer',
+      count: 1,
+      names: 'Engr. Maria Clara',
+      hours: 0,
+    });
+    expect(customOverride.find((w) => w.role === 'Safety Officer')).toEqual({
+      role: 'Safety Officer',
+      count: 0,
+      names: '',
+      hours: 0,
+    });
   });
 });

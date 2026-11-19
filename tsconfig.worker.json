@@ -2,9 +2,9 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.worker.tsbuildinfo",
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "DOM"],
     "module": "ESNext",
-    "types": ["@cloudflare/workers-types"],
+    "types": ["node"],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
@@ -20,6 +20,7 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": [
+    "server.ts",
     "worker",
     "src/shared/storage/r2Quota.ts",
     "src/entities/project/types.ts",

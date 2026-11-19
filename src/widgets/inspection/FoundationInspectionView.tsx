@@ -313,6 +313,7 @@ export function FoundationInspectionView({
                       value={meta.inspectorSignatureUrl}
                       inheritedValue={inheritedInspectorSignature}
                       emptyHint="No signature — left blank"
+                      defaultSignerName={meta.inspectorName || project.preparedBy}
                       onChange={(nextUrl) =>
                         updateFoundationInspectionMeta(selectedFoundation.id, {
                           inspectorSignatureUrl: nextUrl,
@@ -322,6 +323,7 @@ export function FoundationInspectionView({
                     <SignatureUploadControl
                       label="Verified by Signature"
                       value={meta.verifiedSignatureUrl}
+                      defaultSignerName={meta.contractorRep}
                       emptyHint={
                         meta.contractorRep?.trim()
                           ? 'No signature — left blank'

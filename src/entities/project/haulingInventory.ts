@@ -246,7 +246,7 @@ export function createDefaultCentralMaterials(): CentralMaterialItem[] {
 export function resolveCentralMaterials(
   project: Pick<MastProjectState, 'centralMaterials'>
 ): CentralMaterialItem[] {
-  if (project.centralMaterials && project.centralMaterials.length > 0) {
+  if (Array.isArray(project.centralMaterials)) {
     return project.centralMaterials;
   }
   return createDefaultCentralMaterials();

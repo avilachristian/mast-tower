@@ -1,6 +1,6 @@
 import { createTestD1 as createMockD1 } from './helpers/d1';
 import { describe, expect, it } from 'vitest';
-import type { R2Bucket } from '@cloudflare/workers-types';
+import type { R2Bucket } from '../worker/cloudflareTypes';
 import { createSampleMast2Project } from '../src/entities/project/mast2Baseline';
 import { createWorkerApp } from '../worker/index';
 import type { Env } from '../worker/types';

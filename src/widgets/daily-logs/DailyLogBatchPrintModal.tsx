@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, CheckSquare, Filter, Square } from 'lucide-react';
+import { Calendar, CheckSquare, Eye, EyeOff, Filter, Square } from 'lucide-react';
 import { sortDailyLogsNewestFirst } from '@/entities/project/calculations';
 import type {
   MastProjectState,
@@ -46,6 +46,7 @@ function DailyLogBatchPrintModalContent({
 
   const [startDate, setStartDate] = useState(minDate);
   const [endDate, setEndDate] = useState(maxDate);
+  const [showMaterials, setShowMaterials] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
     return new Set(allLogsChronological.map((l) => l.id));
   });
@@ -131,6 +132,26 @@ function DailyLogBatchPrintModalContent({
         <PrintModalHeader
           title="Batch Print Daily Construction Logs"
           subtitle={`${logsToPrint.length} of ${project.dailyLogs.length} logs selected · Ready for multi-page PDF Export`}
+          extraActions={
+            <button
+              type="button"
+              aria-pressed={showMaterials}
+              onClick={() => setShowMaterials((v) => !v)}
+              className={`inline-flex items-center justify-center gap-1.5 min-h-10 sm:min-h-8 px-3 py-1.5 rounded-lg border text-xs font-semibold shadow-2xs transition-colors cursor-pointer ${
+                showMaterials
+                  ? 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                  : 'bg-white border-slate-300 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Toggle materials table on printed daily logs"
+            >
+              {showMaterials ? (
+                <Eye className="w-3.5 h-3.5 shrink-0" />
+              ) : (
+                <EyeOff className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>{showMaterials ? 'Materials: On' : 'Materials: Off'}</span>
+            </button>
+          }
           targetRef={sheetRef}
           documentTitle={reportDocTitle}
           onClose={onClose}
@@ -253,7 +274,11 @@ function DailyLogBatchPrintModalContent({
                   className="report-printable-card pdf-desktop-layout mx-auto bg-white text-slate-900 p-4 sm:p-6 pdf-desktop:p-6 print:p-2 shadow-sm border border-slate-200 print:w-full print:min-w-0 print:border-none print:shadow-none mb-6 print:mb-0 break-after-page print:break-after-page"
                   style={{ pageBreakAfter: idx < logsToPrint.length - 1 ? 'always' : 'auto' }}
                 >
-                  <DailyLogPrintSheet project={project} log={l} />
+                  <DailyLogPrintSheet
+                    project={project}
+                    log={l}
+                    showMaterials={showMaterials}
+                  />
                 </div>
               ))}
             </div>

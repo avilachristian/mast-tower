@@ -63,6 +63,7 @@ export type StaffCommandType =
   | 'payout.save'
   | 'hauling.save'
   | 'material.save'
+  | 'material.delete'
   | 'rates.save';
 export interface StaffCommand {
   operationId: string;

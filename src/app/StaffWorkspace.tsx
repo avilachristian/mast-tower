@@ -6,6 +6,7 @@ import type {
   StaffCommandType,
 } from '@/shared/api/access';
 import { useAuthStore } from '@/shared/state/authStore';
+import { useFeedbackStore } from '@/shared/state/feedbackStore';
 import { useUiStore } from '@/shared/state/uiStore';
 import { todayLocalIso } from '@/shared/lib/dateUtils';
 import {
@@ -1116,6 +1117,31 @@ function Hauling({
                   <td>{r.onSiteRemainingQty}</td>
                   <td>
                     <button onClick={() => setMaterial(r.item)}>Edit</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void useFeedbackStore
+                          .getState()
+                          .requestConfirm({
+                            tone: 'danger',
+                            title: 'Delete Material Item?',
+                            message: `Remove "${r.item.name}" from Material Inventory?`,
+                            confirmLabel: 'Delete Material',
+                          })
+                          .then((ok) => {
+                            if (!ok) return;
+                            void submit('material.delete', {
+                              id: r.item.id,
+                            }).then((saved) => {
+                              if (saved && material?.id === r.item.id) {
+                                setMaterial(null);
+                              }
+                            });
+                          });
+                      }}
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}

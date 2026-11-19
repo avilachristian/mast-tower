@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { Pencil, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { DEFAULT_SAFETY_OFFICER_NAME } from '@/entities/project/materialConstants';
 import type { DailyLogSafetyItem } from '@/entities/project/types';
 
 export interface DailyLogSafetySectionProps {
@@ -55,7 +56,7 @@ export const DailyLogSafetySection = memo(function DailyLogSafetySection({
           type="text"
           value={safetyOfficer}
           onChange={(e) => onSafetyOfficerChange(e.target.value)}
-          placeholder="Name of Safety Officer"
+          placeholder={DEFAULT_SAFETY_OFFICER_NAME}
           className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-2 sm:py-1.5 text-xs text-slate-900 focus:border-sky-500 focus:outline-none"
         />
       </label>
