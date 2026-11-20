@@ -1,13 +1,21 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   buildClientShowcaseDto,
+  CLIENT_SHOWCASE_DTO_VERSION,
   resolveClientShowcaseSettings,
   slugifyProjectSlug,
 } from '../src/entities/project/clientProjection';
+import { toClientRenderProjectState } from '../src/entities/project/clientRender';
 import { createSampleMast2Project } from '../src/entities/project/mast2Baseline';
 import type { SavedProjectRecord } from '../src/entities/project/types';
 import { createInitialVerticalMastState } from '../src/entities/project/verticalMastBaseline';
 import { parseWorkspacePayload } from '../src/shared/state/projectStore';
+import { clientHighlightToDailyLogEntry } from '../src/widgets/client-showcase/ClientDailyLogPrintModal';
+import { DailyLogPrintSheet } from '../src/widgets/daily-logs/DailyLogPrintSheet';
+import { OverallVerticalMastStatusSheet } from '../src/widgets/mast-tower/OverallVerticalMastStatusSheet';
+import { OverallProjectStatusSheet } from '../src/widgets/project-status/OverallProjectStatusSheet';
 
 describe('Client Showcase Sanitized Projection', () => {
   it('strips private payroll, worker names, inventory, QC remarks, and safetyAndVisitors while projecting public daily log details and delays', () => {
@@ -366,5 +374,201 @@ describe('Client Showcase Sanitized Projection', () => {
     expect(
       'showSchedule' in (dto.settings as Record<string, unknown>)
     ).toBe(false);
+  });
+
+  it('matches Admin report print letterhead, signatories, signatures, notes, and DailyLogPrintSheet sections on Client Showcase', () => {
+    const state = createSampleMast2Project();
+    state.verticalMast = createInitialVerticalMastState();
+    state.verticalMast.guyLayers[0].sectors.I.tensioned = true;
+    state.verticalMast.guyLayers[0].sectors.I.tensionKn = '14.5 kN';
+    state.reportDetails = {
+      ...state.reportDetails,
+      documentTitle: 'CUSTOM SITE PROGRESS DOSSIER',
+      revision: 'Rev 03',
+      logoHeightPx: 68,
+      preparedBy: 'Engr. Christian C. Avila',
+      preparedTitle: 'Project Engineer',
+      preparedSignatureUrl: 'data:image/png;base64,PREPSIG',
+      checkedBy: 'Engr. Marco Villanueva',
+      checkedTitle: 'QA/QC Manager',
+      checkedSignatureUrl: 'data:image/png;base64,CHKSIG',
+      approvedBy: 'Engr. Elena Bautista',
+      approvedTitle: 'Operations Director',
+      approvedSignatureUrl: 'data:image/png;base64,APPSIG',
+      safetyOfficerBy: 'Flordeliza Manjares',
+      safetyOfficerSignatureUrl: 'data:image/png;base64,SOSIG',
+      notes: 'Issued for client review.',
+    };
+    state.dailyLogs = [
+      {
+        id: 'dl-match-1',
+        date: '2026-01-15',
+        dayNumber: 5,
+        weather: 'Sunny',
+        preparedBy: 'Engr. Christian C. Avila',
+        safetyOfficer: 'Flordeliza Manjares',
+        foundationsWorked: ['PF-0'],
+        workers: [
+          {
+            role: 'Site Engineer',
+            count: 1,
+            names: 'PRIVATE_WORKER_NAME',
+            hours: 8,
+          },
+          { role: 'Mason', count: 4, names: 'PRIVATE_MASON_LIST', hours: 8 },
+        ],
+        totalWorkers: 5,
+        totalManHours: 40,
+        cementUsedBags: 0,
+        sandUsedBags: 0,
+        gravelUsedBags: 0,
+        activities: [
+          {
+            id: 'act-1',
+            foundationId: 'PF-0',
+            description: 'Concrete pouring for principal pad',
+            status: 'Completed',
+            remarks: 'Slump 100mm',
+          },
+        ],
+        activitiesSummary: 'Completed PF-0 pour.',
+        materialsOnSite: [
+          {
+            id: 'mat-cem',
+            name: 'Portland Cement',
+            unit: 'bags',
+            onSiteQty: 60,
+            deliveredQty: 20,
+            usedTodayQty: 30,
+            remainingQty: 50,
+            remarks: 'Dry storage',
+          },
+        ],
+        equipmentItems: [],
+        delayItems: [],
+        visitorItems: [
+          {
+            id: 'vis-1',
+            name: 'PRIVATE_VISITOR_NAME',
+            roleOrCompany: 'Subcon',
+            purpose: 'Audit',
+            remarks: 'PRIVATE_VISITOR_NOTE',
+          },
+        ],
+        safetyLogs: [],
+        documentationItems: [],
+        issuesOrDelays: '',
+      },
+    ];
+
+    const dto = buildClientShowcaseDto({
+      id: 'proj-parity',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-15T12:00:00Z',
+      clientSettings: {
+        enabled: true,
+        featured: true,
+        phaseMode: 'both',
+        showPhotos: true,
+        showReports: true,
+      },
+      state,
+    });
+
+    expect(dto.dtoVersion).toBe(CLIENT_SHOWCASE_DTO_VERSION);
+    const clientJson = JSON.stringify(dto);
+    expect(clientJson).not.toContain('PRIVATE_WORKER_NAME');
+    expect(clientJson).not.toContain('PRIVATE_MASON_LIST');
+    expect(clientJson).not.toContain('PRIVATE_VISITOR_NAME');
+    expect(clientJson).not.toContain('PRIVATE_VISITOR_NOTE');
+
+    const clientRenderProject = toClientRenderProjectState(dto);
+
+    // 1. Foundation Status Report matches Admin letterhead, signatories, signatures, and notes
+    const foundationHtml = renderToStaticMarkup(
+      createElement(OverallProjectStatusSheet, {
+        project: clientRenderProject,
+        clientSafe: true,
+      })
+    );
+    expect(foundationHtml).toContain('CUSTOM SITE PROGRESS DOSSIER');
+    expect(foundationHtml).toContain('Rev 03');
+    expect(foundationHtml).toContain('Engr. Christian C. Avila');
+    expect(foundationHtml).toContain('Engr. Marco Villanueva');
+    expect(foundationHtml).toContain('Engr. Elena Bautista');
+    expect(foundationHtml).toContain('data:image/png;base64,PREPSIG');
+    expect(foundationHtml).toContain('data:image/png;base64,CHKSIG');
+    expect(foundationHtml).toContain('data:image/png;base64,APPSIG');
+    expect(foundationHtml).toContain('Issued for client review.');
+    // Safety Officer stays off non-Daily-Log reports by default
+    expect(foundationHtml).not.toContain('Flordeliza Manjares');
+    expect(foundationHtml).not.toContain('data:image/png;base64,SOSIG');
+
+    // 2. Vertical Mast Status Report matches Admin letterhead, tension values, and signatories
+    const mastHtml = renderToStaticMarkup(
+      createElement(OverallVerticalMastStatusSheet, {
+        project: clientRenderProject,
+        clientSafe: true,
+      })
+    );
+    expect(mastHtml).toContain('CUSTOM SITE PROGRESS DOSSIER');
+    expect(mastHtml).toContain('Rev 03');
+    expect(mastHtml).toContain('14.5 kN');
+    expect(mastHtml).toContain('data:image/png;base64,PREPSIG');
+    expect(mastHtml).toContain('data:image/png;base64,APPSIG');
+    expect(mastHtml).toContain('Issued for client review.');
+
+    // 3. Client Daily Log uses Admin DailyLogPrintSheet layout, omits blank sections, and respects Safety Officer & Materials toggle
+    const reconstructedLog = clientHighlightToDailyLogEntry(dto.highlights[0], dto);
+    const clientDailyHtml = renderToStaticMarkup(
+      createElement(DailyLogPrintSheet, {
+        project: clientRenderProject,
+        log: reconstructedLog,
+        showMaterials: true,
+      })
+    );
+    const adminDailyHtml = renderToStaticMarkup(
+      createElement(DailyLogPrintSheet, {
+        project: state,
+        log: state.dailyLogs[0],
+        showMaterials: true,
+      })
+    );
+
+    expect(clientDailyHtml).toContain('CUSTOM SITE PROGRESS DOSSIER');
+    expect(clientDailyHtml).toContain('Day #5 · Weather: Sunny');
+    expect(adminDailyHtml).toContain('CUSTOM SITE PROGRESS DOSSIER');
+    expect(clientDailyHtml).toContain('Manpower Attendance');
+    expect(clientDailyHtml).toContain('Site Engineer');
+    expect(clientDailyHtml).toContain('Mason');
+    expect(clientDailyHtml).toContain('5 Workers');
+    expect(clientDailyHtml).toContain('Activities &amp; Status');
+    expect(clientDailyHtml).toContain('Concrete pouring for principal pad');
+    expect(clientDailyHtml).toContain('Materials on Site');
+    expect(clientDailyHtml).toContain('Portland Cement');
+    expect(clientDailyHtml).toContain('Flordeliza Manjares');
+    expect(clientDailyHtml).toContain('data:image/png;base64,SOSIG');
+    expect(clientDailyHtml).toContain('data:image/png;base64,PREPSIG');
+    // Blank sections omitted identically to Admin
+    expect(clientDailyHtml).not.toContain('Equipments');
+    expect(clientDailyHtml).not.toContain('Delays / Issues');
+    expect(clientDailyHtml).not.toContain('Safety Logs');
+    expect(clientDailyHtml).not.toContain('Visitors');
+    expect(clientDailyHtml).not.toContain('Documentation');
+    // Admin still has its own private names/visitors while client strips them
+    expect(adminDailyHtml).toContain('PRIVATE_WORKER_NAME');
+    expect(clientDailyHtml).not.toContain('PRIVATE_WORKER_NAME');
+    expect(clientDailyHtml).not.toContain('PRIVATE_VISITOR_NAME');
+
+    // Materials toggle off on client hides Materials table
+    const clientDailyMaterialsOffHtml = renderToStaticMarkup(
+      createElement(DailyLogPrintSheet, {
+        project: clientRenderProject,
+        log: reconstructedLog,
+        showMaterials: false,
+      })
+    );
+    expect(clientDailyMaterialsOffHtml).not.toContain('Materials on Site');
+    expect(clientDailyMaterialsOffHtml).not.toContain('Portland Cement');
   });
 });

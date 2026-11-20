@@ -653,8 +653,14 @@ export interface ClientDailyHighlightDto {
   weatherNotes?: string;
   preparedBy: string;
   totalWorkers: number;
+  workers?: Array<{
+    role: WorkerRole;
+    count: number;
+  }>;
   foundationsWorked: string[];
   activitiesSummary: string;
+  activities?: DailyLogActivityItem[];
+  materials?: DailyLogMaterialItem[];
   safetyOfficer?: string;
   safetyLogs: DailyLogSafetyItem[];
   equipment: Array<{
@@ -711,6 +717,7 @@ export interface PublicProjectSummary {
 
 export interface ClientProjectShowcaseDto {
   id: string;
+  dtoVersion?: number;
   slug: string;
   featured: boolean;
   updatedAt: string;
@@ -723,6 +730,7 @@ export interface ClientProjectShowcaseDto {
   towerHeightM: number;
   projectType: ProjectType;
   logos?: ReportDetailsSpec['logos'];
+  reportDetails?: ReportDetailsSpec;
   settings: ClientShowcaseSettings;
   foundations: ClientFoundationSummary[];
   verticalMastSummary?: VerticalMastState;

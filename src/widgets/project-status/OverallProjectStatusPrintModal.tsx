@@ -37,8 +37,14 @@ export function OverallProjectStatusPrintModal({
   const docTitle = `${project.reportDetails?.projectName?.trim() || project.projectName} - Overall Project Status Report`;
 
   return createPortal(
-    <div className="report-modal-portal fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-start justify-center overflow-y-auto p-3 sm:p-6">
-      <div className={`report-modal-dialog bg-white w-full ${dialogMaxWidthClass} rounded-xl shadow-2xl border border-slate-300 overflow-hidden my-2 print:max-w-none print:rounded-none print:shadow-none print:border-none`}>
+    <div
+      className="report-modal-portal fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-start justify-center overflow-y-auto p-3 sm:p-6 print:static print:p-0 print:bg-white"
+      onClick={onClose}
+    >
+      <div
+        className={`report-modal-dialog bg-white w-full ${dialogMaxWidthClass} rounded-xl shadow-2xl border border-slate-300 overflow-hidden my-2 print:my-0 print:max-w-none print:rounded-none print:shadow-none print:border-none`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <ReportSignoffOverrideProvider project={project} enabled={!clientSafe}>
           <PrintModalHeader
             title="Overall Project Status Report — Print / Save PDF Preview"

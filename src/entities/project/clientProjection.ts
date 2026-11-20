@@ -4,13 +4,18 @@ import type {
   ClientProjectShowcaseDto,
   ClientShowcaseSettings,
   DailyActivityLogEntry,
+  DailyLogActivityItem,
+  DailyLogMaterialItem,
   FoundationRecord,
   FoundationResolvedDims,
   FoundationType,
   MastProjectState,
+  ReportDetailsSpec,
   SavedProjectRecord,
   VerticalMastState,
 } from './types';
+
+export const CLIENT_SHOWCASE_DTO_VERSION = 2;
 
 // Worker-safe dimension defaults matching mast2Baseline.ts (avoids pulling PNG imports into worker bundle)
 const DEFAULT_FOUNDATION_DIMS: Record<FoundationType, FoundationResolvedDims> = {
@@ -166,16 +171,25 @@ function sanitizeVerticalMastForClient(
           pulled: layer.sectors.I.pulled,
           terminated: layer.sectors.I.terminated,
           tensioned: layer.sectors.I.tensioned,
+          ...(layer.sectors.I.tensionKn?.trim()
+            ? { tensionKn: layer.sectors.I.tensionKn.trim() }
+            : {}),
         },
         II: {
           pulled: layer.sectors.II.pulled,
           terminated: layer.sectors.II.terminated,
           tensioned: layer.sectors.II.tensioned,
+          ...(layer.sectors.II.tensionKn?.trim()
+            ? { tensionKn: layer.sectors.II.tensionKn.trim() }
+            : {}),
         },
         III: {
           pulled: layer.sectors.III.pulled,
           terminated: layer.sectors.III.terminated,
           tensioned: layer.sectors.III.tensioned,
+          ...(layer.sectors.III.tensionKn?.trim()
+            ? { tensionKn: layer.sectors.III.tensionKn.trim() }
+            : {}),
         },
       },
       installedDate: layer.installedDate,
@@ -185,10 +199,128 @@ function sanitizeVerticalMastForClient(
   };
 }
 
+function sanitizeReportDetailsForClient(state: MastProjectState): ReportDetailsSpec {
+  const rd = state.reportDetails;
+  const logos = rd?.logos
+    ? {
+        ...(rd.logos.left ? { left: { ...rd.logos.left } } : {}),
+        ...(rd.logos.center ? { center: { ...rd.logos.center } } : {}),
+        ...(rd.logos.right ? { right: { ...rd.logos.right } } : {}),
+      }
+    : undefined;
+
+  return {
+    projectName: rd?.projectName?.trim() || state.projectName,
+    projectLocation: rd?.projectLocation?.trim() || state.location,
+    clientName: rd?.clientName?.trim() || '',
+    contractor: rd?.contractor?.trim() || state.contractor,
+    referenceNo: rd?.referenceNo?.trim() || '',
+    ...(rd?.documentTitle?.trim() ? { documentTitle: rd.documentTitle.trim() } : {}),
+    ...(rd?.revision?.trim() ? { revision: rd.revision.trim() } : {}),
+    ...(rd?.reportDate?.trim() ? { reportDate: rd.reportDate.trim() } : {}),
+    preparedBy: rd?.preparedBy?.trim() || state.preparedBy?.trim() || '',
+    ...(rd?.preparedTitle?.trim() ? { preparedTitle: rd.preparedTitle.trim() } : {}),
+    ...(rd?.preparedSignatureUrl?.trim()
+      ? { preparedSignatureUrl: rd.preparedSignatureUrl.trim() }
+      : {}),
+    ...(rd?.checkedBy?.trim() ? { checkedBy: rd.checkedBy.trim() } : {}),
+    ...(rd?.checkedTitle?.trim() ? { checkedTitle: rd.checkedTitle.trim() } : {}),
+    ...(rd?.checkedSignatureUrl?.trim()
+      ? { checkedSignatureUrl: rd.checkedSignatureUrl.trim() }
+      : {}),
+    ...(rd?.approvedBy?.trim() ? { approvedBy: rd.approvedBy.trim() } : {}),
+    ...(rd?.approvedTitle?.trim() ? { approvedTitle: rd.approvedTitle.trim() } : {}),
+    ...(rd?.approvedSignatureUrl?.trim()
+      ? { approvedSignatureUrl: rd.approvedSignatureUrl.trim() }
+      : {}),
+    ...(rd?.safetyOfficerBy !== undefined
+      ? { safetyOfficerBy: rd.safetyOfficerBy.trim() }
+      : {}),
+    ...(rd?.safetyOfficerSignatureUrl?.trim()
+      ? { safetyOfficerSignatureUrl: rd.safetyOfficerSignatureUrl.trim() }
+      : {}),
+    ...(typeof rd?.logoHeightPx === 'number' && Number.isFinite(rd.logoHeightPx)
+      ? { logoHeightPx: rd.logoHeightPx }
+      : {}),
+    ...(logos ? { logos } : {}),
+    ...(rd?.notes?.trim() ? { notes: rd.notes.trim() } : {}),
+  };
+}
+
+function projectClientDailyMaterials(
+  log: DailyActivityLogEntry
+): DailyLogMaterialItem[] {
+  const computeRemaining = (onSite: number, delivered: number, used: number) =>
+    Math.max(0, Number((onSite + delivered - used).toFixed(2)));
+
+  if (log.materialsOnSite && log.materialsOnSite.length > 0) {
+    return log.materialsOnSite
+      .filter((m) => Boolean(m.name?.trim()))
+      .map((m) => {
+        const onSiteQty = Math.max(0, Number(m.onSiteQty) || 0);
+        const deliveredQty = Math.max(0, Number(m.deliveredQty) || 0);
+        const usedTodayQty = Math.max(0, Number(m.usedTodayQty) || 0);
+        const remainingQty =
+          m.remainingQty !== undefined
+            ? Math.max(0, Number(m.remainingQty) || 0)
+            : computeRemaining(onSiteQty, deliveredQty, usedTodayQty);
+        return {
+          id: m.id,
+          name: m.name.trim(),
+          unit: m.unit?.trim() || 'pcs',
+          onSiteQty,
+          deliveredQty,
+          usedTodayQty,
+          remainingQty,
+          ...(m.remarks?.trim() ? { remarks: m.remarks.trim() } : {}),
+        };
+      });
+  }
+
+  const legacy: DailyLogMaterialItem[] = [];
+  if ((log.cementUsedBags ?? 0) > 0) {
+    legacy.push({
+      id: 'legacy-cement',
+      name: 'Cement',
+      unit: 'bags',
+      onSiteQty: 0,
+      deliveredQty: 0,
+      usedTodayQty: log.cementUsedBags,
+      remainingQty: 0,
+      remarks: 'Used today',
+    });
+  }
+  if ((log.sandUsedBags ?? 0) > 0) {
+    legacy.push({
+      id: 'legacy-sand',
+      name: 'Sand',
+      unit: 'sacks',
+      onSiteQty: 0,
+      deliveredQty: 0,
+      usedTodayQty: log.sandUsedBags,
+      remainingQty: 0,
+      remarks: 'Used today',
+    });
+  }
+  if ((log.gravelUsedBags ?? 0) > 0) {
+    legacy.push({
+      id: 'legacy-gravel',
+      name: 'Gravel',
+      unit: 'sacks',
+      onSiteQty: 0,
+      deliveredQty: 0,
+      usedTodayQty: log.gravelUsedBags,
+      remainingQty: 0,
+      remarks: 'Used today',
+    });
+  }
+  return legacy;
+}
+
 /**
  * Projects a single daily log entry into a sanitized client-safe update record,
- * keeping worker headcount, lead engineer, safety entries, equipment, and delays
- * while stripping individual worker names, hours, payroll rates, and internal notes.
+ * keeping worker role headcounts, lead engineer, activities, materials, safety entries, equipment, and delays
+ * while stripping individual worker names, hours, payroll rates, visitors, and internal notes.
  */
 function projectClientDailyHighlight(
   log: DailyActivityLogEntry,
@@ -255,10 +387,31 @@ function projectClientDailyHighlight(
       status: s.status?.trim() || 'Compliant',
     }));
 
+  const workers = (log.workers ?? [])
+    .filter(
+      (w) => Boolean(w.role?.trim()) && (Number.isFinite(w.count) ? w.count : 0) > 0
+    )
+    .map((w) => ({
+      role: w.role,
+      count: Math.max(0, Number(w.count) || 0),
+    }));
+
+  const activities: DailyLogActivityItem[] = (log.activities ?? [])
+    .filter((a) => Boolean(a.description?.trim()))
+    .map((a) => ({
+      id: a.id,
+      foundationId: a.foundationId?.trim() || '',
+      description: a.description.trim(),
+      status: a.status,
+      ...(a.remarks?.trim() ? { remarks: a.remarks.trim() } : {}),
+    }));
+
+  const materials = projectClientDailyMaterials(log);
+
   const resolvedWorkers =
     Number.isFinite(log.totalWorkers) && log.totalWorkers > 0
       ? log.totalWorkers
-      : (log.workers ?? []).reduce((sum, w) => sum + Math.max(0, w.count || 0), 0);
+      : workers.reduce((sum, w) => sum + w.count, 0);
 
   return {
     id: log.id,
@@ -268,8 +421,11 @@ function projectClientDailyHighlight(
     ...(log.weatherNotes?.trim() ? { weatherNotes: log.weatherNotes.trim() } : {}),
     preparedBy: log.preparedBy?.trim() || fallbackEngineer,
     totalWorkers: resolvedWorkers,
+    ...(workers.length > 0 ? { workers } : {}),
     foundationsWorked: [...(log.foundationsWorked ?? [])],
     activitiesSummary: log.activitiesSummary?.trim() || '',
+    ...(activities.length > 0 ? { activities } : {}),
+    ...(materials.length > 0 ? { materials } : {}),
     ...(log.safetyOfficer?.trim() ? { safetyOfficer: log.safetyOfficer.trim() } : {}),
     safetyLogs,
     equipment,
@@ -289,25 +445,26 @@ function projectClientDailyHighlight(
 
 /**
  * Produces a strictly sanitized, client-safe showcase payload.
- * Strips manpower, payroll, hauler rates/payouts, inventory, inspection remarks, and internal delays.
+ * Strips manpower names/payroll, hauler rates/payouts, inventory, inspection remarks, visitors, and internal delays.
  */
 export function buildClientShowcaseDto(
   record: SavedProjectRecord
 ): ClientProjectShowcaseDto {
   const { state } = record;
   const settings = resolveClientShowcaseSettings(record);
-  const projectName = state.reportDetails?.projectName?.trim() || state.projectName;
-  const location = state.reportDetails?.projectLocation?.trim() || state.location;
-  const contractor = state.reportDetails?.contractor?.trim() || state.contractor;
-  const clientName = state.reportDetails?.clientName?.trim() || '';
-  const referenceNo = state.reportDetails?.referenceNo?.trim() || '';
+  const reportDetails = sanitizeReportDetailsForClient(state);
+  const projectName = reportDetails.projectName || state.projectName;
+  const location = reportDetails.projectLocation || state.location;
+  const contractor = reportDetails.contractor || state.contractor;
+  const clientName = reportDetails.clientName || '';
+  const referenceNo = reportDetails.referenceNo || '';
 
   const sortedLogs = [...(state.dailyLogs ?? [])].sort((a, b) =>
     b.date.localeCompare(a.date)
   );
 
   const fallbackEngineer =
-    state.reportDetails?.preparedBy?.trim() || state.preparedBy?.trim() || '';
+    reportDetails.preparedBy?.trim() || state.preparedBy?.trim() || '';
 
   const highlights: ClientDailyHighlightDto[] =
     settings.showPhotos || settings.showReports
@@ -323,6 +480,8 @@ export function buildClientShowcaseDto(
             (h) =>
               h.photos.length > 0 ||
               h.activitiesSummary.length > 0 ||
+              (h.activities?.length ?? 0) > 0 ||
+              (h.materials?.length ?? 0) > 0 ||
               h.totalWorkers > 0 ||
               h.safetyLogs.length > 0 ||
               h.delays.length > 0
@@ -331,6 +490,7 @@ export function buildClientShowcaseDto(
 
   return {
     id: record.id,
+    dtoVersion: CLIENT_SHOWCASE_DTO_VERSION,
     slug: settings.slug || slugifyProjectSlug(projectName, record.id),
     featured: settings.featured,
     updatedAt: record.updatedAt,
@@ -342,15 +502,8 @@ export function buildClientShowcaseDto(
     referenceNo,
     towerHeightM: state.towerHeightM,
     projectType: state.projectType ?? 'foundation',
-    logos: state.reportDetails?.logos
-      ? {
-          ...(state.reportDetails.logos.left ? { left: { ...state.reportDetails.logos.left } } : {}),
-          ...(state.reportDetails.logos.center
-            ? { center: { ...state.reportDetails.logos.center } }
-            : {}),
-          ...(state.reportDetails.logos.right ? { right: { ...state.reportDetails.logos.right } } : {}),
-        }
-      : undefined,
+    ...(reportDetails.logos ? { logos: reportDetails.logos } : {}),
+    reportDetails,
     settings,
     foundations: state.foundations.map(sanitizeFoundationForClient),
     verticalMastSummary:

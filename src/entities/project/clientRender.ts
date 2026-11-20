@@ -10,21 +10,27 @@ import type { ClientProjectShowcaseDto, MastProjectState } from './types';
 export function toClientRenderProjectState(
   dto: ClientProjectShowcaseDto
 ): MastProjectState {
+  const rd = dto.reportDetails;
+  const effectiveProjectType =
+    dto.settings.phaseMode === 'foundation' && !dto.verticalMastSummary
+      ? 'foundation'
+      : dto.projectType;
   const shell: MastProjectState = {
-    projectType: dto.projectType,
+    projectType: effectiveProjectType,
     projectName: dto.projectName,
     location: dto.location,
-    preparedBy: '',
+    preparedBy: rd?.preparedBy?.trim() || '',
     contractor: dto.contractor,
     towerHeightM: dto.towerHeightM,
     lastUpdated: dto.lastUpdated,
     reportDetails: {
-      projectName: dto.projectName,
-      projectLocation: dto.location,
-      clientName: dto.clientName,
-      contractor: dto.contractor,
-      referenceNo: dto.referenceNo,
-      logos: resolveReportLogos(dto.logos),
+      ...(rd ?? {}),
+      projectName: rd?.projectName?.trim() || dto.projectName,
+      projectLocation: rd?.projectLocation?.trim() || dto.location,
+      clientName: rd?.clientName?.trim() || dto.clientName,
+      contractor: rd?.contractor?.trim() || dto.contractor,
+      referenceNo: rd?.referenceNo?.trim() || dto.referenceNo,
+      logos: resolveReportLogos(rd?.logos ?? dto.logos),
     },
     foundations: dto.foundations.map((f) => ({
       ...f,

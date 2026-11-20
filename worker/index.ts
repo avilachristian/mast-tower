@@ -3,6 +3,7 @@ import { auditedWrite, auditStatement } from './audit';
 import { Hono } from 'hono';
 import {
   buildClientShowcaseDto,
+  CLIENT_SHOWCASE_DTO_VERSION,
   deriveClientMetaFromState,
   resolveClientShowcaseSettings,
   slugifyProjectSlug,
@@ -385,7 +386,12 @@ function extractClientDtoFromRow(row: ProjectRow): {
       row.client_dto_json,
       null
     );
-    if (parsed && parsed.id && Array.isArray(parsed.foundations)) {
+    if (
+      parsed &&
+      parsed.id &&
+      Array.isArray(parsed.foundations) &&
+      (parsed.dtoVersion ?? 1) >= CLIENT_SHOWCASE_DTO_VERSION
+    ) {
       return { dto: parsed, needsBackfill: false };
     }
   }
@@ -444,8 +450,8 @@ export function createWorkerApp(options?: WorkerAppOptions) {
     const result = await c.env.DB.prepare(
       `SELECT id, slug, name, project_type, client_visible, client_featured, version,
               created_at, updated_at, client_dto_json,
-              CASE WHEN client_dto_json IS NULL THEN client_settings_json ELSE NULL END AS client_settings_json,
-              CASE WHEN client_dto_json IS NULL THEN state_json ELSE NULL END AS state_json
+              CASE WHEN client_dto_json IS NULL OR COALESCE(json_extract(client_dto_json, '$.dtoVersion'), 1) < ${CLIENT_SHOWCASE_DTO_VERSION} THEN client_settings_json ELSE NULL END AS client_settings_json,
+              CASE WHEN client_dto_json IS NULL OR COALESCE(json_extract(client_dto_json, '$.dtoVersion'), 1) < ${CLIENT_SHOWCASE_DTO_VERSION} THEN state_json ELSE NULL END AS state_json
        FROM projects
        WHERE client_visible = 1
        ORDER BY client_featured DESC, updated_at DESC`
@@ -474,7 +480,9 @@ export function createWorkerApp(options?: WorkerAppOptions) {
     const etagSeed = rows
       .map((r) => `${r.id}:${r.version}:${r.updated_at}`)
       .join('|');
-    const etag = await computeWeakOrStrongEtag(`list:${etagSeed}`);
+    const etag = await computeWeakOrStrongEtag(
+      `list:v${CLIENT_SHOWCASE_DTO_VERSION}:${etagSeed}`
+    );
 
     if (matchesIfNoneMatch(ifNoneMatch, etag)) {
       return new Response(null, {
@@ -535,8 +543,8 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       c.env.DB.prepare(
         `SELECT id, slug, name, project_type, client_visible, client_featured, version,
                 created_at, updated_at, client_dto_json,
-                CASE WHEN client_dto_json IS NULL THEN client_settings_json ELSE NULL END AS client_settings_json,
-                CASE WHEN client_dto_json IS NULL THEN state_json ELSE NULL END AS state_json
+                CASE WHEN client_dto_json IS NULL OR COALESCE(json_extract(client_dto_json, '$.dtoVersion'), 1) < ${CLIENT_SHOWCASE_DTO_VERSION} THEN client_settings_json ELSE NULL END AS client_settings_json,
+                CASE WHEN client_dto_json IS NULL OR COALESCE(json_extract(client_dto_json, '$.dtoVersion'), 1) < ${CLIENT_SHOWCASE_DTO_VERSION} THEN state_json ELSE NULL END AS state_json
          FROM projects
          WHERE client_visible = 1 AND (id = ? OR slug = ?)
          LIMIT 1`
@@ -592,7 +600,7 @@ export function createWorkerApp(options?: WorkerAppOptions) {
       .map((s) => `${s.id}:${s.slug ?? ''}:${s.version}:${s.updated_at}`)
       .join('|');
     const etag = await computeWeakOrStrongEtag(
-      `one:${row.id}:${row.version}:${row.updated_at}:${summarySeed}`
+      `one:v${CLIENT_SHOWCASE_DTO_VERSION}:${row.id}:${row.version}:${row.updated_at}:${summarySeed}`
     );
 
     if (matchesIfNoneMatch(ifNoneMatch, etag)) {
