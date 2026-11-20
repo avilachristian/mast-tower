@@ -7,6 +7,7 @@ import {
   BarChart3,
   Building2,
   Camera,
+  ChevronDown,
   ClipboardCheck,
   ClipboardList,
   Download,
@@ -18,6 +19,7 @@ import {
   Loader2,
   LogOut,
   Menu,
+  Package,
   PanelLeft,
   RefreshCw,
   RotateCcw,
@@ -161,6 +163,11 @@ const PayrollPrintModal = lazy(() =>
     default: m.PayrollPrintModal,
   }))
 );
+const MaterialsReportPrintModal = lazy(() =>
+  import('@/widgets/hauling/MaterialsReportPrintModal').then((m) => ({
+    default: m.MaterialsReportPrintModal,
+  }))
+);
 const VerticalMastOrderModal = lazy(() =>
   import('@/widgets/mast-tower/VerticalMastOrderModal').then((m) => ({
     default: m.VerticalMastOrderModal,
@@ -240,6 +247,8 @@ export function AdminWorkspace() {
   const r2StatusLevel = useStorageQuotaStore((s) => s.status?.level);
   const [clientModalProjectId, setClientModalProjectId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [reportsMenuOpen, setReportsMenuOpen] = useState(false);
+  const reportsMenuRef = useRef<HTMLDivElement>(null);
   const [openingClientView, setOpeningClientView] = useState(false);
   const activeRecord = useMemo(
     () => projects.find((p) => p.id === activeProjectId),
@@ -334,6 +343,9 @@ export function AdminWorkspace() {
     setInspectionReportOpen,
     overallReportOpen,
     setOverallReportOpen,
+    materialsReportOpen,
+    materialsReportPhaseScope,
+    setMaterialsReportOpen,
     dailyLogPrintId,
     setDailyLogPrintId,
     selectedMastTarget,
@@ -357,6 +369,9 @@ export function AdminWorkspace() {
       setInspectionReportOpen: s.setInspectionReportOpen,
       overallReportOpen: s.overallReportOpen,
       setOverallReportOpen: s.setOverallReportOpen,
+      materialsReportOpen: s.materialsReportOpen,
+      materialsReportPhaseScope: s.materialsReportPhaseScope,
+      setMaterialsReportOpen: s.setMaterialsReportOpen,
       dailyLogPrintId: s.dailyLogPrintId,
       setDailyLogPrintId: s.setDailyLogPrintId,
       selectedMastTarget: s.selectedMastTarget,
@@ -502,6 +517,7 @@ export function AdminWorkspace() {
     reportOpen ||
     inspectionReportOpen ||
     overallReportOpen ||
+    materialsReportOpen ||
     Boolean(activePrintDailyLog) ||
     Boolean(activePayrollPrintData);
 
@@ -549,6 +565,27 @@ export function AdminWorkspace() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [mobileMenuOpen]);
 
+  useEffect(() => {
+    if (!reportsMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setReportsMenuOpen(false);
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      if (
+        reportsMenuRef.current &&
+        !reportsMenuRef.current.contains(e.target as Node)
+      ) {
+        setReportsMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onMouseDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onMouseDown);
+    };
+  }, [reportsMenuOpen]);
+
   const isOffline =
     offlineCached || (typeof navigator !== 'undefined' && navigator.onLine === false);
   const mobileMenuDotTone =
@@ -566,6 +603,8 @@ export function AdminWorkspace() {
   const handleOpenReport = () => {
     if (activeAppTab === 'project_status') {
       setOverallReportOpen(true);
+    } else if (activeAppTab === 'hauling_inventory') {
+      setMaterialsReportOpen(true, 'active');
     } else if (activeAppTab === 'daily_logs' && project.dailyLogs[0]) {
       setDailyLogPrintId(project.dailyLogs[0].id);
     } else if (activeAppTab === 'inspection') {
@@ -617,6 +656,7 @@ export function AdminWorkspace() {
     setReportOpen(false);
     setInspectionReportOpen(false);
     setOverallReportOpen(false);
+    setMaterialsReportOpen(false);
   };
 
   const workspaceTabs = useMemo(
@@ -1138,6 +1178,17 @@ export function AdminWorkspace() {
 
                       <button
                         type="button"
+                        onClick={() => setMaterialsReportOpen(true, 'active')}
+                        className="w-full py-1.5 px-2.5 border border-stone-300 bg-white text-neutral-800 hover:border-neutral-950 text-[11px] font-mono uppercase tracking-wider inline-flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <Package className="w-3.5 h-3.5 shrink-0" />
+                          <span>Materials Report</span>
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => setClientModalProjectId(activeProjectId)}
                         className={`w-full py-1.5 px-2.5 border text-[11px] font-mono uppercase tracking-wider inline-flex items-center justify-between gap-2 cursor-pointer transition-colors ${
                           activeRecord?.clientSettings?.enabled
@@ -1322,16 +1373,130 @@ export function AdminWorkspace() {
                         <span>{isUpdating ? 'Updating...' : 'Update'}</span>
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={handleOpenReport}
-                      title="Open Report Preview"
-                      aria-label="Open Report Preview"
-                      className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      <span>Report</span>
-                    </button>
+                    <div ref={reportsMenuRef} className="relative inline-flex items-center">
+                      <button
+                        type="button"
+                        onClick={handleOpenReport}
+                        title="Open Report Preview for current tab"
+                        aria-label="Open Report Preview"
+                        className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-l-md bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold transition cursor-pointer shadow-xs whitespace-nowrap"
+                      >
+                        <FileText className="w-3.5 h-3.5 shrink-0" />
+                        <span>Report</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReportsMenuOpen((v) => !v)}
+                        aria-expanded={reportsMenuOpen}
+                        aria-haspopup="menu"
+                        aria-label="Print Reports menu"
+                        title="Print Reports menu"
+                        className="inline-flex items-center justify-center px-1.5 py-1.5 rounded-r-md bg-sky-600 hover:bg-sky-700 border-l border-sky-500 text-white text-xs font-semibold transition cursor-pointer shadow-xs"
+                      >
+                        <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                      </button>
+
+                      {reportsMenuOpen && (
+                        <div
+                          role="menu"
+                          aria-label="Print Reports"
+                          className="absolute left-0 top-full mt-1.5 w-60 rounded-lg border border-slate-200 bg-white py-1 shadow-xl z-50 text-xs"
+                        >
+                          <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Print Reports
+                          </div>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setReportsMenuOpen(false);
+                              setMaterialsReportOpen(true, 'active');
+                            }}
+                            className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-sky-50 hover:text-sky-800 flex items-center gap-2 font-semibold cursor-pointer"
+                          >
+                            <Package className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                            <span>Materials Inventory Report</span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setReportsMenuOpen(false);
+                              setOverallReportOpen(true);
+                            }}
+                            className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-sky-50 hover:text-sky-800 flex items-center gap-2 cursor-pointer"
+                          >
+                            <BarChart3 className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <span>Overall Project Status Report</span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setReportsMenuOpen(false);
+                              setReportOpen(true);
+                            }}
+                            className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-sky-50 hover:text-sky-800 flex items-center gap-2 cursor-pointer"
+                          >
+                            <Layers className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <span>
+                              {isVerticalMast ? 'Vertical Mast Erection Report' : 'Foundation Activity Report'}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setReportsMenuOpen(false);
+                              setInspectionReportOpen(true);
+                            }}
+                            className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-sky-50 hover:text-sky-800 flex items-center gap-2 cursor-pointer"
+                          >
+                            <ClipboardCheck className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <span>Inspection Report</span>
+                          </button>
+                          {project.dailyLogs.length > 0 && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setReportsMenuOpen(false);
+                                setDailyLogPrintId(project.dailyLogs[0].id);
+                              }}
+                              className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-sky-50 hover:text-sky-800 flex items-center gap-2 cursor-pointer"
+                            >
+                              <ClipboardList className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                              <span>Daily Construction Log</span>
+                            </button>
+                          )}
+                          <div className="my-1 border-t border-slate-100" />
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setReportsMenuOpen(false);
+                              setPayrollPrintTarget({ kind: 'civil' });
+                            }}
+                            className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-sky-50 hover:text-sky-800 flex items-center gap-2 cursor-pointer"
+                          >
+                            <Users className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <span>Civil Works Payroll</span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setReportsMenuOpen(false);
+                              setPayrollPrintTarget({ kind: 'hauler' });
+                            }}
+                            className="w-full px-3 py-1.5 text-left text-slate-700 hover:bg-sky-50 hover:text-sky-800 flex items-center gap-2 cursor-pointer"
+                          >
+                            <Truck className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                            <span>Hauler Payroll</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
                     <button
                       type="button"
@@ -1777,6 +1942,18 @@ export function AdminWorkspace() {
                       <span>Open Report Preview</span>
                     </button>
 
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        setMaterialsReportOpen(true, 'active');
+                      }}
+                      className="w-full py-2 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Package className="w-4 h-4 text-sky-600" />
+                      <span>Materials Inventory Report</span>
+                    </button>
+
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
@@ -1921,6 +2098,18 @@ export function AdminWorkspace() {
             project={project}
             data={activePayrollPrintData}
             onClose={() => setPayrollPrintTarget(null)}
+          />
+        </Suspense>
+      )}
+
+      {/* Printable Materials Inventory Report Modal */}
+      {materialsReportOpen && (
+        <Suspense fallback={null}>
+          <MaterialsReportPrintModal
+            open={materialsReportOpen}
+            onClose={() => setMaterialsReportOpen(false)}
+            project={project}
+            initialPhaseScope={materialsReportPhaseScope}
           />
         </Suspense>
       )}

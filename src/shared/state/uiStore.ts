@@ -176,6 +176,9 @@ interface UiState {
   setReportOpen: (open: boolean) => void;
   setInspectionReportOpen: (open: boolean) => void;
   setOverallReportOpen: (open: boolean) => void;
+  materialsReportOpen: boolean;
+  materialsReportPhaseScope: 'active' | 'all';
+  setMaterialsReportOpen: (open: boolean, scope?: 'active' | 'all') => void;
   setSelectedMastTarget: (target: MastSelectionTarget) => void;
   setMastVerticalScale: (scale: MastVerticalScale) => void;
   setPrintPaperSize: (size: PrintPaperSize) => void;
@@ -201,6 +204,8 @@ export const useUiStore = create<UiState>((set) => ({
   reportOpen: false,
   inspectionReportOpen: false,
   overallReportOpen: false,
+  materialsReportOpen: false,
+  materialsReportPhaseScope: 'active',
   selectedMastTarget: { kind: 'section', id: 'S01' },
   mastVerticalScale: 1,
   printPaperSize: 'A4',
@@ -280,6 +285,11 @@ export const useUiStore = create<UiState>((set) => ({
   setReportOpen: (open) => set({ reportOpen: open }),
   setInspectionReportOpen: (open) => set({ inspectionReportOpen: open }),
   setOverallReportOpen: (open) => set({ overallReportOpen: open }),
+  setMaterialsReportOpen: (open, scope) =>
+    set((state) => ({
+      materialsReportOpen: open,
+      materialsReportPhaseScope: scope ?? state.materialsReportPhaseScope,
+    })),
   setSelectedMastTarget: (target) => set({ selectedMastTarget: target }),
   setMastVerticalScale: (mastVerticalScale) => set({ mastVerticalScale }),
   setPrintPaperSize: (printPaperSize) => set({ printPaperSize }),

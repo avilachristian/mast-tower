@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   ArrowRight,
   CheckCircle2,
+  FileText,
   Package,
   Pencil,
   Plus,
@@ -47,6 +48,7 @@ export function HaulingInventoryView() {
   const setActiveAppTab = useUiStore((s) => s.setActiveAppTab);
   const setManpowerSubTab = useUiStore((s) => s.setManpowerSubTab);
   const setManpowerPaymentMode = useUiStore((s) => s.setManpowerPaymentMode);
+  const setMaterialsReportOpen = useUiStore((s) => s.setMaterialsReportOpen);
 
   const activePhase = project.projectType ?? 'foundation';
 
@@ -247,11 +249,19 @@ export function HaulingInventoryView() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMaterialsReportOpen(true, phaseFilter)}
+            className="inline-flex items-center justify-center gap-1.5 min-h-10 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs transition cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <FileText className="w-4 h-4 text-sky-600" />
+            <span>Materials Report</span>
+          </button>
           <button
             type="button"
             onClick={handleOpenHaulerPayroll}
-            className="inline-flex items-center justify-center gap-1.5 min-h-10 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs transition cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 min-h-10 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-2xs transition cursor-pointer whitespace-nowrap shrink-0"
           >
             <Users className="w-4 h-4 text-sky-600" />
             <span>Hauler Payroll</span>
@@ -260,7 +270,7 @@ export function HaulingInventoryView() {
           <button
             type="button"
             onClick={handleOpenNewTrip}
-            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 min-h-10 px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 min-h-10 px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold shadow-xs transition cursor-pointer whitespace-nowrap shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Log Hauling Trip</span>
